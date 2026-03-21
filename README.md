@@ -16,6 +16,10 @@
 
 ---
 
+<p align="center">
+  <img src="assets/lazystack-screenshot.png" alt="lazystack screenshot" width="800">
+</p>
+
 **lazystack** is a fast, keyboard-first TUI for managing OpenStack resources from the terminal. It follows the "lazy" convention ([lazygit](https://github.com/jesseduffield/lazygit), [lazydocker](https://github.com/jesseduffield/lazydocker)) to provide an intuitive alternative to Horizon and the verbose OpenStack CLI.
 
 Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
