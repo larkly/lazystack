@@ -40,6 +40,7 @@ type KeyMap struct {
 	Sort        key.Binding
 	ReverseSort key.Binding
 	ProjectPick key.Binding
+	Quota       key.Binding
 }
 
 var Keys = KeyMap{
@@ -190,5 +191,9 @@ var Keys = KeyMap{
 	ProjectPick: key.NewBinding(
 		key.WithKeys("P"),
 		key.WithHelp("P", "switch project"),
+	),
+	Quota: key.NewBinding(
+		key.WithKeys("Q"),
+		key.WithHelp("Q", "quotas"),
 	),
 }

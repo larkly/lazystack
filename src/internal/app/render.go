@@ -56,6 +56,10 @@ func (m Model) viewContent() string {
 			lipgloss.NewStyle().Foreground(shared.ColorWarning).Render(msg))
 	}
 
+	if m.quotaView.Visible {
+		return m.quotaView.Render()
+	}
+
 	if m.help.Visible {
 		return m.help.Render()
 	}

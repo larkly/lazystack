@@ -42,6 +42,7 @@ func (m *Model) buildLines() {
 				"C            switch cloud",
 				"P            switch project",
 				"1-5 / ←→     switch tab",
+				"Q             resource quotas",
 				"R             force refresh",
 				"pgup/pgdn    page up/down",
 				"s/S           sort / reverse sort",

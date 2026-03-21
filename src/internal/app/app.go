@@ -19,6 +19,7 @@ import (
 	"github.com/bosse/lazystack/internal/ui/lblist"
 	"github.com/bosse/lazystack/internal/ui/modal"
 	"github.com/bosse/lazystack/internal/ui/projectpicker"
+	"github.com/bosse/lazystack/internal/ui/quotaview"
 	"github.com/bosse/lazystack/internal/ui/secgroupview"
 	"github.com/bosse/lazystack/internal/ui/servercreate"
 	"github.com/bosse/lazystack/internal/ui/serverdetail"
@@ -92,6 +93,7 @@ type Model struct {
 	activeTab int
 	tabInited []bool
 	help         help.Model
+	quotaView    quotaview.Model
 	confirm      modal.ConfirmModel
 	errModal     modal.ErrorModel
 	activeModal  modalType
@@ -138,6 +140,7 @@ func New(opts Options) Model {
 			cloudPicker:     cloudpicker.New(clouds, nil),
 			statusBar:       statusbar.New(opts.Version),
 			help:            help.New(),
+			quotaView:       quotaview.New(),
 			minWidth:        80,
 			minHeight:       20,
 			autoCloud:       clouds[0],
@@ -154,6 +157,7 @@ func New(opts Options) Model {
 		cloudPicker:     cp,
 		statusBar:       statusbar.New(opts.Version),
 		help:            help.New(),
+		quotaView:       quotaview.New(),
 		minWidth:        80,
 		minHeight:       20,
 		refreshInterval: refresh,
@@ -186,6 +190,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errModal.SetSize(m.width, m.height)
 		m.help.Width = m.width
 		m.help.Height = m.height
+		m.quotaView.Width = m.width
+		m.quotaView.Height = m.height
 		m.serverResize.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
 		m.projectPicker.SetSize(m.width, m.height)
@@ -196,6 +202,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.help.Visible {
 			var cmd tea.Cmd
 			m.help, cmd = m.help.Update(msg)
+			return m, cmd
+		}
+
+		if m.quotaView.Visible {
+			var cmd tea.Cmd
+			m.quotaView, cmd = m.quotaView.Update(msg)
 			return m, cmd
 		}
 
@@ -244,6 +256,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.projectPicker = projectpicker.New(m.projects, m.currentProjectID)
 				m.projectPicker.SetSize(m.width, m.height)
 				return m, nil
+			case key.Matches(msg, shared.Keys.Quota) && m.view != viewCloudPicker && m.view != viewServerCreate:
+				m.quotaView.Width = m.width
+				m.quotaView.Height = m.height
+				if m.currentProjectID != "" {
+					m.quotaView.SetProjectID(m.currentProjectID)
+				}
+				cmd := m.quotaView.Open()
+				return m, cmd
 			}
 
 			// Tab switching (only from top-level list views)
@@ -410,6 +430,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeTab = 0
 		m.statusBar.CloudName = m.cloudName
 		m.statusBar.Region = msg.Region
+		m.quotaView.SetClients(msg.ComputeClient, msg.NetworkClient, msg.BlockStorageClient, "")
 		m.serverList = serverlist.New(msg.ComputeClient, msg.ImageClient, m.refreshInterval)
 		m.serverList.SetSize(m.width, m.height)
 		m.view = viewServerList
@@ -463,6 +484,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+		}
+		if m.currentProjectID != "" {
+			m.quotaView.SetProjectID(m.currentProjectID)
 		}
 		return m, nil
 
@@ -595,6 +619,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Route to all views first so background ticks keep firing
 		m2, viewCmd := m.updateAllViews(msg)
 		m = m2
+		// Route to quota view for spinner/loaded messages
+		if m.quotaView.Visible {
+			var cmd tea.Cmd
+			m.quotaView, cmd = m.quotaView.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
 		// Also route to active modals (for spinner, loaded msgs)
 		if m.serverResize.Active {
 			var cmd tea.Cmd
