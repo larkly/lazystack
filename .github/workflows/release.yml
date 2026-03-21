@@ -61,9 +61,14 @@ jobs:
         with:
           merge-multiple: true
 
+      - name: Generate checksums
+        run: sha256sum lazystack-* > SHA256SUMS
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
           generate_release_notes: true
-          files: lazystack-*
+          files: |
+            lazystack-*
+            SHA256SUMS
