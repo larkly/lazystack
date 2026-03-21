@@ -3,6 +3,7 @@ package servercreate
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/bosse/lazystack/internal/shared"
@@ -26,9 +27,10 @@ const (
 	fieldFlavor  = 2
 	fieldNetwork = 3
 	fieldKeypair = 4
-	fieldSubmit  = 5
-	fieldCancel  = 6
-	numFields    = 7
+	fieldCount   = 5
+	fieldSubmit  = 6
+	fieldCancel  = 7
+	numFields    = 8
 )
 
 type imagesLoadedMsg struct{ images []img.Image }
@@ -46,7 +48,8 @@ type Model struct {
 	imageClient   *gophercloud.ServiceClient
 	networkClient *gophercloud.ServiceClient
 
-	nameInput textinput.Model
+	nameInput  textinput.Model
+	countInput textinput.Model
 
 	images   []img.Image
 	flavors  []compute.Flavor
@@ -76,13 +79,23 @@ type Model struct {
 // New creates a server create form.
 func New(computeClient, imageClient, networkClient *gophercloud.ServiceClient) Model {
 	ni := textinput.New()
+	ni.Prompt = ""
 	ni.Placeholder = "my-server"
 	ni.CharLimit = 255
+	ni.SetVirtualCursor(false)
 	ni.Focus()
 
+	ci := textinput.New()
+	ci.Prompt = ""
+	ci.Placeholder = "1"
+	ci.CharLimit = 4
+	ci.SetVirtualCursor(false)
+
 	pf := textinput.New()
-	pf.Placeholder = "type to filter..."
+	pf.Prompt = "/ "
+	pf.Placeholder = "filter..."
 	pf.CharLimit = 64
+	pf.SetVirtualCursor(false)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -92,6 +105,7 @@ func New(computeClient, imageClient, networkClient *gophercloud.ServiceClient) M
 		imageClient:   imageClient,
 		networkClient: networkClient,
 		nameInput:     ni,
+		countInput:    ci,
 		pickerFilter:  pf,
 		spinner:       s,
 		loading:       4,
@@ -176,19 +190,19 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return shared.ViewChangeMsg{View: "serverlist"}
 		}
 
-	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down) && m.focusField != fieldName:
+	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down) && m.focusField != fieldName && m.focusField != fieldCount:
 		m.focusField = (m.focusField + 1) % numFields
 		m.updateFocus()
 		return m, nil
 
-	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up) && m.focusField != fieldName:
+	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up) && m.focusField != fieldName && m.focusField != fieldCount:
 		m.focusField = (m.focusField - 1 + numFields) % numFields
 		m.updateFocus()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Enter):
 		switch m.focusField {
-		case fieldName:
+		case fieldName, fieldCount:
 			m.focusField++
 			m.updateFocus()
 			return m, nil
@@ -214,10 +228,15 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.submit()
 	}
 
-	// Name field input
+	// Text field input
 	if m.focusField == fieldName {
 		var cmd tea.Cmd
 		m.nameInput, cmd = m.nameInput.Update(msg)
+		return m, cmd
+	}
+	if m.focusField == fieldCount {
+		var cmd tea.Cmd
+		m.countInput, cmd = m.countInput.Update(msg)
 		return m, cmd
 	}
 
@@ -340,6 +359,11 @@ func (m *Model) updateFocus() {
 	} else {
 		m.nameInput.Blur()
 	}
+	if m.focusField == fieldCount {
+		m.countInput.Focus()
+	} else {
+		m.countInput.Blur()
+	}
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
@@ -357,10 +381,30 @@ func (m Model) submit() (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	count := 1
+	countStr := strings.TrimSpace(m.countInput.Value())
+	if countStr != "" {
+		n, err := strconv.Atoi(countStr)
+		if err != nil || n < 1 {
+			m.err = "Count must be a positive number"
+			return m, nil
+		}
+		if n > 100 {
+			m.err = "Count must be 100 or less"
+			return m, nil
+		}
+		count = n
+	}
+
 	opts := servers.CreateOpts{
 		Name:      name,
 		ImageRef:  m.images[m.selectedImage].ID,
 		FlavorRef: m.flavors[m.selectedFlavor].ID,
+	}
+
+	if count > 1 {
+		opts.Min = count
+		opts.Max = count
 	}
 
 	if m.selectedNetwork >= 0 {
@@ -417,6 +461,7 @@ func (m Model) View() string {
 		{"Flavor", m.selectionDisplay(fieldFlavor), m.focusField == fieldFlavor, false},
 		{"Network", m.selectionDisplay(fieldNetwork), m.focusField == fieldNetwork, false},
 		{"Key Pair", m.selectionDisplay(fieldKeypair), m.focusField == fieldKeypair, false},
+		{"Count", m.countInput.View(), m.focusField == fieldCount, true},
 	}
 
 	for i, f := range fields {

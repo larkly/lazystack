@@ -15,10 +15,16 @@ import (
 type Server struct {
 	ID        string
 	Name      string
-	Status    string
-	FlavorID  string
-	ImageID   string
-	IP        string
+	Status     string
+	PowerState string
+	FlavorName string
+	FlavorID   string
+	ImageID    string
+	ImageName  string
+	IPv4       []string
+	IPv6       []string
+	FloatingIP []string
+	Locked     bool
 	KeyName   string
 	Created   time.Time
 	TenantID  string
@@ -95,17 +101,112 @@ func RebootServer(ctx context.Context, client *gophercloud.ServiceClient, id str
 	return nil
 }
 
+// PauseServer pauses a server.
+func PauseServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Pause(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("pausing server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// UnpauseServer unpauses a server.
+func UnpauseServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Unpause(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("unpausing server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// SuspendServer suspends a server.
+func SuspendServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Suspend(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("suspending server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// ResumeServer resumes a suspended server.
+func ResumeServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Resume(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("resuming server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// ShelveServer shelves a server.
+func ShelveServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Shelve(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("shelving server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// UnshelveServer unshelves a server.
+func UnshelveServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Unshelve(ctx, client, id, servers.UnshelveOpts{})
+	if r.Err != nil {
+		return fmt.Errorf("unshelving server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// ResizeServer resizes a server to a new flavor.
+func ResizeServer(ctx context.Context, client *gophercloud.ServiceClient, id, flavorRef string) error {
+	r := servers.Resize(ctx, client, id, servers.ResizeOpts{FlavorRef: flavorRef})
+	if r.Err != nil {
+		return fmt.Errorf("resizing server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// ConfirmResize confirms a server resize.
+func ConfirmResize(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.ConfirmResize(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("confirming resize for server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// RevertResize reverts a server resize.
+func RevertResize(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.RevertResize(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("reverting resize for server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// GetConsoleOutput retrieves console output for a server.
+func GetConsoleOutput(ctx context.Context, client *gophercloud.ServiceClient, id string, lines int) (string, error) {
+	r := servers.ShowConsoleOutput(ctx, client, id, servers.ShowConsoleOutputOpts{Length: lines})
+	output, err := r.Extract()
+	if err != nil {
+		return "", fmt.Errorf("getting console output for %s: %w", id, err)
+	}
+	return output, nil
+}
+
 func mapServer(s servers.Server) Server {
 	srv := Server{
-		ID:       s.ID,
-		Name:     s.Name,
-		Status:   s.Status,
-		KeyName:  s.KeyName,
-		Created:  s.Created,
-		TenantID: s.TenantID,
+		ID:         s.ID,
+		Name:       s.Name,
+		Status:     s.Status,
+		PowerState: s.PowerState.String(),
+		KeyName:    s.KeyName,
+		Created:    s.Created,
+		TenantID:   s.TenantID,
 	}
 
-	// Flavor
+	// Flavor — microversion 2.47+ embeds full flavor with original_name
+	if name, ok := s.Flavor["original_name"].(string); ok {
+		srv.FlavorName = name
+	}
 	if id, ok := s.Flavor["id"].(string); ok {
 		srv.FlavorID = id
 	}
@@ -115,10 +216,18 @@ func mapServer(s servers.Server) Server {
 		if id, ok := imgMap["id"].(string); ok {
 			srv.ImageID = id
 		}
+		if name, ok := imgMap["name"].(string); ok {
+			srv.ImageName = name
+		}
 	}
 
-	// Extract first IP
-	srv.IP = extractFirstIP(s.Addresses)
+	// Extract IPs by type
+	srv.IPv4, srv.IPv6, srv.FloatingIP = classifyIPs(s.Addresses)
+
+	// Locked
+	if s.Locked != nil {
+		srv.Locked = *s.Locked
+	}
 
 	// Security groups
 	for _, sg := range s.SecurityGroups {
@@ -138,7 +247,7 @@ func mapServer(s servers.Server) Server {
 	return srv
 }
 
-func extractFirstIP(addresses map[string]interface{}) string {
+func classifyIPs(addresses map[string]interface{}) (ipv4, ipv6, floating []string) {
 	for _, netAddrs := range addresses {
 		addrs, ok := netAddrs.([]interface{})
 		if !ok {
@@ -149,12 +258,24 @@ func extractFirstIP(addresses map[string]interface{}) string {
 			if !ok {
 				continue
 			}
-			if addr, ok := addrMap["addr"].(string); ok {
-				return addr
+			addr, ok := addrMap["addr"].(string)
+			if !ok {
+				continue
+			}
+
+			ipType, _ := addrMap["OS-EXT-IPS:type"].(string)
+			version, _ := addrMap["version"].(float64)
+
+			if ipType == "floating" {
+				floating = append(floating, addr)
+			} else if version == 6 {
+				ipv6 = append(ipv6, addr)
+			} else {
+				ipv4 = append(ipv4, addr)
 			}
 		}
 	}
-	return ""
+	return
 }
 
 // ExtractAllIPs returns all IPs grouped by network name.

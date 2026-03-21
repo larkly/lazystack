@@ -9,11 +9,18 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// ServerRef identifies a server for an action.
+type ServerRef struct {
+	ID   string
+	Name string
+}
+
 // ConfirmAction is the result of a confirmation dialog.
 type ConfirmAction struct {
 	Action   string
 	ServerID string
 	Name     string
+	Servers  []ServerRef // for bulk actions
 	Confirm  bool
 }
 
@@ -22,12 +29,13 @@ type ConfirmModel struct {
 	Action   string
 	ServerID string
 	Name     string
+	Servers  []ServerRef // for bulk actions
 	Width    int
 	Height   int
 	focused  int // 0 = confirm, 1 = cancel
 }
 
-// NewConfirm creates a confirmation dialog.
+// NewConfirm creates a confirmation dialog for a single server.
 func NewConfirm(action, serverID, name string) ConfirmModel {
 	return ConfirmModel{
 		Action:   action,
@@ -37,12 +45,23 @@ func NewConfirm(action, serverID, name string) ConfirmModel {
 	}
 }
 
+// NewBulkConfirm creates a confirmation dialog for multiple servers.
+func NewBulkConfirm(action string, servers []ServerRef) ConfirmModel {
+	return ConfirmModel{
+		Action:  action,
+		Servers: servers,
+		Name:    fmt.Sprintf("%d servers", len(servers)),
+		focused: 1,
+	}
+}
+
 func (m ConfirmModel) confirmMsg() tea.Cmd {
 	return func() tea.Msg {
 		return ConfirmAction{
 			Action:   m.Action,
 			ServerID: m.ServerID,
 			Name:     m.Name,
+			Servers:  m.Servers,
 			Confirm:  true,
 		}
 	}
@@ -54,6 +73,7 @@ func (m ConfirmModel) cancelMsg() tea.Cmd {
 			Action:   m.Action,
 			ServerID: m.ServerID,
 			Name:     m.Name,
+			Servers:  m.Servers,
 			Confirm:  false,
 		}
 	}

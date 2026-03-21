@@ -20,8 +20,18 @@ type KeyMap struct {
 	Right      key.Binding
 	Tab        key.Binding
 	ShiftTab   key.Binding
+	Pause      key.Binding
+	Suspend    key.Binding
+	Shelve     key.Binding
+	Resize        key.Binding
+	ConfirmResize key.Binding
+	RevertResize  key.Binding
+	Actions       key.Binding
+	Console       key.Binding
+	Select     key.Binding
 	Confirm    key.Binding
 	Deny       key.Binding
+	Restart    key.Binding
 }
 
 var Keys = KeyMap{
@@ -50,20 +60,20 @@ var Keys = KeyMap{
 		key.WithHelp("esc", "back"),
 	),
 	Create: key.NewBinding(
-		key.WithKeys("c"),
-		key.WithHelp("c", "create server"),
+		key.WithKeys("ctrl+n"),
+		key.WithHelp("ctrl+n", "create server"),
 	),
 	Delete: key.NewBinding(
-		key.WithKeys("d"),
-		key.WithHelp("d", "delete"),
+		key.WithKeys("ctrl+d"),
+		key.WithHelp("ctrl+d", "delete"),
 	),
 	Reboot: key.NewBinding(
-		key.WithKeys("r"),
-		key.WithHelp("r", "soft reboot"),
+		key.WithKeys("ctrl+o"),
+		key.WithHelp("ctrl+o", "soft reboot"),
 	),
 	HardReboot: key.NewBinding(
-		key.WithKeys("R"),
-		key.WithHelp("R", "hard/force"),
+		key.WithKeys("ctrl+p"),
+		key.WithHelp("ctrl+p", "hard reboot"),
 	),
 	Refresh: key.NewBinding(
 		key.WithKeys("R"),
@@ -93,6 +103,42 @@ var Keys = KeyMap{
 		key.WithKeys("shift+tab"),
 		key.WithHelp("shift+tab", "prev field"),
 	),
+	Pause: key.NewBinding(
+		key.WithKeys("p"),
+		key.WithHelp("p", "pause/unpause"),
+	),
+	Suspend: key.NewBinding(
+		key.WithKeys("ctrl+z"),
+		key.WithHelp("ctrl+z", "suspend/resume"),
+	),
+	Shelve: key.NewBinding(
+		key.WithKeys("ctrl+e"),
+		key.WithHelp("ctrl+e", "shelve/unshelve"),
+	),
+	Resize: key.NewBinding(
+		key.WithKeys("ctrl+f"),
+		key.WithHelp("ctrl+f", "resize"),
+	),
+	ConfirmResize: key.NewBinding(
+		key.WithKeys("ctrl+y"),
+		key.WithHelp("ctrl+y", "confirm resize"),
+	),
+	RevertResize: key.NewBinding(
+		key.WithKeys("ctrl+x"),
+		key.WithHelp("ctrl+x", "revert resize"),
+	),
+	Actions: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "action history"),
+	),
+	Console: key.NewBinding(
+		key.WithKeys("l"),
+		key.WithHelp("l", "console log"),
+	),
+	Select: key.NewBinding(
+		key.WithKeys("space"),
+		key.WithHelp("space", "select"),
+	),
 	Confirm: key.NewBinding(
 		key.WithKeys("y"),
 		key.WithHelp("y", "confirm"),
@@ -100,5 +146,9 @@ var Keys = KeyMap{
 	Deny: key.NewBinding(
 		key.WithKeys("n"),
 		key.WithHelp("n", "cancel"),
+	),
+	Restart: key.NewBinding(
+		key.WithKeys("ctrl+r"),
+		key.WithHelp("ctrl+r", "restart"),
 	),
 }

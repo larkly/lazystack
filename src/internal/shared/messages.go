@@ -52,3 +52,6 @@ type TickMsg struct{}
 type ViewChangeMsg struct {
 	View string
 }
+
+// RestartMsg signals the app should re-exec itself.
+type RestartMsg struct{}

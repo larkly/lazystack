@@ -8,6 +8,63 @@
 **Language**: Go
 **Target cloud**: Any OpenStack cloud with Keystone v3, Nova v2.1+ (tested against cloud.rlnc.eu with microversion 2.100)
 
+## Implementation Status
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: MVP | ✓ Complete | Cloud connection, server CRUD, modals, help |
+| Phase 2: Extended Compute | ✓ Complete | All actions, console log, resize, bulk ops, action history |
+| Phase 3: Additional Resources | Not started | Volumes, floating IPs, security groups |
+| Phase 4: Multi-Cloud | Not started | |
+| Phase 5: Quality of Life | Not started | SSH, clipboard, config file |
+| Phase 6: Operational | Not started | Quotas, admin views |
+
+**Current version**: v0.0.1 (tagged at end of Phase 1)
+
+## Concerns and Considerations
+
+### Architecture
+
+- **Value receiver pattern**: Bubble Tea v2 uses value receivers for `Update()`, which means model mutations require returning new values. This interacts poorly with optimistic UI updates — changes made before an async command fires can be overwritten when the command's response arrives and gets routed through `updateActiveView`. This caused the resize confirmation banner to flicker (optimistic status set to ACTIVE, then stale API response overwrote it back to VERIFY_RESIZE). Solved with a `pendingAction` state that suppresses stale updates until the real state catches up.
+
+- **Message routing complexity**: The root model routes messages to sub-views via a `switch` on the active view. Adding overlay modals (resize picker, confirm, error, help) that intercept messages creates ordering dependencies in the `Update` method. The resize modal being `Active` was swallowing messages meant for other views. Each new modal/overlay adds routing complexity — consider a message bus or middleware pattern if this grows further.
+
+- **Import cycle avoidance**: Shared types (keys, styles, messages) live in `internal/shared/` rather than `internal/app/` to avoid import cycles between `app` and the UI packages. This is a pragmatic workaround but means the "app" package is really just the root model + view routing.
+
+### UX Lessons Learned
+
+- **Ctrl-prefixed dangerous actions**: Originally used `c`/`d`/`r` for create/delete/reboot. Changed to `ctrl+n`/`ctrl+d`/`ctrl+o` after realizing typing in the wrong terminal window could trigger destructive operations. This is a good pattern for any keyboard-first TUI.
+
+- **Optimistic UI is essential for async APIs**: OpenStack actions like `confirmResize` return 202 (accepted) but the server state doesn't change immediately. Polling the API right after the action often returns stale state. The `pendingAction` pattern — show the expected state immediately and suppress stale API responses until the real state catches up — provides much better UX than waiting for the tick.
+
+- **Column adaptivity matters**: Fixed-width columns don't work across terminal sizes. The flex-weight + priority system (columns get proportional extra space, and low-priority columns hide on narrow terminals) works well. IPv6 addresses (39 chars) are particularly challenging — they need the highest flex weight but lowest display priority since they're rarely needed at a glance.
+
+- **Modal vs view**: The resize flavor picker was initially a full view, which caused navigation issues (Esc from resize opened from the list panicked because there was no detail view to go back to). Converting it to a modal overlay that sits on top of the current view eliminated the problem entirely. Prefer modals for transient selection UI.
+
+- **Auto-refresh must survive view changes**: The server list's auto-refresh tick was breaking when navigating to other views because the tick message got routed to the wrong view. Fixed by always routing `TickMsg` to the server list regardless of active view.
+
+### Technical Debt
+
+- **Bulk action support is partial**: Space-select works for delete, reboot, pause, suspend, shelve. Resize and console log only operate on a single server (the cursor, not the selection). This is intentional — resize needs per-server flavor choice, and console log is inherently single-server.
+
+- **Image name resolution**: Nova's server response doesn't include the image name (only ID) with newer microversions. The server list fetches all images from Glance to resolve names, which works but adds an extra API call on every refresh. Should cache more aggressively or resolve lazily.
+
+- **Server detail refresh creates a new model**: After actions from the detail view, the detail model is recreated with `New()` + `Init()` to force a fresh fetch. This resets scroll position and loses the pending action state if not carefully managed. A proper `Refresh()` method on the detail model would be cleaner.
+
+- **No tests**: The codebase has zero test coverage. The compute layer functions are thin wrappers around gophercloud and would benefit from interface-based mocking. The UI components are harder to test but snapshot testing of `View()` output would catch rendering regressions.
+
+- **Error handling in bulk operations**: Bulk actions collect errors and report them as a single concatenated string. Individual failure tracking and partial success reporting would be better UX.
+
+### OpenStack API Considerations
+
+- **Microversion dependency**: The app sets microversion `2.100` on the compute client. This means it requires a relatively recent Nova deployment. The `original_name` field in the flavor response (used for display) requires microversion 2.47+. Should gracefully degrade for older clouds.
+
+- **Image map structure varies by microversion**: The `image` field in the server response is `map[string]any` and its contents depend on the microversion. With 2.100, it typically only contains `id` and `links` — no `name`. Boot-from-volume servers have an empty image map.
+
+- **Unshelve requires non-nil opts**: gophercloud's `Unshelve()` panics if passed `nil` opts (it calls `opts.ToUnshelveMap()` on the nil interface). Must pass `servers.UnshelveOpts{}`. This is arguably a gophercloud bug.
+
+- **Locked server awareness**: The server list shows a 🔒 icon for locked servers, but doesn't prevent actions on them — the API will reject the action and the error modal will display. Could pre-check lock status and show a more helpful message.
+
 ## Problem Statement
 
 OpenStack operators and developers lack a fast, keyboard-driven terminal interface:
@@ -22,9 +79,10 @@ lazystack fills this gap by providing a single binary that connects to any OpenS
 
 1. **Keyboard-first**: Every action is reachable via keyboard shortcuts. Mouse support is not a goal.
 2. **Fast startup**: Connect and show servers in under 2 seconds on a healthy cloud.
-3. **Non-destructive by default**: Destructive actions (delete, reboot) always require confirmation.
+3. **Non-destructive by default**: Destructive actions require Ctrl-prefixed shortcuts and confirmation modals.
 4. **Minimal configuration**: Reads standard `clouds.yaml` — no additional config files needed.
 5. **Single binary**: No runtime dependencies beyond the compiled Go binary.
+6. **Safe by default**: Can't accidentally trigger destructive actions by typing in the wrong window.
 
 ## Target Users
 
@@ -45,43 +103,50 @@ lazystack fills this gap by providing a single binary that connects to any OpenS
 ### Project Structure
 
 ```
-lazystack/
-  cmd/lazystack/main.go           # Entry point, CLI flags
+src/
+  cmd/lazystack/main.go             # Entry point, CLI flags, restart via syscall.Exec
   internal/
     app/
-      app.go                      # Root model, view routing, modal overlay
+      app.go                        # Root model, view routing, modal overlay, bulk actions
     shared/
-      keys.go                     # Global key bindings
-      styles.go                   # Lipgloss theme constants (Solarized Dark)
-      messages.go                 # Shared message types for inter-component communication
+      keys.go                       # Global key bindings (Ctrl-prefixed for dangerous ops)
+      styles.go                     # Lipgloss theme constants (Solarized Dark)
+      messages.go                   # Shared message types for inter-component communication
     cloud/
-      client.go                   # Auth, service client initialization
-      clouds.go                   # clouds.yaml parser
+      client.go                     # Auth, service client initialization
+      clouds.go                     # clouds.yaml parser
     compute/
-      servers.go                  # Server CRUD (list, get, create, delete, reboot)
-      flavors.go                  # Flavor listing
-      keypairs.go                 # Keypair listing
+      servers.go                    # Server CRUD + pause/suspend/shelve/resize/reboot
+      actions.go                    # Instance action history
+      flavors.go                    # Flavor listing
+      keypairs.go                   # Keypair listing
     image/
-      images.go                   # Image listing
+      images.go                     # Image listing
     network/
-      networks.go                 # Network listing
+      networks.go                   # Network listing
     ui/
       serverlist/
-        serverlist.go             # Server table with auto-refresh, filtering
-        columns.go                # Column definitions, status colors
+        serverlist.go               # Server table with auto-refresh, filtering, bulk select
+        columns.go                  # Adaptive columns with flex weights and priority hiding
       serverdetail/
-        serverdetail.go           # Server property view
+        serverdetail.go             # Server property view with auto-refresh, pending action state
       servercreate/
-        servercreate.go           # Create form with inline filterable pickers
+        servercreate.go             # Create form with inline pickers, count field
+      serverresize/
+        serverresize.go             # Resize modal with flavor picker, current flavor indicator
+      consolelog/
+        consolelog.go               # Scrollable console output viewer
+      actionlog/
+        actionlog.go                # Instance action history viewer
       modal/
-        confirm.go                # Confirmation dialog with focusable buttons
-        error.go                  # Error modal
+        confirm.go                  # Confirmation dialog (single + bulk), focusable buttons
+        error.go                    # Error modal
       cloudpicker/
-        cloudpicker.go            # Cloud selection overlay
+        cloudpicker.go              # Cloud selection overlay
       statusbar/
-        statusbar.go              # Bottom bar: cloud, region, context hints
+        statusbar.go                # Bottom bar: cloud, region, context hints
       help/
-        help.go                   # Help overlay
+        help.go                     # Scrollable help overlay
 ```
 
 ### View State Machine
@@ -90,25 +155,40 @@ lazystack/
                     ┌─────────────┐
         start ────→ │ Cloud Picker │
                     └──────┬──────┘
-                           │ select cloud
+                           │ select cloud (auto if single)
                            ▼
                     ┌─────────────┐
-              ┌───→ │ Server List  │ ←───────────────┐
-              │     └──┬───┬───┬──┘                   │
-              │    Enter│   │c  │d/r                   │
-              │        ▼   ▼   ▼                      │
-              │  ┌────────┐ ┌────────┐ ┌─────────┐   │
-              │  │ Detail  │ │ Create │ │ Confirm │   │
-              │  └───┬────┘ └───┬────┘ └────┬────┘   │
-              │   Esc│      Esc/│Submit  y/n │        │
-              └──────┘         └─────────────┘────────┘
-```
+              ┌───→ │ Server List  │ ←───────────────────────┐
+              │     └──┬───┬───┬──┘                           │
+              │  Enter │  ^n  │ ^d/^o/p/^z/^e                │
+              │        │   │  │ (via confirm modal)           │
+              │        ▼   ▼  ▼                               │
+              │  ┌────────┐ ┌────────┐                        │
+              │  │ Detail  │ │ Create │                        │
+              │  └┬──┬──┬─┘ └───┬────┘                        │
+              │   │  │  │   Esc/│Submit                       │
+              │   │  l  a      └──────────────────────────────┘
+              │   │  │  │
+              │   │  ▼  ▼
+              │   │ ┌────────┐ ┌────────────┐
+              │   │ │Console │ │Action Log  │
+              │   │ └───┬────┘ └─────┬──────┘
+              │   │  Esc│         Esc│
+              │   │  ───┘         ───┘ (back to previous view)
+              │   │
+              │  Esc
+              └───┘
 
-Modals (confirm, error, help) overlay the active view and intercept all input until dismissed.
+  Overlays (always available):
+  ┌─────────────┐  ┌──────────┐  ┌──────┐  ┌────────┐
+  │Confirm Modal│  │Error     │  │Help  │  │Resize  │
+  │(y/n/enter)  │  │(enter)   │  │(?)   │  │(^f)    │
+  └─────────────┘  └──────────┘  └──────┘  └────────┘
+```
 
 ## Features
 
-### MVP (Current)
+### Phase 1: MVP (Complete)
 
 #### Cloud Connection
 - Parse `clouds.yaml` from standard locations: `./clouds.yaml`, `$OS_CLIENT_CONFIG_FILE`, `~/.config/openstack/clouds.yaml`, `/etc/openstack/clouds.yaml`
@@ -118,29 +198,39 @@ Modals (confirm, error, help) overlay the active view and intercept all input un
 - Authentication via Keystone v3 using gophercloud's `clouds.Parse` + `config.NewProviderClient`
 
 #### Server List
-- Tabular display: Name, Status, IP, Flavor, Key, ID
+- Adaptive columns with flex weights — columns grow to fill terminal width
+- Priority-based column hiding on narrow terminals (Name/Status always visible, IPv6 hides first)
+- Columns: Name, Status (with power state), IPv4, IPv6, Floating IP, Flavor, Image, Age, Key
+- Image names resolved from Glance (Nova only returns image ID with microversion 2.100)
+- Lock indicator (🔒) on server names
 - Auto-refresh at configurable interval (default 5s, set with `--refresh` flag)
 - Auto-refresh persists across view changes (ticks always route to server list)
-- Client-side filtering with `/` (case-insensitive match on name, ID, status, IP)
-- Status colors: ACTIVE=green, BUILD=yellow, SHUTOFF=gray, ERROR=red, REBOOT=cyan
-- Scrollable with cursor tracking
+- Client-side filtering with `/` (case-insensitive match on name, ID, status, IPs, flavor, image)
+- Status/power colors: ACTIVE/RUNNING=green, BUILD=yellow, SHUTOFF=gray, ERROR=red, REBOOT=cyan
+- Bulk selection with `space` (selected servers shown with ● prefix in purple)
+- LAZYSTACK branding badge in top-right corner
 
 #### Server Detail
-- Two-column property list: name, ID, status, flavor, image, IP, keypair, tenant, AZ, created, security groups, volumes
+- Two-column property list: name, ID, status, power state, flavor, image (name + ID), IPv4, IPv6, floating IP, keypair, locked, tenant, AZ, created, security groups, volumes
+- Auto-refresh at same interval as server list
 - Scrollable viewport
-- Actions available: delete, soft reboot, hard reboot
+- Resize pending banner with confirm/revert actions
+- Pending action state — optimistic UI that suppresses stale API responses
+- Empty fields hidden for cleaner display
 
 #### Server Create
-- Form fields: Name (text input), Image, Flavor, Network, Key Pair (inline filterable pickers)
+- Form fields: Name, Image, Flavor, Network, Key Pair (inline filterable pickers), Count
+- Count field (1–100) for batch creation using Nova's `min_count`/`max_count`
 - Parallel resource fetching on form open (images, flavors, networks, keypairs)
 - Type-to-filter in picker dropdowns
+- Cursor advances to next field after picker selection
 - Focusable Submit/Cancel buttons with hotkey labels
 - Navigation: Tab/Shift+Tab/Arrow keys between fields, Enter to open pickers
 - Submit via button or Ctrl+S hotkey
-- Keypair properly passed via `keypairs.CreateOptsExt`
 
 #### Confirmation Modals
-- Required for all destructive actions (delete, soft reboot, hard reboot)
+- Required for all destructive actions (delete, reboot, pause, suspend, shelve)
+- Supports both single-server and bulk operations
 - Focusable [y] Confirm / [n] Cancel buttons
 - Navigate buttons with arrow keys, Tab, or use hotkeys directly
 - Defaults to Cancel for safety
@@ -152,25 +242,75 @@ Modals (confirm, error, help) overlay the active view and intercept all input un
 - Missing clouds.yaml shows helpful error with search paths
 
 #### Help Overlay
-- `?` toggles help overlay
-- Keybindings grouped by context (Global, Server List, Server Detail, Create Form, Modals)
+- `?` toggles scrollable help overlay
+- Keybindings grouped by context (Global, Server List, Server Detail, Create Form, Console Log, Modals)
+- Scrollable with ↑/↓ when content doesn't fit
 
 #### Status Bar
 - Shows current cloud name and region
-- Context-sensitive key hints per view
+- Context-sensitive key hints per view (adapts to server state, selection count)
 - Error/warning display
+- Truncates gracefully when bar overflows
 
 #### Edge Cases
 - Terminal too small: centered warning with required dimensions (80x20 minimum)
-- Empty server list: "press [c] to create" message
+- Empty server list: "press [ctrl+n] to create" message
 - No clouds.yaml: error modal with guidance
+- Ctrl+R restarts the app (re-exec with same flags) for rapid testing after rebuilds
+
+### Phase 2: Extended Compute (Complete)
+
+#### Server Actions
+- Pause/unpause (`p`) — auto-detects current state
+- Suspend/resume (`ctrl+z`) — auto-detects current state
+- Shelve/unshelve (`ctrl+e`) — auto-detects current state
+- Resize (`ctrl+f`) — modal flavor picker with filter, current flavor marked with ★
+- Confirm resize (`ctrl+y`) / Revert resize (`ctrl+x`) with optimistic UI
+- Hard reboot (`ctrl+p`)
+- All toggle actions read server status from both list and detail views
+
+#### Console Log Viewer (`l`)
+- Scrollable console output (last 500 lines from Nova)
+- `g`/`G` for top/bottom navigation
+- `R` to refresh
+- `Esc` returns to previous view
+
+#### Action History (`a`)
+- Scrollable list of all instance actions (create, reboot, resize, etc.)
+- Shows action name, timestamp with relative age, request ID
+- Failed actions highlighted in red
+- `R` to refresh
+
+#### Resize Flow
+- Modal overlay (not a separate view) — sits on top of list or detail
+- Flavor list auto-sizes to content (no wrapping)
+- Current flavor dimmed with ★ indicator
+- After resize, server enters VERIFY_RESIZE state
+- Detail view shows contextual banner: "Resize pending — ctrl+y confirm • ctrl+x revert"
+- Confirm/revert uses optimistic UI with pending action state
+- Staggered re-fetch (0.5s, 2s) for non-resize actions to catch state transitions
+
+#### Bulk Actions
+- `space` toggles selection on current server (advances cursor)
+- Selected servers shown with ● prefix and purple highlighting
+- Status bar shows selection count and available bulk actions
+- Bulk delete, reboot, pause, suspend, shelve all work on selection
+- Confirm modal shows "N servers" for bulk operations
+- Selection auto-clears after action execution
+- Errors collected and reported as single modal (partial success visible)
+
+#### Server Detail Auto-Refresh
+- Same configurable interval as server list
+- `R` for manual refresh
+- Immediate re-fetch after actions (delete navigates to list)
+- Pending action state prevents stale responses from overwriting optimistic updates
 
 ### CLI Flags
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--pick-cloud` | bool | false | Always show cloud picker, even with one cloud |
-| `--refresh` | duration | 5s | Server list auto-refresh interval |
+| `--refresh` | int | 5 | Server list/detail auto-refresh interval in seconds |
 
 ### Keybindings
 
@@ -178,28 +318,45 @@ Modals (confirm, error, help) overlay the active view and intercept all input un
 | Key | Action |
 |-----|--------|
 | `q` / `Ctrl+C` | Quit |
-| `?` | Toggle help |
+| `?` | Toggle help (scrollable) |
 | `C` | Switch cloud |
+| `Ctrl+R` | Restart app (re-exec binary) |
 
 #### Server List
 | Key | Action |
 |-----|--------|
 | `↑/k` `↓/j` | Navigate |
+| `space` | Select/deselect for bulk actions |
 | `Enter` | View detail |
-| `c` | Create server |
-| `d` | Delete server |
-| `r` | Soft reboot |
+| `Ctrl+N` | Create server |
+| `Ctrl+D` | Delete server (or selected) |
+| `Ctrl+O` | Soft reboot (or selected) |
+| `p` | Pause/unpause (or selected) |
+| `Ctrl+Z` | Suspend/resume (or selected) |
+| `Ctrl+E` | Shelve/unshelve (or selected) |
+| `Ctrl+F` | Resize (modal) |
+| `l` | Console log |
+| `a` | Action history |
 | `R` | Force refresh |
 | `/` | Filter |
-| `Esc` | Clear filter |
+| `Esc` | Clear filter / clear selection |
 
 #### Server Detail
 | Key | Action |
 |-----|--------|
 | `↑/k` `↓/j` | Scroll |
-| `d` | Delete server |
-| `r` | Soft reboot |
-| `R` | Hard reboot |
+| `Ctrl+D` | Delete server |
+| `Ctrl+O` | Soft reboot |
+| `Ctrl+P` | Hard reboot |
+| `p` | Pause/unpause |
+| `Ctrl+Z` | Suspend/resume |
+| `Ctrl+E` | Shelve/unshelve |
+| `Ctrl+F` | Resize (modal) |
+| `Ctrl+Y` | Confirm resize (when VERIFY_RESIZE) |
+| `Ctrl+X` | Revert resize (when VERIFY_RESIZE) |
+| `l` | Console log |
+| `a` | Action history |
+| `R` | Refresh |
 | `Esc` | Back to list |
 
 #### Create Form
@@ -207,9 +364,17 @@ Modals (confirm, error, help) overlay the active view and intercept all input un
 |-----|--------|
 | `Tab` / `↓` | Next field |
 | `Shift+Tab` / `↑` | Previous field |
-| `Enter` | Open picker / activate button |
+| `Enter` | Open picker / activate button / advance |
 | `Ctrl+S` | Submit (hotkey) |
 | `Esc` | Cancel |
+
+#### Console Log / Action History
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Scroll |
+| `g` / `G` | Top / Bottom (console only) |
+| `R` | Refresh |
+| `Esc` | Back to previous view |
 
 #### Modals
 | Key | Action |
@@ -222,23 +387,18 @@ Modals (confirm, error, help) overlay the active view and intercept all input un
 ### Visual Design
 
 - **Color palette**: Solarized Dark base
-- **Primary accent**: `#7D56F4` (purple)
+- **Primary accent**: `#7D56F4` (purple) — used for branding badge, selected items, focused buttons
 - **Secondary**: `#6C71C4`
-- **Status indicators**: Green (active/success), Yellow (building/warning), Red (error), Gray (stopped), Cyan (rebooting)
+- **Status indicators**: Green (ACTIVE/RUNNING), Yellow (BUILD/warning), Red (ERROR), Gray (SHUTOFF), Cyan (REBOOT)
+- **Power state colors**: Green (RUNNING), Gray (SHUTDOWN), Red (CRASHED), Muted (PAUSED/SUSPENDED)
 - **Selected row**: `#073642` background with bold text
+- **Bulk selected**: ● prefix with purple text
+- **Locked servers**: 🔒 prefix on name
+- **Current flavor in resize**: Dimmed with ★ suffix
 - **Buttons**: Styled with background color, highlight on focus (green for confirm/submit, red for cancel/deny)
+- **Branding**: LAZYSTACK pill badge in top-right, dark text on purple background
 
 ## Future Roadmap
-
-These features are not yet implemented but represent the natural evolution of the tool.
-
-### Phase 2: Extended Compute
-- Server console log viewer
-- Server action history
-- Resize (flavor change)
-- Pause/unpause, suspend/resume, shelve/unshelve
-- Server group awareness
-- Bulk actions (multi-select with space)
 
 ### Phase 3: Additional Resources
 - Volume management (list, create, attach, detach, delete)
@@ -280,6 +440,8 @@ These features are not yet implemented but represent the natural evolution of th
 1. `go build` produces a single binary with zero runtime dependencies
 2. Connects to any standard OpenStack cloud via `clouds.yaml`
 3. Server list loads and auto-refreshes without manual intervention
-4. Full VM lifecycle (list, inspect, create, delete, reboot) from keyboard
-5. All destructive actions require explicit confirmation
+4. Full VM lifecycle (list, inspect, create, delete, reboot, pause, suspend, shelve, resize) from keyboard
+5. All destructive actions require Ctrl-prefix and explicit confirmation
 6. Responsive at terminal sizes from 80x20 upward
+7. Bulk operations work on multi-selected servers
+8. Console log and action history accessible per server

@@ -3,11 +3,13 @@ package serverlist
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 
 	"github.com/bosse/lazystack/internal/shared"
 	"github.com/bosse/lazystack/internal/compute"
+	img "github.com/bosse/lazystack/internal/image"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -24,9 +26,12 @@ type serversErrMsg struct {
 	err error
 }
 
+type imageNamesMsg map[string]string // image ID → name
+
 // Model is the server list view.
 type Model struct {
 	client          *gophercloud.ServiceClient
+	imageClient     *gophercloud.ServiceClient
 	servers         []compute.Server
 	filtered        []compute.Server
 	columns         []Column
@@ -40,22 +45,29 @@ type Model struct {
 	err             string
 	scrollOff       int
 	refreshInterval time.Duration
+	imageNames      map[string]string // cache of image ID → name
+	selected        map[string]bool   // selected server IDs for bulk actions
 }
 
 // New creates a new server list model.
-func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model {
+func New(client, imageClient *gophercloud.ServiceClient, refreshInterval time.Duration) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	fi := textinput.New()
+	fi.Prompt = ""
 	fi.Placeholder = "filter..."
 	fi.CharLimit = 64
+	fi.SetVirtualCursor(false)
 
 	return Model{
 		client:          client,
+		imageClient:     imageClient,
 		columns:         DefaultColumns(),
 		loading:         true,
 		spinner:         s,
+		imageNames:      make(map[string]string),
+		selected:        make(map[string]bool),
 		filter:          fi,
 		refreshInterval: refreshInterval,
 	}
@@ -88,7 +100,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case serversLoadedMsg:
 		m.loading = false
 		m.servers = msg.servers
+		// Apply cached image names
+		for i := range m.servers {
+			if m.servers[i].ImageName == "" && m.servers[i].ImageID != "" {
+				if name, ok := m.imageNames[m.servers[i].ImageID]; ok {
+					m.servers[i].ImageName = name
+				}
+			}
+		}
 		m.err = ""
+		m.applyFilter()
+		// Fetch any unknown image names
+		return m, m.fetchMissingImageNames()
+
+	case imageNamesMsg:
+		for id, name := range msg {
+			m.imageNames[id] = name
+		}
+		for i := range m.servers {
+			if m.servers[i].ImageName == "" && m.servers[i].ImageID != "" {
+				if name, ok := m.imageNames[m.servers[i].ImageID]; ok {
+					m.servers[i].ImageName = name
+				}
+			}
+		}
 		m.applyFilter()
 		return m, nil
 
@@ -115,6 +150,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.columns = ComputeWidths(m.columns, m.width)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -157,10 +193,21 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Handled by root model (modal confirmation)
 	case key.Matches(msg, shared.Keys.Reboot):
 		// Handled by root model (modal confirmation)
-	case key.Matches(msg, shared.Keys.HardReboot):
-		if msg.String() == "R" {
-			m.loading = true
-			return m, tea.Batch(m.spinner.Tick, m.fetchServers())
+	case key.Matches(msg, shared.Keys.Refresh):
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.fetchServers())
+	case key.Matches(msg, shared.Keys.Select):
+		if s := m.SelectedServer(); s != nil {
+			if m.selected[s.ID] {
+				delete(m.selected, s.ID)
+			} else {
+				m.selected[s.ID] = true
+			}
+			// Move cursor down after selection
+			if m.cursor < len(m.filtered)-1 {
+				m.cursor++
+				m.ensureVisible()
+			}
 		}
 	}
 	return m, nil
@@ -193,10 +240,13 @@ func (m *Model) applyFilter() {
 	} else {
 		m.filtered = nil
 		for _, s := range m.servers {
+			allIPs := strings.ToLower(strings.Join(s.IPv4, " ") + " " + strings.Join(s.IPv6, " ") + " " + strings.Join(s.FloatingIP, " "))
 			if strings.Contains(strings.ToLower(s.Name), query) ||
 				strings.Contains(strings.ToLower(s.ID), query) ||
 				strings.Contains(strings.ToLower(s.Status), query) ||
-				strings.Contains(strings.ToLower(s.IP), query) {
+				strings.Contains(allIPs, query) ||
+				strings.Contains(strings.ToLower(s.FlavorName), query) ||
+				strings.Contains(strings.ToLower(s.ImageName), query) {
 				m.filtered = append(m.filtered, s)
 			}
 		}
@@ -259,7 +309,7 @@ func (m Model) View() string {
 
 	// Header
 	header := m.renderRow(func(col Column) string {
-		return shared.StyleHeader.Width(col.Width).Render(col.Title)
+		return shared.StyleHeader.Width(col.Width()).Render(col.Title)
 	})
 	b.WriteString(header + "\n")
 	sep := lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(strings.Repeat("─", m.width))
@@ -285,40 +335,147 @@ func (m Model) View() string {
 func (m Model) renderRow(render func(Column) string) string {
 	var parts []string
 	for _, col := range m.columns {
+		if col.Hidden() {
+			continue
+		}
 		parts = append(parts, render(col))
 	}
 	return "  " + strings.Join(parts, " ")
 }
 
-func (m Model) renderServerRow(s compute.Server, selected bool) string {
+func (m Model) renderServerRow(s compute.Server, cursor bool) string {
+	// Build combined status: "ACTIVE/RUNNING"
+	statusVal := s.Status + "/" + s.PowerState
+
+	// Selection and lock indicators on name
+	nameVal := s.Name
+	if s.Locked {
+		nameVal = "🔒 " + nameVal
+	}
+
+	// Row prefix: selection marker
+	prefix := "  "
+	if m.selected[s.ID] {
+		prefix = "● "
+	}
+
 	values := map[string]string{
-		"name":   s.Name,
-		"status": s.Status,
-		"ip":     s.IP,
-		"flavor": s.FlavorID,
-		"key":    s.KeyName,
-		"id":     s.ID,
+		"name":     nameVal,
+		"status":   statusVal,
+		"ipv4":     strings.Join(s.IPv4, ", "),
+		"ipv6":     strings.Join(s.IPv6, ", "),
+		"floating": strings.Join(s.FloatingIP, ", "),
+		"flavor":   s.FlavorName,
+		"image":    s.ImageName,
+		"age":      formatAge(s.Created),
+		"key":      s.KeyName,
+		"id":       s.ID,
+	}
+
+	isSelected := m.selected[s.ID]
+
+	// Determine row background
+	var rowBg color.Color
+	hasBg := false
+	if cursor {
+		rowBg = lipgloss.Color("#073642")
+		hasBg = true
+	} else if isSelected {
+		rowBg = lipgloss.Color("#1a1a2e")
+		hasBg = true
 	}
 
 	var parts []string
 	for _, col := range m.columns {
+		if col.Hidden() {
+			continue
+		}
 		val := values[col.Key]
-		if len(val) > col.Width {
-			val = val[:col.Width-1] + "…"
+		w := col.Width()
+		if len(val) > w && w > 1 {
+			val = val[:w-1] + "…"
 		}
 
-		style := lipgloss.NewStyle().Width(col.Width)
+		style := lipgloss.NewStyle().Width(w)
 		if col.Key == "status" {
-			style = StatusStyle(s.Status).Width(col.Width)
+			style = m.statusColumnStyle(s, w)
 		}
-		if selected {
-			style = style.Background(lipgloss.Color("#073642")).Bold(true)
+		if isSelected {
+			style = style.Foreground(shared.ColorPrimary)
+		}
+		if cursor {
+			style = style.Bold(true)
+		}
+		if hasBg {
+			style = style.Background(rowBg)
 		}
 
 		parts = append(parts, style.Render(val))
 	}
 
-	return "  " + strings.Join(parts, " ")
+	// Style the prefix and gaps with same background
+	prefixStyle := lipgloss.NewStyle()
+	gapStyle := lipgloss.NewStyle()
+	if hasBg {
+		prefixStyle = prefixStyle.Background(rowBg)
+		gapStyle = gapStyle.Background(rowBg)
+	}
+	if isSelected {
+		prefixStyle = prefixStyle.Foreground(shared.ColorPrimary)
+	}
+
+	gap := gapStyle.Render(" ")
+	row := prefixStyle.Render(prefix) + strings.Join(parts, gap)
+
+	// Pad to full width
+	if hasBg {
+		rowW := lipgloss.Width(row)
+		if rowW < m.width {
+			row += gapStyle.Render(strings.Repeat(" ", m.width-rowW))
+		}
+	}
+
+	return row
+}
+
+func (m Model) statusColumnStyle(s compute.Server, w int) lipgloss.Style {
+	// Use the more severe color between status and power state
+	statusColor, ok := shared.StatusColors[s.Status]
+	if !ok {
+		statusColor = shared.ColorFg
+	}
+	// If status is ACTIVE but power is not RUNNING, use power color
+	if s.Status == "ACTIVE" && s.PowerState != "RUNNING" {
+		if pc, ok := shared.PowerColors[s.PowerState]; ok {
+			statusColor = pc
+		}
+	}
+	// If status indicates a problem, always use status color
+	if s.Status == "ERROR" || s.Status == "SHUTOFF" {
+		statusColor = shared.StatusColors[s.Status]
+	}
+	return lipgloss.NewStyle().Width(w).Foreground(statusColor)
+}
+
+func formatAge(created time.Time) string {
+	if created.IsZero() {
+		return ""
+	}
+	d := time.Since(created)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		days := int(d.Hours() / 24)
+		if days > 365 {
+			return fmt.Sprintf("%dy", days/365)
+		}
+		return fmt.Sprintf("%dd", days)
+	}
 }
 
 func (m Model) fetchServers() tea.Cmd {
@@ -329,6 +486,39 @@ func (m Model) fetchServers() tea.Cmd {
 			return serversErrMsg{err: err}
 		}
 		return serversLoadedMsg{servers: servers}
+	}
+}
+
+func (m Model) fetchMissingImageNames() tea.Cmd {
+	if m.imageClient == nil {
+		return nil
+	}
+	// Collect image IDs we don't have names for
+	missing := make(map[string]bool)
+	for _, s := range m.servers {
+		if s.ImageID != "" && s.ImageName == "" {
+			if _, ok := m.imageNames[s.ImageID]; !ok {
+				missing[s.ImageID] = true
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+
+	client := m.imageClient
+	return func() tea.Msg {
+		result := make(imageNamesMsg)
+		images, err := img.ListImages(context.Background(), client)
+		if err != nil {
+			return result // silently fail, names are optional
+		}
+		for _, image := range images {
+			if missing[image.ID] {
+				result[image.ID] = image.Name
+			}
+		}
+		return result
 	}
 }
 
@@ -343,7 +533,37 @@ func (m Model) Hints() string {
 	if m.filtering {
 		return "enter confirm • esc clear"
 	}
-	return "↑↓ navigate • enter detail • c create • d delete • r reboot • / filter • ? help"
+	if len(m.selected) > 0 {
+		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^o reboot • esc clear • ? help", len(m.selected))
+	}
+	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • ^o reboot • / filter • ? help"
+}
+
+// SelectedServers returns all selected servers, or the cursor server if none selected.
+func (m Model) SelectedServers() []compute.Server {
+	if len(m.selected) > 0 {
+		var result []compute.Server
+		for _, s := range m.filtered {
+			if m.selected[s.ID] {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	if s := m.SelectedServer(); s != nil {
+		return []compute.Server{*s}
+	}
+	return nil
+}
+
+// ClearSelection clears all selected servers.
+func (m *Model) ClearSelection() {
+	m.selected = make(map[string]bool)
+}
+
+// SelectionCount returns the number of selected servers.
+func (m Model) SelectionCount() int {
+	return len(m.selected)
 }
 
 // SetClient updates the compute client.
@@ -355,4 +575,5 @@ func (m *Model) SetClient(client *gophercloud.ServiceClient) {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.columns = ComputeWidths(m.columns, w)
 }

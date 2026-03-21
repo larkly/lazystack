@@ -37,6 +37,15 @@ var (
 		"SHELVED_OFFLOADED": ColorMuted,
 	}
 
+	PowerColors = map[string]color.Color{
+		"RUNNING":  ColorSuccess,
+		"PAUSED":   ColorMuted,
+		"SHUTDOWN": lipgloss.Color("#586E75"),
+		"CRASHED":  ColorError,
+		"SUSPENDED": ColorMuted,
+		"NOSTATE":  ColorWarning,
+	}
+
 	StyleTitle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorPrimary).

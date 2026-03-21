@@ -2,6 +2,7 @@ package statusbar
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/bosse/lazystack/internal/shared"
 	"charm.land/lipgloss/v2"
@@ -15,18 +16,22 @@ type Model struct {
 	Width       int
 	Hint        string
 	Error       string
+	Version     string
 }
 
 // New creates a new status bar.
-func New() Model {
+func New(version string) Model {
 	return Model{
 		CurrentView: "cloudpicker",
 		Hint:        "Select a cloud to connect",
+		Version:     version,
 	}
 }
 
 // Render renders the status bar.
 func (m Model) Render() string {
+	style := shared.StyleStatusBar
+
 	left := ""
 	if m.CloudName != "" {
 		left = fmt.Sprintf(" %s %s  %s %s",
@@ -46,12 +51,18 @@ func (m Model) Render() string {
 		right = shared.StyleHelp.Render(fmt.Sprintf(" %s ", m.Hint))
 	}
 
-	gap := m.Width - lipgloss.Width(left) - lipgloss.Width(right)
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	gap := m.Width - leftW - rightW
 	if gap < 0 {
-		gap = 0
+		right = ""
+		gap = m.Width - leftW
+		if gap < 0 {
+			gap = 0
+		}
 	}
 
-	bar := left + lipgloss.NewStyle().Width(gap).Render("") + right
+	bar := left + strings.Repeat(" ", gap) + right
 
-	return shared.StyleStatusBar.Width(m.Width).Render(bar)
+	return style.Render(bar)
 }

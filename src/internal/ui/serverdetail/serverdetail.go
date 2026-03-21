@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bosse/lazystack/internal/shared"
 	"github.com/bosse/lazystack/internal/compute"
@@ -22,35 +23,40 @@ type serverDetailErrMsg struct {
 	err error
 }
 
+type detailTickMsg struct{}
+
 // Model is the server detail view.
 type Model struct {
-	client   *gophercloud.ServiceClient
-	serverID string
-	server   *compute.Server
-	loading  bool
-	spinner  spinner.Model
-	width    int
-	height   int
-	scroll   int
-	err      string
+	client          *gophercloud.ServiceClient
+	serverID        string
+	server          *compute.Server
+	loading         bool
+	spinner         spinner.Model
+	width           int
+	height          int
+	scroll          int
+	err             string
+	refreshInterval time.Duration
+	pendingAction   string // e.g. "Resize confirmed" — shown until server state catches up
 }
 
 // New creates a server detail model.
-func New(client *gophercloud.ServiceClient, serverID string) Model {
+func New(client *gophercloud.ServiceClient, serverID string, refreshInterval time.Duration) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	return Model{
-		client:   client,
-		serverID: serverID,
-		loading:  true,
-		spinner:  s,
+		client:          client,
+		serverID:        serverID,
+		loading:         true,
+		spinner:         s,
+		refreshInterval: refreshInterval,
 	}
 }
 
 // Init fetches the server details.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchServer())
+	return tea.Batch(m.spinner.Tick, m.fetchServer(), m.tickCmd())
 }
 
 // ServerID returns the current server ID.
@@ -66,11 +72,25 @@ func (m Model) ServerName() string {
 	return m.serverID
 }
 
+// ServerStatus returns the current server status.
+func (m Model) ServerStatus() string {
+	if m.server != nil {
+		return m.server.Status
+	}
+	return ""
+}
+
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case serverDetailLoadedMsg:
 		m.loading = false
+		// Clear pending action if server state has changed
+		if m.pendingAction != "" && msg.server != nil {
+			if msg.server.Status != "VERIFY_RESIZE" {
+				m.pendingAction = ""
+			}
+		}
 		m.server = msg.server
 		m.err = ""
 		return m, nil
@@ -79,6 +99,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
+
+	case detailTickMsg:
+		return m, tea.Batch(m.fetchServer(), m.tickCmd())
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -109,6 +132,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Handled by root model
 		case key.Matches(msg, shared.Keys.Reboot):
 			// Handled by root model
+		case key.Matches(msg, shared.Keys.Refresh):
+			m.loading = true
+			return m, tea.Batch(m.spinner.Tick, m.fetchServer())
 		}
 	}
 	return m, nil
@@ -134,6 +160,27 @@ func (m Model) View() string {
 	}
 
 	s := m.server
+
+	// Show resize-related banners
+	if m.pendingAction != "" {
+		banner := lipgloss.NewStyle().
+			Foreground(shared.ColorSuccess).
+			Bold(true).
+			Render(fmt.Sprintf("  ✓ %s — waiting for server...", m.pendingAction))
+		b.WriteString(banner + "\n\n")
+	} else if s.Status == "VERIFY_RESIZE" {
+		banner := lipgloss.NewStyle().
+			Foreground(shared.ColorWarning).
+			Bold(true).
+			Render("  ⚠ Resize pending — ctrl+y confirm • ctrl+x revert")
+		b.WriteString(banner + "\n\n")
+	}
+
+	locked := ""
+	if s.Locked {
+		locked = "yes"
+	}
+
 	props := []struct {
 		label string
 		value string
@@ -141,10 +188,15 @@ func (m Model) View() string {
 		{"Name", s.Name},
 		{"ID", s.ID},
 		{"Status", s.Status},
-		{"Flavor", s.FlavorID},
-		{"Image", s.ImageID},
-		{"IP", s.IP},
+		{"Power State", s.PowerState},
+		{"Flavor", s.FlavorName},
+		{"Image", s.ImageName},
+		{"Image ID", s.ImageID},
+		{"IPv4", strings.Join(s.IPv4, ", ")},
+		{"IPv6", strings.Join(s.IPv6, ", ")},
+		{"Floating IP", strings.Join(s.FloatingIP, ", ")},
 		{"Key Pair", s.KeyName},
+		{"Locked", locked},
 		{"Tenant ID", s.TenantID},
 		{"Availability Zone", s.AZ},
 		{"Created", s.Created.Format("2006-01-02 15:04:05")},
@@ -154,6 +206,9 @@ func (m Model) View() string {
 
 	lines := make([]string, 0, len(props))
 	for _, p := range props {
+		if p.value == "" {
+			continue
+		}
 		label := shared.StyleLabel.Render(p.label)
 		value := shared.StyleValue.Render(p.value)
 		if p.label == "Status" {
@@ -164,6 +219,9 @@ func (m Model) View() string {
 
 	// Apply scroll
 	viewHeight := m.height - 5
+	if s.Status == "VERIFY_RESIZE" {
+		viewHeight -= 2
+	}
 	if viewHeight < 1 {
 		viewHeight = 1
 	}
@@ -204,13 +262,49 @@ func (m Model) fetchServer() tea.Cmd {
 	}
 }
 
+func (m Model) tickCmd() tea.Cmd {
+	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
+		return detailTickMsg{}
+	})
+}
+
 // SetSize updates the dimensions.
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 }
 
+// ServerFlavor returns the current server flavor name.
+func (m Model) ServerFlavor() string {
+	if m.server != nil {
+		return m.server.FlavorName
+	}
+	return ""
+}
+
+// SetServer updates the server data directly.
+func (m *Model) SetServer(s *compute.Server) {
+	if m.pendingAction != "" && s != nil && s.Status != "VERIFY_RESIZE" {
+		m.pendingAction = ""
+	}
+	m.server = s
+	m.loading = false
+	m.err = ""
+}
+
+// SetPendingAction marks an action as in-progress. The banner stays
+// until the server's real status changes away from the old state.
+func (m *Model) SetPendingAction(action string) {
+	m.pendingAction = action
+}
+
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
-	return "↑↓ scroll • d delete • r reboot • R hard reboot • esc back • ? help"
+	if m.pendingAction != "" {
+		return "↑↓ scroll • esc back • ? help"
+	}
+	if m.server != nil && m.server.Status == "VERIFY_RESIZE" {
+		return "^y confirm resize • ^x revert resize • ↑↓ scroll • ^d delete • esc back • ? help"
+	}
+	return "↑↓ scroll • ^d delete • ^o reboot • ^p hard reboot • R refresh • esc back • ? help"
 }

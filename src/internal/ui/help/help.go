@@ -18,32 +18,18 @@ type Model struct {
 	View    string // current view context
 	Width   int
 	Height  int
+	scroll  int
+	lines   []string
 }
 
 // New creates a help model.
 func New() Model {
-	return Model{}
+	m := Model{}
+	m.buildLines()
+	return m
 }
 
-// Update handles input.
-func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if key.Matches(msg, shared.Keys.Help) || key.Matches(msg, shared.Keys.Back) {
-			m.Visible = false
-			return m, nil
-		}
-	case tea.WindowSizeMsg:
-		m.Width = msg.Width
-		m.Height = msg.Height
-	}
-	return m, nil
-}
-
-// Render returns the help overlay content.
-func (m Model) Render() string {
-	title := shared.StyleModalTitle.Render("Keyboard Shortcuts")
-
+func (m *Model) buildLines() {
 	sections := []struct {
 		name  string
 		binds []string
@@ -54,6 +40,7 @@ func (m Model) Render() string {
 				"q / ctrl+c   quit",
 				"?            toggle help",
 				"C            switch cloud",
+				"ctrl+r       restart app",
 			},
 		},
 		{
@@ -61,9 +48,16 @@ func (m Model) Render() string {
 			binds: []string{
 				"↑/k ↓/j      navigate",
 				"enter         view detail",
-				"c             create server",
-				"d             delete server",
-				"r             soft reboot",
+				"ctrl+n        create server",
+				"ctrl+d        delete server",
+				"ctrl+o        soft reboot",
+				"p             pause/unpause",
+				"ctrl+z        suspend/resume",
+				"ctrl+e        shelve/unshelve",
+				"ctrl+f        resize",
+				"l             console log",
+				"a             action history",
+				"space         select/deselect",
 				"R             force refresh",
 				"/             filter",
 			},
@@ -72,18 +66,34 @@ func (m Model) Render() string {
 			name: "Server Detail",
 			binds: []string{
 				"↑/k ↓/j      scroll",
-				"d             delete server",
-				"r             soft reboot",
-				"R             hard reboot",
+				"ctrl+d        delete server",
+				"ctrl+o        soft reboot",
+				"ctrl+p        hard reboot",
+				"p             pause/unpause",
+				"ctrl+z        suspend/resume",
+				"ctrl+e        shelve/unshelve",
+				"ctrl+f        resize",
+				"l             console log",
+				"a             action history",
 				"esc           back to list",
+			},
+		},
+		{
+			name: "Console Log",
+			binds: []string{
+				"↑/k ↓/j      scroll",
+				"g             top",
+				"G             bottom",
+				"R             refresh",
+				"esc           back",
 			},
 		},
 		{
 			name: "Create Form",
 			binds: []string{
-				"tab           next field",
-				"shift+tab     prev field",
-				"enter         open picker",
+				"tab / ↓       next field",
+				"shift+tab / ↑ prev field",
+				"enter         open picker / activate button",
 				"ctrl+s        submit",
 				"esc           cancel",
 			},
@@ -93,25 +103,88 @@ func (m Model) Render() string {
 			binds: []string{
 				"y             confirm",
 				"n / esc       cancel",
+				"←/→ ↑/↓ tab  navigate buttons",
+				"enter         activate button",
 			},
 		},
 	}
 
-	var b strings.Builder
+	m.lines = nil
 	for _, s := range sections {
-		b.WriteString(lipgloss.NewStyle().
+		m.lines = append(m.lines, lipgloss.NewStyle().
 			Bold(true).
 			Foreground(shared.ColorSecondary).
-			Render(s.name) + "\n")
+			Render(s.name))
 		for _, bind := range s.binds {
-			b.WriteString("  " + bind + "\n")
+			m.lines = append(m.lines, "  "+bind)
 		}
-		b.WriteString("\n")
+		m.lines = append(m.lines, "")
+	}
+}
+
+// Update handles input.
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, shared.Keys.Help), key.Matches(msg, shared.Keys.Back):
+			m.Visible = false
+			m.scroll = 0
+			return m, nil
+		case key.Matches(msg, shared.Keys.Down):
+			maxScroll := len(m.lines) - m.viewHeight()
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			if m.scroll < maxScroll {
+				m.scroll++
+			}
+		case key.Matches(msg, shared.Keys.Up):
+			if m.scroll > 0 {
+				m.scroll--
+			}
+		}
+	case tea.WindowSizeMsg:
+		m.Width = msg.Width
+		m.Height = msg.Height
+	}
+	return m, nil
+}
+
+func (m Model) viewHeight() int {
+	// modal padding (border 1 + padding 1) * 2 + title + blank + hint = ~8 lines overhead
+	h := m.Height - 8
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+// Render returns the help overlay content.
+func (m Model) Render() string {
+	title := shared.StyleModalTitle.Render("Keyboard Shortcuts")
+
+	vh := m.viewHeight()
+	end := m.scroll + vh
+	if end > len(m.lines) {
+		end = len(m.lines)
+	}
+	start := m.scroll
+	if start > len(m.lines) {
+		start = len(m.lines)
 	}
 
-	content := title + "\n\n" + b.String() +
-		shared.StyleHelp.Render("Press ? or esc to close")
+	visible := strings.Join(m.lines[start:end], "\n")
 
+	// Scroll indicator
+	scrollHint := ""
+	if m.scroll > 0 || end < len(m.lines) {
+		scrollHint = shared.StyleHelp.Render(" ↑↓ scroll •")
+	}
+
+	hint := scrollHint + shared.StyleHelp.Render(" ? or esc to close")
+
+	content := title + "\n\n" + visible + "\n\n" + hint
 	box := shared.StyleModal.Width(50).Render(content)
 
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, box)
