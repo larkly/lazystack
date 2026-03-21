@@ -15,11 +15,11 @@
 | Phase 1: MVP | ✓ Complete | Cloud connection, server CRUD, modals, help |
 | Phase 2: Extended Compute | ✓ Complete | All actions, console log, resize, bulk ops, action history |
 | Phase 3: Additional Resources | ✓ Complete | Tabbed navigation, volumes, floating IPs, security groups, key pairs |
-| Phase 4: Multi-Cloud | Not started | |
-| Phase 5: Quality of Life | Not started | SSH, clipboard, config file |
-| Phase 6: Operational | Not started | Quotas, admin views |
+| Phase 4: Refactor, Octavia, Projects, Quotas | ✓ Complete | App refactor, dynamic tabs, Octavia LB tab, project switching, quota overlay |
+| Phase 5: Quality of Life | Not started | SSH, clipboard, config file, Designate (DNS) |
+| Phase 6: Operational | Not started | Admin views, hypervisor view, service catalog browser |
 
-**Current version**: v0.0.1 (tagged at end of Phase 1)
+**Current version**: v0.0.4 (tagged at end of Phase 4)
 
 ## Concerns and Considerations
 
@@ -27,7 +27,7 @@
 
 - **Value receiver pattern**: Bubble Tea v2 uses value receivers for `Update()`, which means model mutations require returning new values. This interacts poorly with optimistic UI updates — changes made before an async command fires can be overwritten when the command's response arrives and gets routed through `updateActiveView`. This caused the resize confirmation banner to flicker (optimistic status set to ACTIVE, then stale API response overwrote it back to VERIFY_RESIZE). Solved with a `pendingAction` state that suppresses stale updates until the real state catches up.
 
-- **Message routing complexity**: The root model routes messages to sub-views via a `switch` on the active view. Adding overlay modals (resize picker, confirm, error, help) that intercept messages creates ordering dependencies in the `Update` method. The resize modal being `Active` was swallowing messages meant for other views. Each new modal/overlay adds routing complexity — consider a message bus or middleware pattern if this grows further.
+- **Message routing complexity**: The root model routes messages to sub-views via a `switch` on the active view. Adding overlay modals (resize picker, confirm, error, help) that intercept messages creates ordering dependencies in the `Update` method. The resize modal being `Active` was swallowing messages meant for other views. Each new modal/overlay adds routing complexity — consider a message bus or middleware pattern if this grows further. Phase 4's refactor split app.go from 1,643 lines into 7 focused files (app.go, actions_server.go, actions_resource.go, routing.go, render.go, connect.go, tabs.go), which makes this manageable for now.
 
 - **Import cycle avoidance**: Shared types (keys, styles, messages) live in `internal/shared/` rather than `internal/app/` to avoid import cycles between `app` and the UI packages. This is a pragmatic workaround but means the "app" package is really just the root model + view routing.
 
@@ -53,7 +53,7 @@
 
 - **Server detail refresh creates a new model**: After actions from the detail view, the detail model is recreated with `New()` + `Init()` to force a fresh fetch. This resets scroll position and loses the pending action state if not carefully managed. A proper `Refresh()` method on the detail model would be cleaner.
 
-- **No tests**: The codebase has zero test coverage. The compute layer functions are thin wrappers around gophercloud and would benefit from interface-based mocking. The UI components are harder to test but snapshot testing of `View()` output would catch rendering regressions.
+- **Limited tests**: The codebase has minimal test coverage (cloud, compute, serverlist columns). The compute layer functions are thin wrappers around gophercloud and would benefit from interface-based mocking. The UI components are harder to test but snapshot testing of `View()` output would catch rendering regressions.
 
 - **Error handling in bulk operations**: Bulk actions collect errors and report them as a single concatenated string. Individual failure tracking and partial success reporting would be better UX.
 
@@ -109,14 +109,21 @@ src/
   cmd/lazystack/main.go             # Entry point, CLI flags, restart via syscall.Exec
   internal/
     app/
-      app.go                        # Root model, view routing, modal overlay, bulk actions
+      app.go                        # Root model, New(), Init(), Update() routing, type defs
+      actions_server.go             # Server CRUD/lifecycle actions, bulk operations
+      actions_resource.go           # Volume, FIP, security group, keypair, LB actions
+      routing.go                    # View routing, modal updates, view change handling
+      render.go                     # View(), viewContent(), viewName()
+      connect.go                    # Cloud connection and picker switching
+      tabs.go                       # Dynamic tab registry (TabDef), tab switching, tab bar
     shared/
       keys.go                       # Global key bindings (Ctrl-prefixed for dangerous ops)
       styles.go                     # Lipgloss theme constants (Solarized Dark)
       messages.go                   # Shared message types for inter-component communication
     cloud/
-      client.go                     # Auth, service client initialization
+      client.go                     # Auth, service client initialization, optional service detection
       clouds.go                     # clouds.yaml parser
+      projects.go                   # Keystone project listing for project switching
     compute/
       servers.go                    # Server CRUD + pause/suspend/shelve/resize/reboot
       actions.go                    # Instance action history
@@ -130,6 +137,10 @@ src/
       secgroups.go                  # Security group listing, rule create/delete
     volume/
       volumes.go                    # Volume CRUD (list, get, create, delete, attach, detach)
+    loadbalancer/
+      lb.go                         # Octavia LB, listener, pool, member CRUD
+    quota/
+      quota.go                      # Compute, network, block storage quota fetching
     ui/
       serverlist/
         serverlist.go               # Server table with auto-refresh, filtering, bulk select, sorting
@@ -154,15 +165,23 @@ src/
         secgroupview.go             # Security group viewer with expandable rules, rule deletion
       keypairlist/
         keypairlist.go              # Key pair table with sorting, delete
+      lblist/
+        lblist.go                   # Load balancer table with status colors, sorting
+      lbdetail/
+        lbdetail.go                 # LB detail with listener/pool/member tree
       fippicker/
         fippicker.go                # Floating IP picker modal for server association
+      projectpicker/
+        projectpicker.go            # Project picker modal for project switching
+      quotaview/
+        quotaview.go                # Quota overlay with ASCII progress bars
       modal/
         confirm.go                  # Confirmation dialog (single + bulk), custom body/title
         error.go                    # Error modal
       cloudpicker/
         cloudpicker.go              # Cloud selection overlay
       statusbar/
-        statusbar.go                # Bottom bar: cloud, region, context hints
+        statusbar.go                # Bottom bar: cloud, project, region, context hints
       help/
         help.go                     # Scrollable help overlay
 ```
@@ -175,36 +194,42 @@ src/
                     └──────┬──────┘
                            │ select cloud (auto if single)
                            ▼
-  ┌─────────────────── Tab Bar (1-5 / ←→) ──────────────────┐
-  │                                                          │
-  │ Tab 1          Tab 2        Tab 3       Tab 4     Tab 5  │
-  │ ┌──────────┐  ┌──────────┐ ┌────────┐ ┌───────┐ ┌─────┐ │
-  │ │Server    │  │Volume    │ │Float   │ │SecGrp │ │Keys │ │
-  │ │List      │  │List      │ │IP List │ │View   │ │List │ │
-  │ └──┬───┬───┘  └──┬───────┘ └────────┘ └───────┘ └─────┘ │
-  │    │   │ ^n    Enter                                     │
-  │    │   │       │                                         │
-  │  Enter ▼       ▼                                         │
-  │    │ ┌──────┐ ┌───────────┐                              │
-  │    │ │Create│ │Vol Detail │                              │
-  │    ▼ └──────┘ └───────────┘                              │
-  │ ┌──────────┐                                             │
-  │ │Server    │                                             │
-  │ │Detail    │                                             │
-  │ └──┬──┬────┘                                             │
-  │    l  a                                                  │
-  │    │  │                                                  │
-  │    ▼  ▼                                                  │
-  │ ┌────────┐ ┌──────────┐                                  │
-  │ │Console │ │Action Log│                                  │
-  │ └────────┘ └──────────┘                                  │
-  └──────────────────────────────────────────────────────────┘
+  ┌────────────── Dynamic Tab Bar (1-N / ←→) ──────────────────────┐
+  │  Tabs built from service catalog: Servers always, Volumes if   │
+  │  Cinder, Floating IPs/Sec Groups always, LBs if Octavia,      │
+  │  Key Pairs always                                              │
+  │                                                                │
+  │ ┌──────────┐ ┌──────────┐ ┌────────┐ ┌───────┐ ┌────┐ ┌─────┐│
+  │ │Server    │ │Volume    │ │Float   │ │SecGrp │ │LBs │ │Keys ││
+  │ │List      │ │List      │ │IP List │ │View   │ │List│ │List ││
+  │ └──┬───┬───┘ └──┬───────┘ └────────┘ └───────┘ └─┬──┘ └─────┘│
+  │    │   │ ^n   Enter                             Enter         │
+  │    │   │       │                                  │           │
+  │  Enter ▼       ▼                                  ▼           │
+  │    │ ┌──────┐ ┌───────────┐              ┌───────────┐        │
+  │    │ │Create│ │Vol Detail │              │LB Detail  │        │
+  │    ▼ └──────┘ └───────────┘              └───────────┘        │
+  │ ┌──────────┐                                                  │
+  │ │Server    │                                                  │
+  │ │Detail    │                                                  │
+  │ └──┬──┬────┘                                                  │
+  │    l  a                                                       │
+  │    │  │                                                       │
+  │    ▼  ▼                                                       │
+  │ ┌────────┐ ┌──────────┐                                       │
+  │ │Console │ │Action Log│                                       │
+  │ └────────┘ └──────────┘                                       │
+  └────────────────────────────────────────────────────────────────┘
 
   Overlays (always available):
-  ┌─────────────┐  ┌──────────┐  ┌──────┐  ┌────────┐  ┌──────────┐
-  │Confirm Modal│  │Error     │  │Help  │  │Resize  │  │FIP Picker│
-  │(y/n/enter)  │  │(enter)   │  │(?)   │  │(^f)    │  │(^a)      │
-  └─────────────┘  └──────────┘  └──────┘  └────────┘  └──────────┘
+  ┌─────────────┐ ┌──────────┐ ┌──────┐ ┌────────┐ ┌──────────┐
+  │Confirm Modal│ │Error     │ │Help  │ │Resize  │ │FIP Picker│
+  │(y/n/enter)  │ │(enter)   │ │(?)   │ │(^f)    │ │(^a)      │
+  └─────────────┘ └──────────┘ └──────┘ └────────┘ └──────────┘
+  ┌──────────────┐ ┌──────────┐
+  │Project Picker│ │Quotas    │
+  │(P)           │ │(Q)       │
+  └──────────────┘ └──────────┘
 ```
 
 ## Features
@@ -381,6 +406,43 @@ src/
 - Custom title and body text per resource type (e.g., "Delete Volume", "Release Floating IP")
 - Reused across all resource types via generic action routing
 
+### Phase 4: Refactor, Octavia, Projects, Quotas (Complete)
+
+#### App Refactor
+- Split monolithic `app.go` (1,643 lines) into 7 focused files with no logic changes
+- Replaced hardcoded `activeTab` enum with dynamic `TabDef` registry — tabs are now data-driven
+- Tab number keys `1-9` map dynamically to index position; arrow keys cycle with modulo
+- Tab availability determined at connection time based on service catalog
+
+#### Service Catalog Detection
+- Octavia (Load Balancer) service detected optionally via `openstack.NewLoadBalancerV2`
+- Block Storage detected optionally (try v3, v2, v1 — same as before)
+- Tabs built conditionally: Volumes only if Cinder, Load Balancers only if Octavia
+- Clouds without optional services work normally — those tabs simply don't appear
+
+#### Load Balancer Management (Octavia)
+- **LB List**: Columns (Name, VIP Address, Provisioning Status, Operating Status), auto-refresh, sorting
+- **LB Detail**: Properties display plus tree view of Listeners → Pools → Members
+- **Delete** (`Ctrl+D`): Cascade delete (removes listeners, pools, members along with LB)
+- Status colors: ACTIVE/ONLINE=green, PENDING_*=yellow, ERROR/OFFLINE=red
+
+#### Project Switching (ALPHA — UNTESTED)
+- After cloud connection, accessible projects fetched in background via Keystone `ListAvailable`
+- If more than one project available, `P` key opens project picker modal
+- Current project marked with `*` in picker
+- On selection, re-authenticates scoped to new project via `ConnectWithProject` (overrides TenantID)
+- All tabs reset on project switch (same as cloud switch)
+- Project name shown in status bar between cloud and region
+
+#### Quota Overlay
+- `Q` key opens full-screen quota overlay (same pattern as help)
+- Three sections: Compute (instances, cores, RAM, key pairs, server groups), Network (floating IPs, networks, ports, routers, security groups, subnets), Block Storage (volumes, gigabytes, snapshots, backups)
+- ASCII progress bars (18 chars wide) with color coding: green (<70%), yellow (70-90%), red (>90%)
+- Unlimited quotas (limit=-1) shown as "used / unlimited" with no bar
+- Lazy fetch on open, cached for 30 seconds
+- Scroll support, close with `Q` or `Esc`
+- Block Storage section omitted if Cinder unavailable
+
 ### CLI Flags
 
 | Flag | Type | Default | Description |
@@ -396,9 +458,11 @@ src/
 | `q` / `Ctrl+C` | Quit |
 | `?` | Toggle help (scrollable) |
 | `C` | Switch cloud |
-| `1-5` / `←/→` | Switch tab |
+| `1-9` / `←/→` | Switch tab (dynamic based on available services) |
 | `R` | Force refresh |
 | `s` / `S` | Sort column / reverse sort |
+| `P` | Switch project (when multiple projects available) |
+| `Q` | Resource quotas overlay |
 | `PgUp` / `PgDn` | Page up / page down |
 | `Ctrl+R` | Restart app (re-exec binary) |
 
@@ -485,6 +549,14 @@ src/
 | `↑/k` `↓/j` | Navigate |
 | `Ctrl+D` | Delete key pair |
 
+#### Load Balancers
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Navigate |
+| `Enter` | View detail (listener/pool/member tree) |
+| `Ctrl+D` | Delete load balancer (cascade) |
+| `Esc` | Back to list (from detail) |
+
 #### Console Log / Action History
 | Key | Action |
 |-----|--------|
@@ -523,12 +595,6 @@ src/
 - **Volume Attach from detail**: Needs a server picker modal (similar to FIP picker)
 - Network/subnet/port browsing
 
-### Phase 4: Multi-tenant and optional services
-- Hotkey to get the cloud switcher
-- Tenant switcher
-- Cloud status dashboard (API latency, quota usage)
-- Designate, Octavia and other services
-
 ### Phase 5: Quality of Life
 - Configuration file (`~/.config/lazystack/config.yaml`) for defaults
 - Custom column selection and ordering
@@ -537,11 +603,10 @@ src/
 - SSH integration (launch SSH session to selected server)
 - Copy-to-clipboard for IDs, IPs
 - Log/audit trail of actions taken
+- Designate (DNS) tab
 
 ### Phase 6: Operational
-- Quota display and warnings
 - Hypervisor view (admin)
-- Project/tenant switcher
 - User management (admin)
 - Service catalog browser
 

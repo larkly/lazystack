@@ -80,6 +80,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // View renders the project picker.
 func (m Model) View() string {
 	title := shared.StyleModalTitle.Render("Switch Project")
+	warning := lipgloss.NewStyle().Foreground(shared.ColorWarning).Bold(true).Render("ALPHA — UNTESTED")
 	items := ""
 	for i, p := range m.projects {
 		cursor := "  "
@@ -97,7 +98,7 @@ func (m Model) View() string {
 
 	hint := shared.StyleHelp.Render("↑/↓ navigate • enter select • esc cancel")
 
-	content := title + "\n\n" + items + "\n" + hint
+	content := title + "\n" + warning + "\n\n" + items + "\n" + hint
 	box := shared.StyleModal.Width(40).Render(content)
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
