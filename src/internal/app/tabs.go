@@ -13,6 +13,23 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// TabDef describes a resource tab.
+type TabDef struct {
+	Name string // tab bar label (e.g., "Servers")
+	Key  string // identifier (e.g., "servers", "volumes")
+}
+
+// DefaultTabs returns the default set of resource tabs.
+func DefaultTabs() []TabDef {
+	return []TabDef{
+		{Name: "Servers", Key: "servers"},
+		{Name: "Volumes", Key: "volumes"},
+		{Name: "Floating IPs", Key: "floatingips"},
+		{Name: "Sec Groups", Key: "secgroups"},
+		{Name: "Key Pairs", Key: "keypairs"},
+	}
+}
+
 func (m Model) isTopLevelView() bool {
 	switch m.view {
 	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList:
@@ -21,65 +38,69 @@ func (m Model) isTopLevelView() bool {
 	return false
 }
 
-func (m Model) switchTab(tab activeTab) (Model, tea.Cmd) {
-	if tab == m.activeTab && m.isTopLevelView() {
+func (m Model) switchTab(idx int) (Model, tea.Cmd) {
+	if idx < 0 || idx >= len(m.tabs) {
 		return m, nil
 	}
-	m.activeTab = tab
+	if idx == m.activeTab && m.isTopLevelView() {
+		return m, nil
+	}
+	m.activeTab = idx
+	td := m.tabs[idx]
 
-	switch tab {
-	case tabServers:
+	switch td.Key {
+	case "servers":
 		m.view = viewServerList
 		m.statusBar.CurrentView = "serverlist"
 		m.statusBar.Hint = m.serverList.Hints()
 		return m, nil
 
-	case tabVolumes:
+	case "volumes":
 		m.view = viewVolumeList
 		m.statusBar.CurrentView = "volumelist"
-		if !m.tabsInited[tabVolumes] {
+		if !m.tabInited[idx] {
 			m.volumeList = volumelist.New(m.client.BlockStorage, m.client.Compute, m.refreshInterval)
 			m.volumeList.SetSize(m.width, m.height)
-			m.tabsInited[tabVolumes] = true
+			m.tabInited[idx] = true
 			m.statusBar.Hint = m.volumeList.Hints()
 			return m, m.volumeList.Init()
 		}
 		m.statusBar.Hint = m.volumeList.Hints()
 		return m, nil
 
-	case tabFloatingIPs:
+	case "floatingips":
 		m.view = viewFloatingIPList
 		m.statusBar.CurrentView = "floatingiplist"
-		if !m.tabsInited[tabFloatingIPs] {
+		if !m.tabInited[idx] {
 			m.floatingIPList = floatingiplist.New(m.client.Network, m.refreshInterval)
 			m.floatingIPList.SetSize(m.width, m.height)
-			m.tabsInited[tabFloatingIPs] = true
+			m.tabInited[idx] = true
 			m.statusBar.Hint = m.floatingIPList.Hints()
 			return m, m.floatingIPList.Init()
 		}
 		m.statusBar.Hint = m.floatingIPList.Hints()
 		return m, nil
 
-	case tabSecGroups:
+	case "secgroups":
 		m.view = viewSecGroupView
 		m.statusBar.CurrentView = "secgroupview"
-		if !m.tabsInited[tabSecGroups] {
+		if !m.tabInited[idx] {
 			m.secGroupView = secgroupview.New(m.client.Network, m.refreshInterval)
 			m.secGroupView.SetSize(m.width, m.height)
-			m.tabsInited[tabSecGroups] = true
+			m.tabInited[idx] = true
 			m.statusBar.Hint = m.secGroupView.Hints()
 			return m, m.secGroupView.Init()
 		}
 		m.statusBar.Hint = m.secGroupView.Hints()
 		return m, nil
 
-	case tabKeypairs:
+	case "keypairs":
 		m.view = viewKeypairList
 		m.statusBar.CurrentView = "keypairlist"
-		if !m.tabsInited[tabKeypairs] {
+		if !m.tabInited[idx] {
 			m.keypairList = keypairlist.New(m.client.Compute)
 			m.keypairList.SetSize(m.width, m.height)
-			m.tabsInited[tabKeypairs] = true
+			m.tabInited[idx] = true
 			m.statusBar.Hint = m.keypairList.Hints()
 			return m, m.keypairList.Init()
 		}
@@ -91,9 +112,9 @@ func (m Model) switchTab(tab activeTab) (Model, tea.Cmd) {
 
 func (m Model) renderTabBar() string {
 	var tabs []string
-	for i, name := range tabNames {
-		label := fmt.Sprintf(" %d:%s ", i+1, name)
-		if activeTab(i) == m.activeTab {
+	for i, td := range m.tabs {
+		label := fmt.Sprintf(" %d:%s ", i+1, td.Name)
+		if i == m.activeTab {
 			tabs = append(tabs, lipgloss.NewStyle().
 				Background(shared.ColorPrimary).
 				Foreground(shared.ColorBg).

@@ -29,11 +29,6 @@ type KeyMap struct {
 	Actions       key.Binding
 	Console       key.Binding
 	Select     key.Binding
-	Tab1       key.Binding
-	Tab2       key.Binding
-	Tab3       key.Binding
-	Tab4       key.Binding
-	Tab5       key.Binding
 	Confirm    key.Binding
 	Deny       key.Binding
 	Restart    key.Binding
@@ -150,26 +145,6 @@ var Keys = KeyMap{
 	Select: key.NewBinding(
 		key.WithKeys("space"),
 		key.WithHelp("space", "select"),
-	),
-	Tab1: key.NewBinding(
-		key.WithKeys("1"),
-		key.WithHelp("1", "servers"),
-	),
-	Tab2: key.NewBinding(
-		key.WithKeys("2"),
-		key.WithHelp("2", "volumes"),
-	),
-	Tab3: key.NewBinding(
-		key.WithKeys("3"),
-		key.WithHelp("3", "floating IPs"),
-	),
-	Tab4: key.NewBinding(
-		key.WithKeys("4"),
-		key.WithHelp("4", "security groups"),
-	),
-	Tab5: key.NewBinding(
-		key.WithKeys("5"),
-		key.WithHelp("5", "key pairs"),
 	),
 	Confirm: key.NewBinding(
 		key.WithKeys("y"),

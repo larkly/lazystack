@@ -59,21 +59,24 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 	}
 
 	// Route to all initialized tab list views
-	if m.tabsInited[tabVolumes] {
-		m.volumeList, cmd = m.volumeList.Update(msg)
-		cmds = append(cmds, cmd)
-	}
-	if m.tabsInited[tabFloatingIPs] {
-		m.floatingIPList, cmd = m.floatingIPList.Update(msg)
-		cmds = append(cmds, cmd)
-	}
-	if m.tabsInited[tabSecGroups] {
-		m.secGroupView, cmd = m.secGroupView.Update(msg)
-		cmds = append(cmds, cmd)
-	}
-	if m.tabsInited[tabKeypairs] {
-		m.keypairList, cmd = m.keypairList.Update(msg)
-		cmds = append(cmds, cmd)
+	for i, td := range m.tabs {
+		if !m.tabInited[i] {
+			continue
+		}
+		switch td.Key {
+		case "volumes":
+			m.volumeList, cmd = m.volumeList.Update(msg)
+			cmds = append(cmds, cmd)
+		case "floatingips":
+			m.floatingIPList, cmd = m.floatingIPList.Update(msg)
+			cmds = append(cmds, cmd)
+		case "secgroups":
+			m.secGroupView, cmd = m.secGroupView.Update(msg)
+			cmds = append(cmds, cmd)
+		case "keypairs":
+			m.keypairList, cmd = m.keypairList.Update(msg)
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	// Route to active sub-views (detail, console, etc.)

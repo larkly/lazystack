@@ -28,18 +28,6 @@ import (
 	"charm.land/bubbletea/v2"
 )
 
-type activeTab int
-
-const (
-	tabServers activeTab = iota
-	tabVolumes
-	tabFloatingIPs
-	tabSecGroups
-	tabKeypairs
-)
-
-var tabNames = []string{"Servers", "Volumes", "Floating IPs", "Sec Groups", "Key Pairs"}
-
 type activeView int
 
 const (
@@ -92,8 +80,9 @@ type Model struct {
 	secGroupView  secgroupview.Model
 	keypairList   keypairlist.Model
 	statusBar     statusbar.Model
-	activeTab     activeTab
-	tabsInited    map[activeTab]bool
+	tabs      []TabDef
+	activeTab int
+	tabInited []bool
 	help         help.Model
 	confirm      modal.ConfirmModel
 	errModal     modal.ErrorModel
@@ -130,6 +119,8 @@ func New(opts Options) Model {
 		refresh = 5 * time.Second
 	}
 
+	tabs := DefaultTabs()
+
 	// Auto-select if exactly one cloud and not forced to pick
 	if err == nil && len(clouds) == 1 && !opts.AlwaysPickCloud {
 		return Model{
@@ -142,7 +133,8 @@ func New(opts Options) Model {
 			autoCloud:       clouds[0],
 			refreshInterval: refresh,
 			version:         opts.Version,
-			tabsInited:      make(map[activeTab]bool),
+			tabs:            tabs,
+			tabInited:       make([]bool, len(tabs)),
 		}
 	}
 
@@ -156,7 +148,8 @@ func New(opts Options) Model {
 		minHeight:       20,
 		refreshInterval: refresh,
 		version:         opts.Version,
-		tabsInited:      make(map[activeTab]bool),
+		tabs:            tabs,
+		tabInited:       make([]bool, len(tabs)),
 	}
 }
 
@@ -233,22 +226,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Tab switching (only from top-level list views)
 			if m.isTopLevelView() {
+				// Number keys 1-9 map to tab indices
+				if s := msg.String(); len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
+					idx := int(s[0] - '1')
+					if idx < len(m.tabs) {
+						return m.switchTab(idx)
+					}
+				}
 				switch {
-				case key.Matches(msg, shared.Keys.Tab1):
-					return m.switchTab(tabServers)
-				case key.Matches(msg, shared.Keys.Tab2):
-					return m.switchTab(tabVolumes)
-				case key.Matches(msg, shared.Keys.Tab3):
-					return m.switchTab(tabFloatingIPs)
-				case key.Matches(msg, shared.Keys.Tab4):
-					return m.switchTab(tabSecGroups)
-				case key.Matches(msg, shared.Keys.Tab5):
-					return m.switchTab(tabKeypairs)
 				case key.Matches(msg, shared.Keys.Right):
-					next := (m.activeTab + 1) % activeTab(len(tabNames))
+					next := (m.activeTab + 1) % len(m.tabs)
 					return m.switchTab(next)
 				case key.Matches(msg, shared.Keys.Left):
-					prev := (m.activeTab - 1 + activeTab(len(tabNames))) % activeTab(len(tabNames))
+					prev := (m.activeTab - 1 + len(m.tabs)) % len(m.tabs)
 					return m.switchTab(prev)
 				}
 			}
@@ -364,8 +354,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			BlockStorage: msg.BlockStorageClient,
 		}
 		// Reset tab state for new cloud connection
-		m.tabsInited = make(map[activeTab]bool)
-		m.activeTab = tabServers
+		m.tabInited = make([]bool, len(m.tabs))
+		m.activeTab = 0
 		m.statusBar.CloudName = m.cloudName
 		m.statusBar.Region = msg.Region
 		m.serverList = serverlist.New(msg.ComputeClient, msg.ImageClient, m.refreshInterval)
