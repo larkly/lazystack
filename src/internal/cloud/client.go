@@ -12,12 +12,15 @@ import (
 
 // Client holds authenticated OpenStack service clients.
 type Client struct {
-	CloudName    string
-	Region       string
-	Compute      *gophercloud.ServiceClient
-	Image        *gophercloud.ServiceClient
-	Network      *gophercloud.ServiceClient
-	BlockStorage *gophercloud.ServiceClient
+	CloudName      string
+	Region         string
+	Compute        *gophercloud.ServiceClient
+	Image          *gophercloud.ServiceClient
+	Network        *gophercloud.ServiceClient
+	BlockStorage   *gophercloud.ServiceClient
+	LoadBalancer   *gophercloud.ServiceClient
+	ProviderClient *gophercloud.ProviderClient
+	EndpointOpts   gophercloud.EndpointOpts
 }
 
 // Connect authenticates to the given cloud and initializes service clients.
@@ -52,19 +55,32 @@ func Connect(ctx context.Context, cloudName string) (*Client, error) {
 	// Different clouds register Cinder under different service types
 	blockStorage := tryBlockStorage(providerClient, eo)
 
+	// LoadBalancer (Octavia) — optional service
+	loadBalancer := tryLoadBalancer(providerClient, eo)
+
 	region := eo.Region
 	if region == "" {
 		region = "default"
 	}
 
 	return &Client{
-		CloudName:    cloudName,
-		Region:       region,
-		Compute:      compute,
-		Image:        image,
-		Network:      network,
-		BlockStorage: blockStorage,
+		CloudName:      cloudName,
+		Region:         region,
+		Compute:        compute,
+		Image:          image,
+		Network:        network,
+		BlockStorage:   blockStorage,
+		LoadBalancer:   loadBalancer,
+		ProviderClient: providerClient,
+		EndpointOpts:   eo,
 	}, nil
+}
+
+func tryLoadBalancer(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) *gophercloud.ServiceClient {
+	if sc, err := openstack.NewLoadBalancerV2(pc, eo); err == nil {
+		return sc
+	}
+	return nil
 }
 
 func tryBlockStorage(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) *gophercloud.ServiceClient {

@@ -20,6 +20,7 @@ func (m Model) connectToCloud(name string) tea.Cmd {
 			ImageClient:        client.Image,
 			NetworkClient:      client.Network,
 			BlockStorageClient: client.BlockStorage,
+			LoadBalancerClient: client.LoadBalancer,
 			Region:             client.Region,
 		}
 	}

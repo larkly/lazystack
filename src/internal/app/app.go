@@ -352,8 +352,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Image:        msg.ImageClient,
 			Network:      msg.NetworkClient,
 			BlockStorage: msg.BlockStorageClient,
+			LoadBalancer: msg.LoadBalancerClient,
 		}
-		// Reset tab state for new cloud connection
+		// Build tabs conditionally based on available services
+		m.tabs = []TabDef{{Name: "Servers", Key: "servers"}}
+		if msg.BlockStorageClient != nil {
+			m.tabs = append(m.tabs, TabDef{Name: "Volumes", Key: "volumes"})
+		}
+		m.tabs = append(m.tabs, TabDef{Name: "Floating IPs", Key: "floatingips"})
+		m.tabs = append(m.tabs, TabDef{Name: "Sec Groups", Key: "secgroups"})
+		if msg.LoadBalancerClient != nil {
+			m.tabs = append(m.tabs, TabDef{Name: "Load Balancers", Key: "loadbalancers"})
+		}
+		m.tabs = append(m.tabs, TabDef{Name: "Key Pairs", Key: "keypairs"})
 		m.tabInited = make([]bool, len(m.tabs))
 		m.activeTab = 0
 		m.statusBar.CloudName = m.cloudName

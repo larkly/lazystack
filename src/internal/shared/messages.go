@@ -16,6 +16,7 @@ type CloudConnectedMsg struct {
 	ImageClient        *gophercloud.ServiceClient
 	NetworkClient      *gophercloud.ServiceClient
 	BlockStorageClient *gophercloud.ServiceClient
+	LoadBalancerClient *gophercloud.ServiceClient
 	Region             string
 }
 
