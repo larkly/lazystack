@@ -1,4 +1,4 @@
-module github.com/bosse/lazystack
+module github.com/larkly/lazystack
 
 go 1.26.1
 

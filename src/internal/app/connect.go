@@ -3,9 +3,9 @@ package app
 import (
 	"context"
 
-	"github.com/bosse/lazystack/internal/cloud"
-	"github.com/bosse/lazystack/internal/shared"
-	"github.com/bosse/lazystack/internal/ui/cloudpicker"
+	"github.com/larkly/lazystack/internal/cloud"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/cloudpicker"
 	"charm.land/bubbletea/v2"
 )
 

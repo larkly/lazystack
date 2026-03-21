@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bosse/lazystack/internal/shared"
-	"github.com/bosse/lazystack/internal/ui/floatingiplist"
-	"github.com/bosse/lazystack/internal/ui/keypairlist"
-	"github.com/bosse/lazystack/internal/ui/lblist"
-	"github.com/bosse/lazystack/internal/ui/secgroupview"
-	"github.com/bosse/lazystack/internal/ui/volumelist"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/floatingiplist"
+	"github.com/larkly/lazystack/internal/ui/keypairlist"
+	"github.com/larkly/lazystack/internal/ui/lblist"
+	"github.com/larkly/lazystack/internal/ui/secgroupview"
+	"github.com/larkly/lazystack/internal/ui/volumelist"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )

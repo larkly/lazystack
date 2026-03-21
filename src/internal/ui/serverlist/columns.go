@@ -1,7 +1,7 @@
 package serverlist
 
 import (
-	"github.com/bosse/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/lipgloss/v2"
 )
 

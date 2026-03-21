@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bosse/lazystack/internal/quota"
-	"github.com/bosse/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/quota"
+	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"

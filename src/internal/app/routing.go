@@ -1,9 +1,9 @@
 package app
 
 import (
-	"github.com/bosse/lazystack/internal/shared"
-	"github.com/bosse/lazystack/internal/ui/servercreate"
-	"github.com/bosse/lazystack/internal/ui/serverdetail"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/servercreate"
+	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"charm.land/bubbletea/v2"
 )
 

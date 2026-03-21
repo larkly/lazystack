@@ -1,7 +1,7 @@
 package modal
 
 import (
-	"github.com/bosse/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"

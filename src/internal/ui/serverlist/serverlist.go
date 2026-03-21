@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bosse/lazystack/internal/shared"
-	"github.com/bosse/lazystack/internal/compute"
-	img "github.com/bosse/lazystack/internal/image"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/compute"
+	img "github.com/larkly/lazystack/internal/image"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"

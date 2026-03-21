@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bosse/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )

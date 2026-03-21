@@ -7,8 +7,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bosse/lazystack/internal/app"
-	"github.com/bosse/lazystack/internal/selfupdate"
+	"github.com/larkly/lazystack/internal/app"
+	"github.com/larkly/lazystack/internal/selfupdate"
 	"charm.land/bubbletea/v2"
 )
 
