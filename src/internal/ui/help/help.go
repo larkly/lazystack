@@ -40,6 +40,7 @@ func (m *Model) buildLines() {
 				"q / ctrl+c   quit",
 				"?            toggle help",
 				"C            switch cloud",
+				"P            switch project",
 				"1-5 / ←→     switch tab",
 				"R             force refresh",
 				"pgup/pgdn    page up/down",

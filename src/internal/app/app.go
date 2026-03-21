@@ -18,6 +18,7 @@ import (
 	"github.com/bosse/lazystack/internal/ui/lbdetail"
 	"github.com/bosse/lazystack/internal/ui/lblist"
 	"github.com/bosse/lazystack/internal/ui/modal"
+	"github.com/bosse/lazystack/internal/ui/projectpicker"
 	"github.com/bosse/lazystack/internal/ui/secgroupview"
 	"github.com/bosse/lazystack/internal/ui/servercreate"
 	"github.com/bosse/lazystack/internal/ui/serverdetail"
@@ -78,6 +79,7 @@ type Model struct {
 	actionLog     actionlog.Model
 	serverResize  serverresize.Model
 	fipPicker     fippicker.Model
+	projectPicker projectpicker.Model
 	volumeList    volumelist.Model
 	volumeDetail  volumedetail.Model
 	floatingIPList floatingiplist.Model
@@ -93,8 +95,10 @@ type Model struct {
 	confirm      modal.ConfirmModel
 	errModal     modal.ErrorModel
 	activeModal  modalType
-	cloudName       string
-	autoCloud       string
+	projects         []shared.ProjectInfo
+	currentProjectID string
+	cloudName        string
+	autoCloud        string
 	previousView    activeView
 	refreshInterval time.Duration
 	minWidth        int
@@ -184,6 +188,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Height = m.height
 		m.serverResize.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
+		m.projectPicker.SetSize(m.width, m.height)
 		m.statusBar.Width = m.width
 		return m.updateActiveView(msg)
 
@@ -218,6 +223,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Project picker modal intercepts all keys when active
+		if m.projectPicker.Active {
+			var cmd tea.Cmd
+			m.projectPicker, cmd = m.projectPicker.Update(msg)
+			return m, cmd
+		}
+
 		if m.view != viewServerCreate {
 			switch {
 			case key.Matches(msg, shared.Keys.Quit) && m.view != viewCloudPicker:
@@ -228,6 +240,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case key.Matches(msg, shared.Keys.CloudPick) && m.view != viewCloudPicker:
 				return m.switchToCloudPicker()
+			case key.Matches(msg, shared.Keys.ProjectPick) && m.view != viewCloudPicker && len(m.projects) > 1:
+				m.projectPicker = projectpicker.New(m.projects, m.currentProjectID)
+				m.projectPicker.SetSize(m.width, m.height)
+				return m, nil
 			}
 
 			// Tab switching (only from top-level list views)
@@ -370,12 +386,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shared.CloudConnectedMsg:
 		m.client = &cloud.Client{
-			CloudName:    m.cloudName,
-			Compute:      msg.ComputeClient,
-			Image:        msg.ImageClient,
-			Network:      msg.NetworkClient,
-			BlockStorage: msg.BlockStorageClient,
-			LoadBalancer: msg.LoadBalancerClient,
+			CloudName:      m.cloudName,
+			Compute:        msg.ComputeClient,
+			Image:          msg.ImageClient,
+			Network:        msg.NetworkClient,
+			BlockStorage:   msg.BlockStorageClient,
+			LoadBalancer:   msg.LoadBalancerClient,
+			ProviderClient: msg.ProviderClient,
+			EndpointOpts:   msg.EndpointOpts,
 		}
 		// Build tabs conditionally based on available services
 		m.tabs = []TabDef{{Name: "Servers", Key: "servers"}}
@@ -397,7 +415,80 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = viewServerList
 		m.statusBar.CurrentView = "serverlist"
 		m.statusBar.Hint = m.serverList.Hints()
-		return m, m.serverList.Init()
+		cmds := []tea.Cmd{m.serverList.Init()}
+		// Background-fetch accessible projects for project switching
+		if msg.ProviderClient != nil {
+			pc := msg.ProviderClient
+			eo := msg.EndpointOpts
+			cmds = append(cmds, func() tea.Msg {
+				projs, err := cloud.ListAccessibleProjects(context.Background(), pc, eo)
+				if err != nil {
+					return nil
+				}
+				var infos []shared.ProjectInfo
+				for _, p := range projs {
+					infos = append(infos, shared.ProjectInfo{ID: p.ID, Name: p.Name})
+				}
+				// Try to get current project ID from the auth scope
+				currentID := ""
+				if pc.GetAuthResult() != nil {
+					// The token should have project scope info
+					// We'll match by checking project IDs
+				}
+				return shared.ProjectsLoadedMsg{Projects: infos, CurrentID: currentID}
+			})
+		}
+		return m, tea.Batch(cmds...)
+
+	case shared.ProjectsLoadedMsg:
+		m.projects = msg.Projects
+		// Find current project name for status bar
+		for _, p := range msg.Projects {
+			if p.ID == msg.CurrentID {
+				m.statusBar.ProjectName = p.Name
+				m.currentProjectID = p.ID
+				break
+			}
+		}
+		// If we couldn't identify the current project but have only one, use it
+		if m.statusBar.ProjectName == "" && len(msg.Projects) == 1 {
+			m.statusBar.ProjectName = msg.Projects[0].Name
+			m.currentProjectID = msg.Projects[0].ID
+		}
+		// If we have a current project ID set from project switching, preserve the name
+		if m.currentProjectID != "" && m.statusBar.ProjectName == "" {
+			for _, p := range msg.Projects {
+				if p.ID == m.currentProjectID {
+					m.statusBar.ProjectName = p.Name
+					break
+				}
+			}
+		}
+		return m, nil
+
+	case shared.ProjectSelectedMsg:
+		m.projectPicker.Active = false
+		m.statusBar.Hint = fmt.Sprintf("Switching to project %s...", msg.ProjectName)
+		m.currentProjectID = msg.ProjectID
+		m.statusBar.ProjectName = msg.ProjectName
+		cloudName := m.cloudName
+		projectID := msg.ProjectID
+		return m, func() tea.Msg {
+			client, err := cloud.ConnectWithProject(context.Background(), cloudName, projectID)
+			if err != nil {
+				return shared.CloudConnectErrMsg{Err: err}
+			}
+			return shared.CloudConnectedMsg{
+				ComputeClient:      client.Compute,
+				ImageClient:        client.Image,
+				NetworkClient:      client.Network,
+				BlockStorageClient: client.BlockStorage,
+				LoadBalancerClient: client.LoadBalancer,
+				ProviderClient:     client.ProviderClient,
+				EndpointOpts:       client.EndpointOpts,
+				Region:             client.Region,
+			}
+		}
 
 	case shared.CloudConnectErrMsg:
 		m.errModal = modal.NewError("Cloud Connection", msg.Err)
@@ -513,6 +604,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fipPicker.Active {
 			var cmd tea.Cmd
 			m.fipPicker, cmd = m.fipPicker.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.projectPicker.Active {
+			var cmd tea.Cmd
+			m.projectPicker, cmd = m.projectPicker.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		return m, viewCmd

@@ -17,6 +17,8 @@ type CloudConnectedMsg struct {
 	NetworkClient      *gophercloud.ServiceClient
 	BlockStorageClient *gophercloud.ServiceClient
 	LoadBalancerClient *gophercloud.ServiceClient
+	ProviderClient     *gophercloud.ProviderClient
+	EndpointOpts       gophercloud.EndpointOpts
 	Region             string
 }
 
@@ -73,3 +75,21 @@ type ResourceActionErrMsg struct {
 
 // RefreshResourceMsg triggers a resource list refresh for the current tab.
 type RefreshResourceMsg struct{}
+
+// ProjectInfo is a simplified project reference for UI use.
+type ProjectInfo struct {
+	ID   string
+	Name string
+}
+
+// ProjectsLoadedMsg is sent after accessible projects are fetched.
+type ProjectsLoadedMsg struct {
+	Projects  []ProjectInfo
+	CurrentID string
+}
+
+// ProjectSelectedMsg is sent when user picks a project.
+type ProjectSelectedMsg struct {
+	ProjectID   string
+	ProjectName string
+}

@@ -39,6 +39,7 @@ type KeyMap struct {
 	PageDown    key.Binding
 	Sort        key.Binding
 	ReverseSort key.Binding
+	ProjectPick key.Binding
 }
 
 var Keys = KeyMap{
@@ -185,5 +186,9 @@ var Keys = KeyMap{
 	ReverseSort: key.NewBinding(
 		key.WithKeys("S"),
 		key.WithHelp("S", "reverse sort"),
+	),
+	ProjectPick: key.NewBinding(
+		key.WithKeys("P"),
+		key.WithHelp("P", "switch project"),
 	),
 }

@@ -11,6 +11,7 @@ import (
 // Model holds the status bar state.
 type Model struct {
 	CloudName   string
+	ProjectName string
 	Region      string
 	CurrentView string
 	Width       int
@@ -34,12 +35,23 @@ func (m Model) Render() string {
 
 	left := ""
 	if m.CloudName != "" {
-		left = fmt.Sprintf(" %s %s  %s %s",
-			shared.StyleStatusBarKey.Render("cloud:"),
-			m.CloudName,
-			shared.StyleStatusBarKey.Render("region:"),
-			m.Region,
-		)
+		if m.ProjectName != "" {
+			left = fmt.Sprintf(" %s %s  %s %s  %s %s",
+				shared.StyleStatusBarKey.Render("cloud:"),
+				m.CloudName,
+				shared.StyleStatusBarKey.Render("project:"),
+				m.ProjectName,
+				shared.StyleStatusBarKey.Render("region:"),
+				m.Region,
+			)
+		} else {
+			left = fmt.Sprintf(" %s %s  %s %s",
+				shared.StyleStatusBarKey.Render("cloud:"),
+				m.CloudName,
+				shared.StyleStatusBarKey.Render("region:"),
+				m.Region,
+			)
+		}
 	}
 
 	right := ""

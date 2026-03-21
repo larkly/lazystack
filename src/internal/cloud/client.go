@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -29,7 +30,21 @@ func Connect(ctx context.Context, cloudName string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing cloud %q: %w", cloudName, err)
 	}
+	return connectWithOpts(ctx, ao, eo, tlsConfig, cloudName)
+}
 
+// ConnectWithProject authenticates scoped to a specific project.
+func ConnectWithProject(ctx context.Context, cloudName, projectID string) (*Client, error) {
+	ao, eo, tlsConfig, err := clouds.Parse(clouds.WithCloudName(cloudName))
+	if err != nil {
+		return nil, fmt.Errorf("parsing cloud %q: %w", cloudName, err)
+	}
+	ao.TenantID = projectID
+	ao.TenantName = "" // Clear TenantName to avoid conflicts
+	return connectWithOpts(ctx, ao, eo, tlsConfig, cloudName)
+}
+
+func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gophercloud.EndpointOpts, tlsConfig *tls.Config, cloudName string) (*Client, error) {
 	providerClient, err := config.NewProviderClient(ctx, ao, config.WithTLSConfig(tlsConfig))
 	if err != nil {
 		return nil, fmt.Errorf("authenticating to %q: %w", cloudName, err)
