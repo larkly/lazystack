@@ -523,10 +523,11 @@ src/
 - **Volume Attach from detail**: Needs a server picker modal (similar to FIP picker)
 - Network/subnet/port browsing
 
-### Phase 4: Multi-Cloud
-- Side-by-side cloud comparison
-- Cross-cloud server migration assistance
-- Cloud health dashboard (API latency, quota usage)
+### Phase 4: Multi-tenant and optional services
+- Hotkey to get the cloud switcher
+- Tenant switcher
+- Cloud status dashboard (API latency, quota usage)
+- Designate, Octavia and other services
 
 ### Phase 5: Quality of Life
 - Configuration file (`~/.config/lazystack/config.yaml`) for defaults
