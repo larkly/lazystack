@@ -54,7 +54,7 @@ make build
 ### With `go install`
 
 ```bash
-go install github.com/bosse/lazystack/cmd/lazystack@latest
+go install github.com/larkly/lazystack/cmd/lazystack@latest
 ```
 
 ### Requirements
