@@ -4,9 +4,17 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and release (e.g. v0.0.5)"
+        required: true
 
 permissions:
   contents: write
+
+env:
+  VERSION: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -24,6 +32,8 @@ jobs:
             goarch: arm64
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
 
       - uses: actions/setup-go@v5
         with:
@@ -36,7 +46,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           bin="lazystack-${{ matrix.goos }}-${{ matrix.goarch }}"
-          go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o "../${bin}" ./cmd/lazystack
+          go build -ldflags "-s -w -X main.version=${{ env.VERSION }}" -o "../${bin}" ./cmd/lazystack
 
       - uses: actions/upload-artifact@v4
         with:
@@ -54,5 +64,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.VERSION }}
           generate_release_notes: true
           files: lazystack-*
