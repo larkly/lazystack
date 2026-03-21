@@ -19,8 +19,6 @@
 | Phase 5: Quality of Life | Not started | SSH, clipboard, config file, Designate (DNS) |
 | Phase 6: Operational | Not started | Admin views, hypervisor view, service catalog browser |
 
-**Current version**: v0.0.4 (tagged at end of Phase 4)
-
 ## Concerns and Considerations
 
 ### Architecture
@@ -47,7 +45,7 @@
 
 ### Technical Debt
 
-- **Bulk action support is partial**: Space-select works for delete, reboot, pause, suspend, shelve. Resize and console log only operate on a single server (the cursor, not the selection). This is intentional — resize needs per-server flavor choice, and console log is inherently single-server.
+- **Bulk action support is partial**: Space-select works for delete, reboot, pause, suspend, shelve, and resize. Console log only operates on a single server (the cursor, not the selection), which is intentional since console log is inherently single-server. Bulk resize applies the same target flavor to all selected servers.
 
 - **Image name resolution**: Nova's server response doesn't include the image name (only ID) with newer microversions. The server list fetches all images from Glance to resolve names, which works but adds an extra API call on every refresh. Should cache more aggressively or resolve lazily.
 
@@ -341,7 +339,7 @@ src/
 - `space` toggles selection on current server (advances cursor)
 - Selected servers shown with ● prefix and purple highlighting
 - Status bar shows selection count and available bulk actions
-- Bulk delete, reboot, pause, suspend, shelve all work on selection
+- Bulk delete, reboot, pause, suspend, shelve, resize all work on selection
 - Confirm modal shows "N servers" for bulk operations
 - Selection auto-clears after action execution
 - Errors collected and reported as single modal (partial success visible)
@@ -355,8 +353,8 @@ src/
 ### Phase 3: Additional Resources (Complete)
 
 #### Tabbed Navigation
-- Five tabs: Servers (1), Volumes (2), Floating IPs (3), Security Groups (4), Key Pairs (5)
-- Switch with number keys `1-5` or `←/→` from any top-level list view
+- Dynamic tabs built from service catalog (see Phase 4 refactor): Servers, Volumes, Floating IPs, Security Groups, Key Pairs (always present), Load Balancers (if Octavia available)
+- Switch with number keys `1-9` or `←/→` from any top-level list view
 - Tab bar with active tab highlighted, inactive tabs muted
 - Each tab lazily initializes on first visit, auto-refreshes independently
 - Background tick routing ensures all initialized tabs keep refreshing even when not active
@@ -447,8 +445,9 @@ src/
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--pick-cloud` | bool | false | Always show cloud picker, even with one cloud |
-| `--refresh` | int | 5 | Server list/detail auto-refresh interval in seconds |
+| `-version` | bool | false | Print version and exit |
+| `-pick-cloud` | bool | false | Always show cloud picker, even with one cloud |
+| `-refresh` | int | 5 | Server list/detail auto-refresh interval in seconds |
 
 ### Keybindings
 
