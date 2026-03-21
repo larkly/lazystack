@@ -40,6 +40,10 @@ func (m *Model) buildLines() {
 				"q / ctrl+c   quit",
 				"?            toggle help",
 				"C            switch cloud",
+				"1-5 / ←→     switch tab",
+				"R             force refresh",
+				"pgup/pgdn    page up/down",
+				"s/S           sort / reverse sort",
 				"ctrl+r       restart app",
 			},
 		},
@@ -55,10 +59,10 @@ func (m *Model) buildLines() {
 				"ctrl+z        suspend/resume",
 				"ctrl+e        shelve/unshelve",
 				"ctrl+f        resize",
+				"ctrl+a        assign floating IP",
 				"l             console log",
 				"a             action history",
 				"space         select/deselect",
-				"R             force refresh",
 				"/             filter",
 			},
 		},
@@ -67,6 +71,7 @@ func (m *Model) buildLines() {
 			binds: []string{
 				"↑/k ↓/j      scroll",
 				"ctrl+d        delete server",
+				"ctrl+a        assign floating IP",
 				"ctrl+o        soft reboot",
 				"ctrl+p        hard reboot",
 				"p             pause/unpause",
@@ -84,7 +89,6 @@ func (m *Model) buildLines() {
 				"↑/k ↓/j      scroll",
 				"g             top",
 				"G             bottom",
-				"R             refresh",
 				"esc           back",
 			},
 		},
@@ -96,6 +100,42 @@ func (m *Model) buildLines() {
 				"enter         open picker / activate button",
 				"ctrl+s        submit",
 				"esc           cancel",
+			},
+		},
+		{
+			name: "Volume List / Detail",
+			binds: []string{
+				"↑/k ↓/j      navigate / scroll",
+				"enter         view detail",
+				"ctrl+d        delete volume",
+				"ctrl+a        attach to server",
+				"ctrl+t        detach from server",
+				"esc           back to list",
+			},
+		},
+		{
+			name: "Floating IPs",
+			binds: []string{
+				"↑/k ↓/j      navigate",
+				"ctrl+n        allocate new IP",
+				"ctrl+t        disassociate IP",
+				"ctrl+d        release floating IP",
+			},
+		},
+		{
+			name: "Security Groups",
+			binds: []string{
+				"↑/k ↓/j      navigate groups / rules",
+				"enter         expand / collapse group",
+				"ctrl+d        delete selected rule",
+				"esc           back to group list",
+			},
+		},
+		{
+			name: "Key Pairs",
+			binds: []string{
+				"↑/k ↓/j      navigate",
+				"ctrl+d        delete key pair",
 			},
 		},
 		{
@@ -142,6 +182,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Up):
 			if m.scroll > 0 {
 				m.scroll--
+			}
+		case key.Matches(msg, shared.Keys.PageDown):
+			maxScroll := len(m.lines) - m.viewHeight()
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			m.scroll += m.viewHeight()
+			if m.scroll > maxScroll {
+				m.scroll = maxScroll
+			}
+		case key.Matches(msg, shared.Keys.PageUp):
+			m.scroll -= m.viewHeight()
+			if m.scroll < 0 {
+				m.scroll = 0
 			}
 		}
 	case tea.WindowSizeMsg:

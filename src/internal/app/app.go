@@ -8,23 +8,43 @@ import (
 
 	"github.com/bosse/lazystack/internal/cloud"
 	"github.com/bosse/lazystack/internal/compute"
+	"github.com/bosse/lazystack/internal/network"
 	"github.com/bosse/lazystack/internal/shared"
-	"github.com/bosse/lazystack/internal/ui/cloudpicker"
-	"github.com/bosse/lazystack/internal/ui/help"
-	"github.com/bosse/lazystack/internal/ui/modal"
-	"github.com/bosse/lazystack/internal/ui/servercreate"
+	"github.com/bosse/lazystack/internal/volume"
 	"github.com/bosse/lazystack/internal/ui/actionlog"
+	"github.com/bosse/lazystack/internal/ui/cloudpicker"
 	"github.com/bosse/lazystack/internal/ui/consolelog"
+	"github.com/bosse/lazystack/internal/ui/fippicker"
+	"github.com/bosse/lazystack/internal/ui/floatingiplist"
+	"github.com/bosse/lazystack/internal/ui/help"
+	"github.com/bosse/lazystack/internal/ui/keypairlist"
+	"github.com/bosse/lazystack/internal/ui/modal"
+	"github.com/bosse/lazystack/internal/ui/secgroupview"
+	"github.com/bosse/lazystack/internal/ui/servercreate"
 	"github.com/bosse/lazystack/internal/ui/serverdetail"
 	"github.com/bosse/lazystack/internal/ui/serverlist"
 	"github.com/bosse/lazystack/internal/ui/serverresize"
 	"github.com/bosse/lazystack/internal/ui/statusbar"
+	"github.com/bosse/lazystack/internal/ui/volumedetail"
+	"github.com/bosse/lazystack/internal/ui/volumelist"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 )
+
+type activeTab int
+
+const (
+	tabServers activeTab = iota
+	tabVolumes
+	tabFloatingIPs
+	tabSecGroups
+	tabKeypairs
+)
+
+var tabNames = []string{"Servers", "Volumes", "Floating IPs", "Sec Groups", "Key Pairs"}
 
 type activeView int
 
@@ -35,6 +55,11 @@ const (
 	viewServerCreate
 	viewConsoleLog
 	viewActionLog
+	viewVolumeList
+	viewVolumeDetail
+	viewFloatingIPList
+	viewSecGroupView
+	viewKeypairList
 )
 
 type modalType int
@@ -63,10 +88,18 @@ type Model struct {
 	serverList   serverlist.Model
 	serverDetail serverdetail.Model
 	serverCreate servercreate.Model
-	consoleLog   consolelog.Model
-	actionLog    actionlog.Model
-	serverResize serverresize.Model
-	statusBar    statusbar.Model
+	consoleLog    consolelog.Model
+	actionLog     actionlog.Model
+	serverResize  serverresize.Model
+	fipPicker     fippicker.Model
+	volumeList    volumelist.Model
+	volumeDetail  volumedetail.Model
+	floatingIPList floatingiplist.Model
+	secGroupView  secgroupview.Model
+	keypairList   keypairlist.Model
+	statusBar     statusbar.Model
+	activeTab     activeTab
+	tabsInited    map[activeTab]bool
 	help         help.Model
 	confirm      modal.ConfirmModel
 	errModal     modal.ErrorModel
@@ -115,6 +148,7 @@ func New(opts Options) Model {
 			autoCloud:       clouds[0],
 			refreshInterval: refresh,
 			version:         opts.Version,
+			tabsInited:      make(map[activeTab]bool),
 		}
 	}
 
@@ -128,6 +162,7 @@ func New(opts Options) Model {
 		minHeight:       20,
 		refreshInterval: refresh,
 		version:         opts.Version,
+		tabsInited:      make(map[activeTab]bool),
 	}
 }
 
@@ -155,6 +190,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Width = m.width
 		m.help.Height = m.height
 		m.serverResize.SetSize(m.width, m.height)
+		m.fipPicker.SetSize(m.width, m.height)
 		m.statusBar.Width = m.width
 		return m.updateActiveView(msg)
 
@@ -182,6 +218,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// FIP picker modal intercepts all keys when active
+		if m.fipPicker.Active {
+			var cmd tea.Cmd
+			m.fipPicker, cmd = m.fipPicker.Update(msg)
+			return m, cmd
+		}
+
 		if m.view != viewServerCreate {
 			switch {
 			case key.Matches(msg, shared.Keys.Quit) && m.view != viewCloudPicker:
@@ -193,6 +236,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, shared.Keys.CloudPick) && m.view != viewCloudPicker:
 				return m.switchToCloudPicker()
 			}
+
+			// Tab switching (only from top-level list views)
+			if m.isTopLevelView() {
+				switch {
+				case key.Matches(msg, shared.Keys.Tab1):
+					return m.switchTab(tabServers)
+				case key.Matches(msg, shared.Keys.Tab2):
+					return m.switchTab(tabVolumes)
+				case key.Matches(msg, shared.Keys.Tab3):
+					return m.switchTab(tabFloatingIPs)
+				case key.Matches(msg, shared.Keys.Tab4):
+					return m.switchTab(tabSecGroups)
+				case key.Matches(msg, shared.Keys.Tab5):
+					return m.switchTab(tabKeypairs)
+				case key.Matches(msg, shared.Keys.Right):
+					next := (m.activeTab + 1) % activeTab(len(tabNames))
+					return m.switchTab(next)
+				case key.Matches(msg, shared.Keys.Left):
+					prev := (m.activeTab - 1 + activeTab(len(tabNames))) % activeTab(len(tabNames))
+					return m.switchTab(prev)
+				}
+			}
+		}
+
+		// Global force refresh
+		if key.Matches(msg, shared.Keys.Refresh) && m.view != viewCloudPicker {
+			return m.forceRefreshActiveView()
 		}
 
 		if m.view == viewServerList || m.view == viewServerDetail {
@@ -229,6 +299,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.RevertResize) {
 				return m.doRevertResize()
 			}
+			if key.Matches(msg, shared.Keys.Attach) {
+				return m.doAllocateAndAssociateFIP()
+			}
+		}
+
+		// Volume list: Enter to open detail, ctrl+d to delete
+		if m.view == viewVolumeList {
+			if key.Matches(msg, shared.Keys.Enter) {
+				return m.openVolumeDetail()
+			}
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openVolumeDeleteConfirm()
+			}
+		}
+
+		// Volume detail: ctrl+d delete, ctrl+a attach, ctrl+t detach
+		if m.view == viewVolumeDetail {
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openVolumeDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Attach) {
+				return m.openVolumeAttach()
+			}
+			if key.Matches(msg, shared.Keys.Detach) {
+				return m.openVolumeDetach()
+			}
+		}
+
+		// Floating IP list: ctrl+d release, ctrl+n allocate, ctrl+t disassociate
+		if m.view == viewFloatingIPList {
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openFIPReleaseConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Allocate) {
+				return m.doAllocateFIP()
+			}
+			if key.Matches(msg, shared.Keys.Detach) {
+				return m.openFIPDisassociateConfirm()
+			}
+		}
+
+		// Security group view: ctrl+d delete rule (when on a rule)
+		if m.view == viewSecGroupView {
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openSGRuleDeleteConfirm()
+			}
+		}
+
+		// Key pair list: ctrl+d delete
+		if m.view == viewKeypairList {
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openKeyPairDeleteConfirm()
+			}
 		}
 
 		return m.updateActiveView(msg)
@@ -240,11 +363,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shared.CloudConnectedMsg:
 		m.client = &cloud.Client{
-			CloudName: m.cloudName,
-			Compute:   msg.ComputeClient,
-			Image:     msg.ImageClient,
-			Network:   msg.NetworkClient,
+			CloudName:    m.cloudName,
+			Compute:      msg.ComputeClient,
+			Image:        msg.ImageClient,
+			Network:      msg.NetworkClient,
+			BlockStorage: msg.BlockStorageClient,
 		}
+		// Reset tab state for new cloud connection
+		m.tabsInited = make(map[activeTab]bool)
+		m.activeTab = tabServers
 		m.statusBar.CloudName = m.cloudName
 		m.statusBar.Region = msg.Region
 		m.serverList = serverlist.New(msg.ComputeClient, msg.ImageClient, m.refreshInterval)
@@ -305,6 +432,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
 
+	case shared.ResourceActionMsg:
+		m.statusBar.Hint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
+		m.statusBar.Error = ""
+		// Navigate back to list view if we were on a detail view
+		if m.view == viewVolumeDetail {
+			m.view = viewVolumeList
+			m.statusBar.CurrentView = "volumelist"
+			m.statusBar.Hint = m.volumeList.Hints()
+		}
+		return m, nil
+
+	case shared.ResourceActionErrMsg:
+		m.errModal = modal.NewError(
+			fmt.Sprintf("%s %s", msg.Action, msg.Name), msg.Err)
+		m.errModal.SetSize(m.width, m.height)
+		m.activeModal = modalError
+		return m, nil
+
 	case shared.ServerActionErrMsg:
 		m.errModal = modal.NewError(
 			fmt.Sprintf("%s %s", msg.Action, msg.Name), msg.Err)
@@ -332,20 +477,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case shared.TickMsg:
-		// Always route ticks to serverlist so auto-refresh survives view changes
-		var cmd tea.Cmd
-		m.serverList, cmd = m.serverList.Update(msg)
-		return m, cmd
-
 	default:
-		// Route to resize modal if active (for spinner, loaded msgs)
+		// Route to all views first so background ticks keep firing
+		m2, viewCmd := m.updateAllViews(msg)
+		m = m2
+		// Also route to active modals (for spinner, loaded msgs)
 		if m.serverResize.Active {
 			var cmd tea.Cmd
 			m.serverResize, cmd = m.serverResize.Update(msg)
-			return m, cmd
+			return m, tea.Batch(viewCmd, cmd)
 		}
-		return m.updateActiveView(msg)
+		if m.fipPicker.Active {
+			var cmd tea.Cmd
+			m.fipPicker, cmd = m.fipPicker.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		return m, viewCmd
 	}
 }
 
@@ -369,8 +516,102 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewActionLog:
 		m.actionLog, cmd = m.actionLog.Update(msg)
 		m.statusBar.Hint = m.actionLog.Hints()
+	case viewVolumeList:
+		m.volumeList, cmd = m.volumeList.Update(msg)
+		m.statusBar.Hint = m.volumeList.Hints()
+	case viewVolumeDetail:
+		m.volumeDetail, cmd = m.volumeDetail.Update(msg)
+		m.statusBar.Hint = m.volumeDetail.Hints()
+	case viewFloatingIPList:
+		m.floatingIPList, cmd = m.floatingIPList.Update(msg)
+		m.statusBar.Hint = m.floatingIPList.Hints()
+	case viewSecGroupView:
+		m.secGroupView, cmd = m.secGroupView.Update(msg)
+		m.statusBar.Hint = m.secGroupView.Hints()
+	case viewKeypairList:
+		m.keypairList, cmd = m.keypairList.Update(msg)
+		m.statusBar.Hint = m.keypairList.Hints()
 	}
 	return m, cmd
+}
+
+// updateAllViews routes non-key messages to all initialized views so
+// background auto-refresh ticks keep firing even when a view isn't active.
+func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	var cmd tea.Cmd
+
+	// Always route to server list
+	if m.view != viewCloudPicker {
+		m.serverList, cmd = m.serverList.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
+	// Route to all initialized tab list views
+	if m.tabsInited[tabVolumes] {
+		m.volumeList, cmd = m.volumeList.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+	if m.tabsInited[tabFloatingIPs] {
+		m.floatingIPList, cmd = m.floatingIPList.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+	if m.tabsInited[tabSecGroups] {
+		m.secGroupView, cmd = m.secGroupView.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+	if m.tabsInited[tabKeypairs] {
+		m.keypairList, cmd = m.keypairList.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
+	// Route to active sub-views (detail, console, etc.)
+	switch m.view {
+	case viewServerDetail:
+		m.serverDetail, cmd = m.serverDetail.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewVolumeDetail:
+		m.volumeDetail, cmd = m.volumeDetail.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewConsoleLog:
+		m.consoleLog, cmd = m.consoleLog.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewActionLog:
+		m.actionLog, cmd = m.actionLog.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewServerCreate:
+		m.serverCreate, cmd = m.serverCreate.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewCloudPicker:
+		m.cloudPicker, cmd = m.cloudPicker.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
+	switch m.view {
+	case viewServerList:
+		return m, m.serverList.ForceRefresh()
+	case viewServerDetail:
+		return m, m.serverDetail.ForceRefresh()
+	case viewVolumeList:
+		return m, m.volumeList.ForceRefresh()
+	case viewVolumeDetail:
+		return m, m.volumeDetail.ForceRefresh()
+	case viewFloatingIPList:
+		return m, m.floatingIPList.ForceRefresh()
+	case viewSecGroupView:
+		return m, m.secGroupView.ForceRefresh()
+	case viewKeypairList:
+		return m, m.keypairList.ForceRefresh()
+	case viewConsoleLog:
+		return m, m.consoleLog.ForceRefresh()
+	case viewActionLog:
+		return m, m.actionLog.ForceRefresh()
+	}
+	return m, nil
 }
 
 func (m Model) updateModal(msg tea.Msg) (Model, tea.Cmd) {
@@ -417,6 +658,12 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "volumelist":
+		m.view = viewVolumeList
+		m.statusBar.CurrentView = "volumelist"
+		m.statusBar.Hint = m.volumeList.Hints()
+		return m, nil
+
 	case "servercreate":
 		m.serverCreate = servercreate.New(m.client.Compute, m.client.Image, m.client.Network)
 		m.serverCreate.SetSize(m.width, m.height)
@@ -430,6 +677,101 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 
 	}
 	return m, nil
+}
+
+func (m Model) isTopLevelView() bool {
+	switch m.view {
+	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList:
+		return true
+	}
+	return false
+}
+
+func (m Model) switchTab(tab activeTab) (Model, tea.Cmd) {
+	if tab == m.activeTab && m.isTopLevelView() {
+		return m, nil
+	}
+	m.activeTab = tab
+
+	switch tab {
+	case tabServers:
+		m.view = viewServerList
+		m.statusBar.CurrentView = "serverlist"
+		m.statusBar.Hint = m.serverList.Hints()
+		return m, nil
+
+	case tabVolumes:
+		m.view = viewVolumeList
+		m.statusBar.CurrentView = "volumelist"
+		if !m.tabsInited[tabVolumes] {
+			m.volumeList = volumelist.New(m.client.BlockStorage, m.client.Compute, m.refreshInterval)
+			m.volumeList.SetSize(m.width, m.height)
+			m.tabsInited[tabVolumes] = true
+			m.statusBar.Hint = m.volumeList.Hints()
+			return m, m.volumeList.Init()
+		}
+		m.statusBar.Hint = m.volumeList.Hints()
+		return m, nil
+
+	case tabFloatingIPs:
+		m.view = viewFloatingIPList
+		m.statusBar.CurrentView = "floatingiplist"
+		if !m.tabsInited[tabFloatingIPs] {
+			m.floatingIPList = floatingiplist.New(m.client.Network, m.refreshInterval)
+			m.floatingIPList.SetSize(m.width, m.height)
+			m.tabsInited[tabFloatingIPs] = true
+			m.statusBar.Hint = m.floatingIPList.Hints()
+			return m, m.floatingIPList.Init()
+		}
+		m.statusBar.Hint = m.floatingIPList.Hints()
+		return m, nil
+
+	case tabSecGroups:
+		m.view = viewSecGroupView
+		m.statusBar.CurrentView = "secgroupview"
+		if !m.tabsInited[tabSecGroups] {
+			m.secGroupView = secgroupview.New(m.client.Network, m.refreshInterval)
+			m.secGroupView.SetSize(m.width, m.height)
+			m.tabsInited[tabSecGroups] = true
+			m.statusBar.Hint = m.secGroupView.Hints()
+			return m, m.secGroupView.Init()
+		}
+		m.statusBar.Hint = m.secGroupView.Hints()
+		return m, nil
+
+	case tabKeypairs:
+		m.view = viewKeypairList
+		m.statusBar.CurrentView = "keypairlist"
+		if !m.tabsInited[tabKeypairs] {
+			m.keypairList = keypairlist.New(m.client.Compute)
+			m.keypairList.SetSize(m.width, m.height)
+			m.tabsInited[tabKeypairs] = true
+			m.statusBar.Hint = m.keypairList.Hints()
+			return m, m.keypairList.Init()
+		}
+		m.statusBar.Hint = m.keypairList.Hints()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) renderTabBar() string {
+	var tabs []string
+	for i, name := range tabNames {
+		label := fmt.Sprintf(" %d:%s ", i+1, name)
+		if activeTab(i) == m.activeTab {
+			tabs = append(tabs, lipgloss.NewStyle().
+				Background(shared.ColorPrimary).
+				Foreground(shared.ColorBg).
+				Bold(true).
+				Render(label))
+		} else {
+			tabs = append(tabs, lipgloss.NewStyle().
+				Foreground(shared.ColorMuted).
+				Render(label))
+		}
+	}
+	return strings.Join(tabs, lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("│"))
 }
 
 func (m Model) switchToCloudPicker() (Model, tea.Cmd) {
@@ -786,6 +1128,169 @@ func (m Model) doRevertResize() (Model, tea.Cmd) {
 	}
 }
 
+// --- Volume actions ---
+
+func (m Model) openVolumeDetail() (Model, tea.Cmd) {
+	v := m.volumeList.SelectedVolume()
+	if v == nil {
+		return m, nil
+	}
+	m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, v.ID, m.refreshInterval)
+	m.volumeDetail.SetSize(m.width, m.height)
+	m.view = viewVolumeDetail
+	m.statusBar.CurrentView = "volumedetail"
+	m.statusBar.Hint = m.volumeDetail.Hints()
+	return m, m.volumeDetail.Init()
+}
+
+func (m Model) openVolumeDeleteConfirm() (Model, tea.Cmd) {
+	var id, name string
+	switch m.view {
+	case viewVolumeList:
+		if v := m.volumeList.SelectedVolume(); v != nil {
+			id, name = v.ID, v.Name
+			if name == "" {
+				name = id
+			}
+		}
+	case viewVolumeDetail:
+		id = m.volumeDetail.SelectedVolumeID()
+		name = m.volumeDetail.SelectedVolumeName()
+	}
+	if id == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_volume", id, name)
+	m.confirm.Title = "Delete Volume"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete volume %q?", name)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+func (m Model) openVolumeAttach() (Model, tea.Cmd) {
+	// Attach requires a server ID — for now, show an error that this needs CLI
+	// A full implementation would need a server picker modal
+	m.errModal = modal.NewError("Attach Volume", fmt.Errorf("use 'openstack server add volume' CLI to attach volumes"))
+	m.errModal.SetSize(m.width, m.height)
+	m.activeModal = modalError
+	return m, nil
+}
+
+func (m Model) openVolumeDetach() (Model, tea.Cmd) {
+	if m.view != viewVolumeDetail {
+		return m, nil
+	}
+	id := m.volumeDetail.SelectedVolumeID()
+	name := m.volumeDetail.SelectedVolumeName()
+	if id == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("detach_volume", id, name)
+	m.confirm.Title = "Detach Volume"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to detach volume %q?", name)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Floating IP actions ---
+
+func (m Model) openFIPReleaseConfirm() (Model, tea.Cmd) {
+	fip := m.floatingIPList.SelectedFIP()
+	if fip == nil {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("release_fip", fip.ID, fip.FloatingIP)
+	m.confirm.Title = "Release Floating IP"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to release floating IP %s?", fip.FloatingIP)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+func (m Model) doAllocateFIP() (Model, tea.Cmd) {
+	m.statusBar.Hint = "Allocating floating IP..."
+	networkClient := m.client.Network
+	return m, func() tea.Msg {
+		nets, err := network.ListExternalNetworks(context.Background(), networkClient)
+		if err != nil {
+			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
+		}
+		if len(nets) == 0 {
+			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: fmt.Errorf("no external networks available")}
+		}
+		fip, err := network.AllocateFloatingIP(context.Background(), networkClient, nets[0].ID)
+		if err != nil {
+			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
+		}
+		return shared.ResourceActionMsg{Action: "Allocated", Name: fip.FloatingIP}
+	}
+}
+
+func (m Model) doAllocateAndAssociateFIP() (Model, tea.Cmd) {
+	var serverID, serverName string
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			serverID, serverName = s.ID, s.Name
+		}
+	case viewServerDetail:
+		serverID = m.serverDetail.ServerID()
+		serverName = m.serverDetail.ServerName()
+	}
+	if serverID == "" {
+		return m, nil
+	}
+	m.fipPicker = fippicker.New(m.client.Network, serverID, serverName)
+	m.fipPicker.SetSize(m.width, m.height)
+	return m, m.fipPicker.Init()
+}
+
+func (m Model) openFIPDisassociateConfirm() (Model, tea.Cmd) {
+	fip := m.floatingIPList.SelectedFIP()
+	if fip == nil || fip.PortID == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("disassociate_fip", fip.ID, fip.FloatingIP)
+	m.confirm.Title = "Disassociate Floating IP"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to disassociate floating IP %s?", fip.FloatingIP)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Security Group actions ---
+
+func (m Model) openSGRuleDeleteConfirm() (Model, tea.Cmd) {
+	ruleID := m.secGroupView.SelectedRule()
+	if ruleID == "" {
+		return m, nil
+	}
+	groupName := m.secGroupView.SelectedGroupName()
+	m.confirm = modal.NewConfirm("delete_sg_rule", ruleID, groupName)
+	m.confirm.Title = "Delete Security Group Rule"
+	m.confirm.Body = fmt.Sprintf("Delete rule from security group %q?", groupName)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Key Pair actions ---
+
+func (m Model) openKeyPairDeleteConfirm() (Model, tea.Cmd) {
+	kp := m.keypairList.SelectedKeyPair()
+	if kp == nil {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_keypair", kp.Name, kp.Name)
+	m.confirm.Title = "Delete Key Pair"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete key pair %q?", kp.Name)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
 func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 	client := m.client.Compute
 
@@ -868,6 +1373,79 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			return shared.ServerActionMsg{Action: "Unshelve", Name: action.Name}
 		}
+	case "delete_volume":
+		bsClient := m.client.BlockStorage
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := volume.DeleteVolume(context.Background(), bsClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete volume", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted volume", Name: name}
+		}
+	case "detach_volume":
+		computeC := m.client.Compute
+		volID := action.ServerID
+		name := action.Name
+		bsClient := m.client.BlockStorage
+		return m, func() tea.Msg {
+			vol, err := volume.GetVolume(context.Background(), bsClient, volID)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: err}
+			}
+			if vol.AttachedServerID == "" {
+				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: fmt.Errorf("volume is not attached")}
+			}
+			err = volume.DetachVolume(context.Background(), computeC, vol.AttachedServerID, volID)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Detached volume", Name: name}
+		}
+	case "release_fip":
+		netClient := m.client.Network
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := network.ReleaseFloatingIP(context.Background(), netClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Release FIP", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Released", Name: name}
+		}
+	case "disassociate_fip":
+		netClient := m.client.Network
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := network.DisassociateFloatingIP(context.Background(), netClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Disassociate FIP", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Disassociated", Name: name}
+		}
+	case "delete_sg_rule":
+		netClient := m.client.Network
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := network.DeleteSecurityGroupRule(context.Background(), netClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete rule", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted rule from", Name: name}
+		}
+	case "delete_keypair":
+		computeC := m.client.Compute
+		name := action.ServerID // keypair name is stored in ServerID
+		return m, func() tea.Msg {
+			err := compute.DeleteKeyPair(context.Background(), computeC, name)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete keypair", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted keypair", Name: name}
+		}
 	}
 	return m, nil
 }
@@ -922,10 +1500,11 @@ func (m Model) connectToCloud(name string) tea.Cmd {
 			return shared.CloudConnectErrMsg{Err: err}
 		}
 		return shared.CloudConnectedMsg{
-			ComputeClient: client.Compute,
-			ImageClient:   client.Image,
-			NetworkClient: client.Network,
-			Region:        client.Region,
+			ComputeClient:      client.Compute,
+			ImageClient:        client.Image,
+			NetworkClient:      client.Network,
+			BlockStorageClient: client.BlockStorage,
+			Region:             client.Region,
 		}
 	}
 }
@@ -944,6 +1523,16 @@ func (m Model) viewName() string {
 		return "consolelog"
 	case viewActionLog:
 		return "actionlog"
+	case viewVolumeList:
+		return "volumelist"
+	case viewVolumeDetail:
+		return "volumedetail"
+	case viewFloatingIPList:
+		return "floatingiplist"
+	case viewSecGroupView:
+		return "secgroupview"
+	case viewKeypairList:
+		return "keypairlist"
 	}
 	return ""
 }
@@ -973,6 +1562,9 @@ func (m Model) viewContent() string {
 	if m.activeModal == modalError {
 		return m.errModal.View()
 	}
+	if m.fipPicker.Active {
+		return m.fipPicker.View()
+	}
 	if m.serverResize.Active {
 		return m.serverResize.View()
 	}
@@ -991,6 +1583,21 @@ func (m Model) viewContent() string {
 		content = m.consoleLog.View()
 	case viewActionLog:
 		content = m.actionLog.View()
+	case viewVolumeList:
+		content = m.volumeList.View()
+	case viewVolumeDetail:
+		content = m.volumeDetail.View()
+	case viewFloatingIPList:
+		content = m.floatingIPList.View()
+	case viewSecGroupView:
+		content = m.secGroupView.View()
+	case viewKeypairList:
+		content = m.keypairList.View()
+	}
+
+	// Add tab bar for top-level views
+	if m.isTopLevelView() {
+		content = m.renderTabBar() + "\n" + content
 	}
 
 	// Overlay app name + version on top-right (lines 0 and 1)

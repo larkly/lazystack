@@ -99,13 +99,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.scroll < max {
 				m.scroll++
 			}
+		case key.Matches(msg, shared.Keys.PageDown):
+			m.scroll += m.viewHeight()
+			max := m.maxScroll()
+			if m.scroll > max {
+				m.scroll = max
+			}
+		case key.Matches(msg, shared.Keys.PageUp):
+			m.scroll -= m.viewHeight()
+			if m.scroll < 0 {
+				m.scroll = 0
+			}
 		case msg.String() == "g":
 			m.scroll = 0
 		case msg.String() == "G":
 			m.scroll = m.maxScroll()
-		case key.Matches(msg, shared.Keys.Refresh):
-			m.loading = true
-			return m, tea.Batch(m.spinner.Tick, m.fetchConsole())
 		}
 	}
 	return m, nil
@@ -174,6 +182,12 @@ func (m Model) fetchConsole() tea.Cmd {
 		}
 		return consoleLoadedMsg{output: output}
 	}
+}
+
+// ForceRefresh triggers a manual reload of the console output.
+func (m *Model) ForceRefresh() tea.Cmd {
+	m.loading = true
+	return tea.Batch(m.spinner.Tick, m.fetchConsole())
 }
 
 // SetSize updates dimensions.

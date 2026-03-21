@@ -36,3 +36,12 @@ func ListKeyPairs(ctx context.Context, client *gophercloud.ServiceClient) ([]Key
 	}
 	return result, nil
 }
+
+// DeleteKeyPair deletes a keypair by name.
+func DeleteKeyPair(ctx context.Context, client *gophercloud.ServiceClient, name string) error {
+	r := keypairs.Delete(ctx, client, name, keypairs.DeleteOpts{})
+	if r.Err != nil {
+		return fmt.Errorf("deleting keypair %s: %w", name, r.Err)
+	}
+	return nil
+}

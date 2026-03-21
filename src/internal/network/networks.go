@@ -6,6 +6,7 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 )
 
@@ -41,4 +42,50 @@ func ListNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Net
 		return nil, fmt.Errorf("listing networks: %w", err)
 	}
 	return result, nil
+}
+
+// ListExternalNetworks fetches networks where router:external is true.
+func ListExternalNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Network, error) {
+	url := client.ServiceURL("networks") + "?router:external=true"
+	var body struct {
+		Networks []struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"networks"`
+	}
+	resp, err := client.Get(ctx, url, &body, nil)
+	if err != nil {
+		return nil, fmt.Errorf("listing external networks: %w", err)
+	}
+	resp.Body.Close()
+
+	result := make([]Network, len(body.Networks))
+	for i, n := range body.Networks {
+		result[i] = Network{ID: n.ID, Name: n.Name, Status: n.Status}
+	}
+	return result, nil
+}
+
+// FindServerPortID returns the first port ID for the given server (device_id).
+func FindServerPortID(ctx context.Context, client *gophercloud.ServiceClient, serverID string) (string, error) {
+	var portID string
+	err := ports.List(client, ports.ListOpts{DeviceID: serverID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+		extracted, err := ports.ExtractPorts(page)
+		if err != nil {
+			return false, err
+		}
+		if len(extracted) > 0 {
+			portID = extracted[0].ID
+			return false, nil // stop after first
+		}
+		return true, nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("finding port for server %s: %w", serverID, err)
+	}
+	if portID == "" {
+		return "", fmt.Errorf("no ports found for server %s", serverID)
+	}
+	return portID, nil
 }

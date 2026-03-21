@@ -3,6 +3,7 @@ package serverdetail
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -128,13 +129,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, shared.Keys.Down):
 			m.scroll++
+		case key.Matches(msg, shared.Keys.PageDown):
+			m.scroll += m.height - 5
+		case key.Matches(msg, shared.Keys.PageUp):
+			m.scroll -= m.height - 5
+			if m.scroll < 0 {
+				m.scroll = 0
+			}
 		case key.Matches(msg, shared.Keys.Delete):
 			// Handled by root model
 		case key.Matches(msg, shared.Keys.Reboot):
 			// Handled by root model
-		case key.Matches(msg, shared.Keys.Refresh):
-			m.loading = true
-			return m, tea.Batch(m.spinner.Tick, m.fetchServer())
 		}
 	}
 	return m, nil
@@ -192,9 +197,6 @@ func (m Model) View() string {
 		{"Flavor", s.FlavorName},
 		{"Image", s.ImageName},
 		{"Image ID", s.ImageID},
-		{"IPv4", strings.Join(s.IPv4, ", ")},
-		{"IPv6", strings.Join(s.IPv6, ", ")},
-		{"Floating IP", strings.Join(s.FloatingIP, ", ")},
 		{"Key Pair", s.KeyName},
 		{"Locked", locked},
 		{"Tenant ID", s.TenantID},
@@ -204,7 +206,7 @@ func (m Model) View() string {
 		{"Volumes", strings.Join(s.VolAttach, ", ")},
 	}
 
-	lines := make([]string, 0, len(props))
+	lines := make([]string, 0, len(props)+len(s.Networks))
 	for _, p := range props {
 		if p.value == "" {
 			continue
@@ -215,6 +217,23 @@ func (m Model) View() string {
 			value = StatusStyle(p.value).Render(p.value)
 		}
 		lines = append(lines, fmt.Sprintf("  %s %s", label, value))
+	}
+
+	// Networks section
+	if len(s.Networks) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, fmt.Sprintf("  %s", shared.StyleLabel.Render("Networks")))
+		netNames := make([]string, 0, len(s.Networks))
+		for name := range s.Networks {
+			netNames = append(netNames, name)
+		}
+		sort.Strings(netNames)
+		for _, name := range netNames {
+			ips := s.Networks[name]
+			lines = append(lines, fmt.Sprintf("    %s  %s",
+				lipgloss.NewStyle().Foreground(shared.ColorSecondary).Render(name),
+				shared.StyleValue.Render(strings.Join(ips, ", "))))
+		}
 	}
 
 	// Apply scroll
@@ -268,6 +287,12 @@ func (m Model) tickCmd() tea.Cmd {
 	})
 }
 
+// ForceRefresh triggers a manual reload of the server detail.
+func (m *Model) ForceRefresh() tea.Cmd {
+	m.loading = true
+	return tea.Batch(m.spinner.Tick, m.fetchServer())
+}
+
 // SetSize updates the dimensions.
 func (m *Model) SetSize(w, h int) {
 	m.width = w
@@ -306,5 +331,5 @@ func (m Model) Hints() string {
 	if m.server != nil && m.server.Status == "VERIFY_RESIZE" {
 		return "^y confirm resize • ^x revert resize • ↑↓ scroll • ^d delete • esc back • ? help"
 	}
-	return "↑↓ scroll • ^d delete • ^o reboot • ^p hard reboot • R refresh • esc back • ? help"
+	return "↑↓ scroll • ^d delete • ^a assign FIP • ^o reboot • R refresh • esc back • ? help"
 }

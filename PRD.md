@@ -14,7 +14,7 @@
 |-------|--------|-------|
 | Phase 1: MVP | ✓ Complete | Cloud connection, server CRUD, modals, help |
 | Phase 2: Extended Compute | ✓ Complete | All actions, console log, resize, bulk ops, action history |
-| Phase 3: Additional Resources | Not started | Volumes, floating IPs, security groups |
+| Phase 3: Additional Resources | ✓ Complete | Tabbed navigation, volumes, floating IPs, security groups, key pairs |
 | Phase 4: Multi-Cloud | Not started | |
 | Phase 5: Quality of Life | Not started | SSH, clipboard, config file |
 | Phase 6: Operational | Not started | Quotas, admin views |
@@ -41,7 +41,9 @@
 
 - **Modal vs view**: The resize flavor picker was initially a full view, which caused navigation issues (Esc from resize opened from the list panicked because there was no detail view to go back to). Converting it to a modal overlay that sits on top of the current view eliminated the problem entirely. Prefer modals for transient selection UI.
 
-- **Auto-refresh must survive view changes**: The server list's auto-refresh tick was breaking when navigating to other views because the tick message got routed to the wrong view. Fixed by always routing `TickMsg` to the server list regardless of active view.
+- **Auto-refresh must survive view changes**: The server list's auto-refresh tick was breaking when navigating to other views because the tick message got routed to the wrong view. Fixed with `updateAllViews` that routes non-key messages to all initialized tab views. Modal overlays (resize, FIP picker) must not swallow background ticks — route to all views first, then to the active modal.
+
+- **Tick chain fragility**: Each view's auto-refresh is a chain: tick fires → fetch + schedule next tick. If any message in the chain gets swallowed (e.g., by a modal that doesn't handle it), the chain breaks permanently. The fix is to always route messages to background views before routing to modal overlays.
 
 ### Technical Debt
 
@@ -119,17 +121,21 @@ src/
       servers.go                    # Server CRUD + pause/suspend/shelve/resize/reboot
       actions.go                    # Instance action history
       flavors.go                    # Flavor listing
-      keypairs.go                   # Keypair listing
+      keypairs.go                   # Keypair listing + delete
     image/
       images.go                     # Image listing
     network/
-      networks.go                   # Network listing
+      networks.go                   # Network listing, external networks, port lookup
+      floatingips.go                # Floating IP CRUD (allocate, associate, disassociate, release)
+      secgroups.go                  # Security group listing, rule create/delete
+    volume/
+      volumes.go                    # Volume CRUD (list, get, create, delete, attach, detach)
     ui/
       serverlist/
-        serverlist.go               # Server table with auto-refresh, filtering, bulk select
+        serverlist.go               # Server table with auto-refresh, filtering, bulk select, sorting
         columns.go                  # Adaptive columns with flex weights and priority hiding
       serverdetail/
-        serverdetail.go             # Server property view with auto-refresh, pending action state
+        serverdetail.go             # Server property view with auto-refresh, network names
       servercreate/
         servercreate.go             # Create form with inline pickers, count field
       serverresize/
@@ -138,8 +144,20 @@ src/
         consolelog.go               # Scrollable console output viewer
       actionlog/
         actionlog.go                # Instance action history viewer
+      volumelist/
+        volumelist.go               # Volume table with sorting, server name resolution
+      volumedetail/
+        volumedetail.go             # Volume property view with metadata, attachment info
+      floatingiplist/
+        floatingiplist.go           # Floating IP table with sorting
+      secgroupview/
+        secgroupview.go             # Security group viewer with expandable rules, rule deletion
+      keypairlist/
+        keypairlist.go              # Key pair table with sorting, delete
+      fippicker/
+        fippicker.go                # Floating IP picker modal for server association
       modal/
-        confirm.go                  # Confirmation dialog (single + bulk), focusable buttons
+        confirm.go                  # Confirmation dialog (single + bulk), custom body/title
         error.go                    # Error modal
       cloudpicker/
         cloudpicker.go              # Cloud selection overlay
@@ -157,33 +175,36 @@ src/
                     └──────┬──────┘
                            │ select cloud (auto if single)
                            ▼
-                    ┌─────────────┐
-              ┌───→ │ Server List  │ ←───────────────────────┐
-              │     └──┬───┬───┬──┘                           │
-              │  Enter │  ^n  │ ^d/^o/p/^z/^e                │
-              │        │   │  │ (via confirm modal)           │
-              │        ▼   ▼  ▼                               │
-              │  ┌────────┐ ┌────────┐                        │
-              │  │ Detail  │ │ Create │                        │
-              │  └┬──┬──┬─┘ └───┬────┘                        │
-              │   │  │  │   Esc/│Submit                       │
-              │   │  l  a      └──────────────────────────────┘
-              │   │  │  │
-              │   │  ▼  ▼
-              │   │ ┌────────┐ ┌────────────┐
-              │   │ │Console │ │Action Log  │
-              │   │ └───┬────┘ └─────┬──────┘
-              │   │  Esc│         Esc│
-              │   │  ───┘         ───┘ (back to previous view)
-              │   │
-              │  Esc
-              └───┘
+  ┌─────────────────── Tab Bar (1-5 / ←→) ──────────────────┐
+  │                                                          │
+  │ Tab 1          Tab 2        Tab 3       Tab 4     Tab 5  │
+  │ ┌──────────┐  ┌──────────┐ ┌────────┐ ┌───────┐ ┌─────┐ │
+  │ │Server    │  │Volume    │ │Float   │ │SecGrp │ │Keys │ │
+  │ │List      │  │List      │ │IP List │ │View   │ │List │ │
+  │ └──┬───┬───┘  └──┬───────┘ └────────┘ └───────┘ └─────┘ │
+  │    │   │ ^n    Enter                                     │
+  │    │   │       │                                         │
+  │  Enter ▼       ▼                                         │
+  │    │ ┌──────┐ ┌───────────┐                              │
+  │    │ │Create│ │Vol Detail │                              │
+  │    ▼ └──────┘ └───────────┘                              │
+  │ ┌──────────┐                                             │
+  │ │Server    │                                             │
+  │ │Detail    │                                             │
+  │ └──┬──┬────┘                                             │
+  │    l  a                                                  │
+  │    │  │                                                  │
+  │    ▼  ▼                                                  │
+  │ ┌────────┐ ┌──────────┐                                  │
+  │ │Console │ │Action Log│                                  │
+  │ └────────┘ └──────────┘                                  │
+  └──────────────────────────────────────────────────────────┘
 
   Overlays (always available):
-  ┌─────────────┐  ┌──────────┐  ┌──────┐  ┌────────┐
-  │Confirm Modal│  │Error     │  │Help  │  │Resize  │
-  │(y/n/enter)  │  │(enter)   │  │(?)   │  │(^f)    │
-  └─────────────┘  └──────────┘  └──────┘  └────────┘
+  ┌─────────────┐  ┌──────────┐  ┌──────┐  ┌────────┐  ┌──────────┐
+  │Confirm Modal│  │Error     │  │Help  │  │Resize  │  │FIP Picker│
+  │(y/n/enter)  │  │(enter)   │  │(?)   │  │(^f)    │  │(^a)      │
+  └─────────────┘  └──────────┘  └──────┘  └────────┘  └──────────┘
 ```
 
 ## Features
@@ -211,7 +232,8 @@ src/
 - LAZYSTACK branding badge in top-right corner
 
 #### Server Detail
-- Two-column property list: name, ID, status, power state, flavor, image (name + ID), IPv4, IPv6, floating IP, keypair, locked, tenant, AZ, created, security groups, volumes
+- Two-column property list: name, ID, status, power state, flavor, image (name + ID), keypair, locked, tenant, AZ, created, security groups, volumes
+- Networks section: IPs grouped by network name with type and version info
 - Auto-refresh at same interval as server list
 - Scrollable viewport
 - Resize pending banner with confirm/revert actions
@@ -305,6 +327,60 @@ src/
 - Immediate re-fetch after actions (delete navigates to list)
 - Pending action state prevents stale responses from overwriting optimistic updates
 
+### Phase 3: Additional Resources (Complete)
+
+#### Tabbed Navigation
+- Five tabs: Servers (1), Volumes (2), Floating IPs (3), Security Groups (4), Key Pairs (5)
+- Switch with number keys `1-5` or `←/→` from any top-level list view
+- Tab bar with active tab highlighted, inactive tabs muted
+- Each tab lazily initializes on first visit, auto-refreshes independently
+- Background tick routing ensures all initialized tabs keep refreshing even when not active
+
+#### Volume Management
+- **Volume List**: Adaptive columns (Name, Status, Size, Type, Attached To, Device, Bootable), auto-refresh, sorting
+- **Volume Detail**: Enter on a volume shows full properties — Name, ID, Status, Size, Type, AZ, Bootable, Encrypted, Multiattach, Description, Created, Updated, Snapshot ID, Source Volume ID, Attached Server (resolved name), Device, Metadata (key=value)
+- **Delete** (`Ctrl+D`): Confirmation modal, works from list or detail
+- **Detach** (`Ctrl+T`): From detail view, finds attached server and detaches
+- **Attach** (`Ctrl+A`): Deferred (complex server picker — use CLI for now)
+- Status colors: available=green, in-use=cyan, creating/extending=yellow, error=red, deleting=muted
+
+#### Floating IP Management
+- **List**: Columns (Floating IP, Status, Fixed IP, Port ID), auto-refresh, sorting
+- **Allocate** (`Ctrl+N`): Allocates from first external network, shows progress in status bar
+- **Associate** (`Ctrl+A` from server list/detail): Opens FIP picker modal showing unassociated IPs + "Allocate new" option. If no unassociated IPs exist, auto-allocates and assigns
+- **Disassociate** (`Ctrl+T`): Confirmation modal, only enabled when FIP has a port
+- **Release** (`Ctrl+D`): Confirmation modal
+
+#### Security Group Management
+- **Group List**: Expandable groups showing name, description, rule count
+- **Rule View**: Enter expands/collapses group rules. Rules show direction, protocol, port range, remote, ethertype
+- **Rule Navigation**: Down arrow enters rule list within expanded group, Up arrow exits back to group level
+- **Delete Rule** (`Ctrl+D`): When cursor is on a rule, confirmation modal then deletes
+- Selected rule highlighted with `▸` prefix and background color
+
+#### Key Pair Management
+- **List**: Columns (Name, Type), sorting
+- **Delete** (`Ctrl+D`): Confirmation modal
+
+#### Column Sorting
+- `s` cycles sort to next visible column (ascending), `S` toggles sort direction
+- Active sort column shows ▲/▼ indicator
+- Column header briefly highlights on sort change (1.5s)
+- Sort persists through data refreshes
+- Available on all list views (servers, volumes, floating IPs, key pairs)
+
+#### Server Detail Enhancements
+- **Networks section**: Shows IPs grouped by network name instead of flat lists
+- **Assign Floating IP** (`Ctrl+A`): Opens FIP picker modal
+
+#### Global Keybindings
+- `R` force refresh — handled globally, dispatches to active view
+- `PgUp/PgDn` — page navigation everywhere arrow keys work (lists, detail views, help modal)
+
+#### Confirmation Modals
+- Custom title and body text per resource type (e.g., "Delete Volume", "Release Floating IP")
+- Reused across all resource types via generic action routing
+
 ### CLI Flags
 
 | Flag | Type | Default | Description |
@@ -320,6 +396,10 @@ src/
 | `q` / `Ctrl+C` | Quit |
 | `?` | Toggle help (scrollable) |
 | `C` | Switch cloud |
+| `1-5` / `←/→` | Switch tab |
+| `R` | Force refresh |
+| `s` / `S` | Sort column / reverse sort |
+| `PgUp` / `PgDn` | Page up / page down |
 | `Ctrl+R` | Restart app (re-exec binary) |
 
 #### Server List
@@ -335,9 +415,9 @@ src/
 | `Ctrl+Z` | Suspend/resume (or selected) |
 | `Ctrl+E` | Shelve/unshelve (or selected) |
 | `Ctrl+F` | Resize (modal) |
+| `Ctrl+A` | Assign floating IP (FIP picker modal) |
 | `l` | Console log |
 | `a` | Action history |
-| `R` | Force refresh |
 | `/` | Filter |
 | `Esc` | Clear filter / clear selection |
 
@@ -352,11 +432,11 @@ src/
 | `Ctrl+Z` | Suspend/resume |
 | `Ctrl+E` | Shelve/unshelve |
 | `Ctrl+F` | Resize (modal) |
+| `Ctrl+A` | Assign floating IP (FIP picker modal) |
 | `Ctrl+Y` | Confirm resize (when VERIFY_RESIZE) |
 | `Ctrl+X` | Revert resize (when VERIFY_RESIZE) |
 | `l` | Console log |
 | `a` | Action history |
-| `R` | Refresh |
 | `Esc` | Back to list |
 
 #### Create Form
@@ -368,12 +448,48 @@ src/
 | `Ctrl+S` | Submit (hotkey) |
 | `Esc` | Cancel |
 
+#### Volume List
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Navigate |
+| `Enter` | View detail |
+| `Ctrl+D` | Delete volume |
+
+#### Volume Detail
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Scroll |
+| `Ctrl+D` | Delete volume |
+| `Ctrl+T` | Detach from server |
+| `Esc` | Back to list |
+
+#### Floating IP List
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Navigate |
+| `Ctrl+N` | Allocate new floating IP |
+| `Ctrl+T` | Disassociate from port |
+| `Ctrl+D` | Release floating IP |
+
+#### Security Groups
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Navigate groups / rules |
+| `Enter` | Expand / collapse group |
+| `Ctrl+D` | Delete selected rule |
+| `Esc` | Back to group level (from rules) |
+
+#### Key Pairs
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Navigate |
+| `Ctrl+D` | Delete key pair |
+
 #### Console Log / Action History
 | Key | Action |
 |-----|--------|
 | `↑/k` `↓/j` | Scroll |
 | `g` / `G` | Top / Bottom (console only) |
-| `R` | Refresh |
 | `Esc` | Back to previous view |
 
 #### Modals
@@ -400,11 +516,11 @@ src/
 
 ## Future Roadmap
 
-### Phase 3: Additional Resources
-- Volume management (list, create, attach, detach, delete)
-- Floating IP management (allocate, associate, release)
-- Security group rule viewer/editor
-- Keypair management (create, import, delete)
+### Backlog (deferred from Phase 3)
+- **Create Volume form**: Name, size, type, AZ, description, source snapshot/volume — similar to server create
+- **Create/Import Key Pair**: Generate or paste public key — requires text area input
+- **Create Security Group Rule**: Direction, protocol, port range, remote — complex form, better left to CLI for now
+- **Volume Attach from detail**: Needs a server picker modal (similar to FIP picker)
 - Network/subnet/port browsing
 
 ### Phase 4: Multi-Cloud

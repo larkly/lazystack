@@ -12,10 +12,11 @@ type CloudSelectedMsg struct {
 
 // CloudConnectedMsg is sent after successful authentication.
 type CloudConnectedMsg struct {
-	ComputeClient *gophercloud.ServiceClient
-	ImageClient   *gophercloud.ServiceClient
-	NetworkClient *gophercloud.ServiceClient
-	Region        string
+	ComputeClient      *gophercloud.ServiceClient
+	ImageClient        *gophercloud.ServiceClient
+	NetworkClient      *gophercloud.ServiceClient
+	BlockStorageClient *gophercloud.ServiceClient
+	Region             string
 }
 
 // CloudConnectErrMsg is sent when authentication fails.
@@ -55,3 +56,19 @@ type ViewChangeMsg struct {
 
 // RestartMsg signals the app should re-exec itself.
 type RestartMsg struct{}
+
+// ResourceActionMsg is sent after a non-server resource action completes.
+type ResourceActionMsg struct {
+	Action string
+	Name   string
+}
+
+// ResourceActionErrMsg is sent when a non-server resource action fails.
+type ResourceActionErrMsg struct {
+	Action string
+	Name   string
+	Err    error
+}
+
+// RefreshResourceMsg triggers a resource list refresh for the current tab.
+type RefreshResourceMsg struct{}

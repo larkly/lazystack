@@ -30,6 +30,8 @@ type ConfirmModel struct {
 	ServerID string
 	Name     string
 	Servers  []ServerRef // for bulk actions
+	Body     string      // custom body text (overrides default)
+	Title    string      // custom title (overrides default)
 	Width    int
 	Height   int
 	focused  int // 0 = confirm, 1 = cancel
@@ -112,10 +114,17 @@ func (m ConfirmModel) Update(msg tea.Msg) (ConfirmModel, tea.Cmd) {
 
 // View renders the confirmation dialog.
 func (m ConfirmModel) View() string {
-	title := shared.StyleModalTitle.Render(fmt.Sprintf("Confirm %s", m.Action))
+	titleText := m.Title
+	if titleText == "" {
+		titleText = fmt.Sprintf("Confirm %s", m.Action)
+	}
+	title := shared.StyleModalTitle.Render(titleText)
 
-	body := fmt.Sprintf("Are you sure you want to %s server %q?",
-		m.Action, m.Name)
+	body := m.Body
+	if body == "" {
+		body = fmt.Sprintf("Are you sure you want to %s server %q?",
+			m.Action, m.Name)
+	}
 
 	// Buttons
 	confirmStyle := lipgloss.NewStyle().Padding(0, 2).Background(shared.ColorMuted).Foreground(shared.ColorFg)

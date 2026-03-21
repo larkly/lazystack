@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +27,8 @@ type serversErrMsg struct {
 	err error
 }
 
+type sortClearMsg struct{}
+
 type imageNamesMsg map[string]string // image ID → name
 
 // Model is the server list view.
@@ -47,6 +50,10 @@ type Model struct {
 	refreshInterval time.Duration
 	imageNames      map[string]string // cache of image ID → name
 	selected        map[string]bool   // selected server IDs for bulk actions
+	sortCol         int
+	sortAsc         bool
+	sortHighlight   bool
+	sortClearAt     time.Time
 }
 
 // New creates a new server list model.
@@ -70,6 +77,7 @@ func New(client, imageClient *gophercloud.ServiceClient, refreshInterval time.Du
 		selected:        make(map[string]bool),
 		filter:          fi,
 		refreshInterval: refreshInterval,
+		sortAsc:         true,
 	}
 }
 
@@ -153,6 +161,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.columns = ComputeWidths(m.columns, m.width)
 		return m, nil
 
+	case sortClearMsg:
+		m.sortHighlight = false
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.filtering {
 			return m.updateFilter(msg)
@@ -165,6 +177,28 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
+	case key.Matches(msg, shared.Keys.Sort):
+		visibleCount := m.visibleColCount()
+		if visibleCount > 0 {
+			m.sortCol = (m.sortCol + 1) % visibleCount
+			m.sortAsc = true
+			m.sortHighlight = true
+			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+			m.sortServers()
+			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+				return sortClearMsg{}
+			})
+		}
+	case key.Matches(msg, shared.Keys.ReverseSort):
+		if m.visibleColCount() > 0 {
+			m.sortAsc = !m.sortAsc
+			m.sortHighlight = true
+			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+			m.sortServers()
+			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+				return sortClearMsg{}
+			})
+		}
 	case key.Matches(msg, shared.Keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
@@ -175,6 +209,21 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.cursor++
 			m.ensureVisible()
 		}
+	case key.Matches(msg, shared.Keys.PageDown):
+		m.cursor += m.tableHeight()
+		if m.cursor >= len(m.filtered) {
+			m.cursor = len(m.filtered) - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		m.ensureVisible()
+	case key.Matches(msg, shared.Keys.PageUp):
+		m.cursor -= m.tableHeight()
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		m.ensureVisible()
 	case key.Matches(msg, shared.Keys.Filter):
 		m.filtering = true
 		m.filter.Focus()
@@ -193,9 +242,6 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Handled by root model (modal confirmation)
 	case key.Matches(msg, shared.Keys.Reboot):
 		// Handled by root model (modal confirmation)
-	case key.Matches(msg, shared.Keys.Refresh):
-		m.loading = true
-		return m, tea.Batch(m.spinner.Tick, m.fetchServers())
 	case key.Matches(msg, shared.Keys.Select):
 		if s := m.SelectedServer(); s != nil {
 			if m.selected[s.ID] {
@@ -255,6 +301,95 @@ func (m *Model) applyFilter() {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
 	m.scrollOff = 0
+	m.sortServers()
+}
+
+func (m Model) visibleColCount() int {
+	n := 0
+	for _, col := range m.columns {
+		if !col.Hidden() {
+			n++
+		}
+	}
+	return n
+}
+
+func (m Model) visibleColKey(idx int) string {
+	n := 0
+	for _, col := range m.columns {
+		if col.Hidden() {
+			continue
+		}
+		if n == idx {
+			return col.Key
+		}
+		n++
+	}
+	return ""
+}
+
+func (m *Model) sortServers() {
+	if len(m.filtered) == 0 {
+		return
+	}
+	colKey := m.visibleColKey(m.sortCol)
+	if colKey == "" {
+		return
+	}
+	asc := m.sortAsc
+	sort.SliceStable(m.filtered, func(i, j int) bool {
+		a, b := m.filtered[i], m.filtered[j]
+		var less bool
+		switch colKey {
+		case "name":
+			less = strings.ToLower(a.Name) < strings.ToLower(b.Name)
+		case "status":
+			less = a.Status < b.Status
+		case "ipv4":
+			ai, bi := "", ""
+			if len(a.IPv4) > 0 {
+				ai = a.IPv4[0]
+			}
+			if len(b.IPv4) > 0 {
+				bi = b.IPv4[0]
+			}
+			less = ai < bi
+		case "ipv6":
+			ai, bi := "", ""
+			if len(a.IPv6) > 0 {
+				ai = a.IPv6[0]
+			}
+			if len(b.IPv6) > 0 {
+				bi = b.IPv6[0]
+			}
+			less = ai < bi
+		case "floating":
+			ai, bi := "", ""
+			if len(a.FloatingIP) > 0 {
+				ai = a.FloatingIP[0]
+			}
+			if len(b.FloatingIP) > 0 {
+				bi = b.FloatingIP[0]
+			}
+			less = ai < bi
+		case "flavor":
+			less = strings.ToLower(a.FlavorName) < strings.ToLower(b.FlavorName)
+		case "image":
+			less = strings.ToLower(a.ImageName) < strings.ToLower(b.ImageName)
+		case "age":
+			less = a.Created.Before(b.Created)
+		case "key":
+			less = strings.ToLower(a.KeyName) < strings.ToLower(b.KeyName)
+		case "id":
+			less = a.ID < b.ID
+		default:
+			less = false
+		}
+		if !asc {
+			return !less
+		}
+		return less
+	})
 }
 
 func (m *Model) ensureVisible() {
@@ -308,8 +443,27 @@ func (m Model) View() string {
 	}
 
 	// Header
+	visIdx := 0
 	header := m.renderRow(func(col Column) string {
-		return shared.StyleHeader.Width(col.Width()).Render(col.Title)
+		title := col.Title
+		idx := visIdx
+		visIdx++
+		indicator := ""
+		if idx == m.sortCol {
+			if m.sortAsc {
+				indicator = " ▲"
+			} else {
+				indicator = " ▼"
+			}
+		}
+		if idx == m.sortCol && m.sortHighlight {
+			return lipgloss.NewStyle().
+				Width(col.Width()).
+				Foreground(shared.ColorHighlight).
+				Bold(true).
+				Render(title + indicator)
+		}
+		return shared.StyleHeader.Width(col.Width()).Render(title + indicator)
 	})
 	b.WriteString(header + "\n")
 	sep := lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(strings.Repeat("─", m.width))
@@ -564,6 +718,12 @@ func (m *Model) ClearSelection() {
 // SelectionCount returns the number of selected servers.
 func (m Model) SelectionCount() int {
 	return len(m.selected)
+}
+
+// ForceRefresh triggers a manual reload of the server list.
+func (m *Model) ForceRefresh() tea.Cmd {
+	m.loading = true
+	return tea.Batch(m.spinner.Tick, m.fetchServers())
 }
 
 // SetClient updates the compute client.

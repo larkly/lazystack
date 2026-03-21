@@ -31,6 +31,7 @@ type Server struct {
 	AZ        string
 	VolAttach []string
 	SecGroups []string
+	Networks  map[string][]string // network name → IPs
 }
 
 // ListServers fetches all servers from Nova.
@@ -223,6 +224,7 @@ func mapServer(s servers.Server) Server {
 
 	// Extract IPs by type
 	srv.IPv4, srv.IPv6, srv.FloatingIP = classifyIPs(s.Addresses)
+	srv.Networks = ExtractAllIPs(s.Addresses)
 
 	// Locked
 	if s.Locked != nil {

@@ -29,9 +29,21 @@ type KeyMap struct {
 	Actions       key.Binding
 	Console       key.Binding
 	Select     key.Binding
+	Tab1       key.Binding
+	Tab2       key.Binding
+	Tab3       key.Binding
+	Tab4       key.Binding
+	Tab5       key.Binding
 	Confirm    key.Binding
 	Deny       key.Binding
 	Restart    key.Binding
+	Attach     key.Binding
+	Detach     key.Binding
+	Allocate   key.Binding
+	PageUp      key.Binding
+	PageDown    key.Binding
+	Sort        key.Binding
+	ReverseSort key.Binding
 }
 
 var Keys = KeyMap{
@@ -139,6 +151,26 @@ var Keys = KeyMap{
 		key.WithKeys("space"),
 		key.WithHelp("space", "select"),
 	),
+	Tab1: key.NewBinding(
+		key.WithKeys("1"),
+		key.WithHelp("1", "servers"),
+	),
+	Tab2: key.NewBinding(
+		key.WithKeys("2"),
+		key.WithHelp("2", "volumes"),
+	),
+	Tab3: key.NewBinding(
+		key.WithKeys("3"),
+		key.WithHelp("3", "floating IPs"),
+	),
+	Tab4: key.NewBinding(
+		key.WithKeys("4"),
+		key.WithHelp("4", "security groups"),
+	),
+	Tab5: key.NewBinding(
+		key.WithKeys("5"),
+		key.WithHelp("5", "key pairs"),
+	),
 	Confirm: key.NewBinding(
 		key.WithKeys("y"),
 		key.WithHelp("y", "confirm"),
@@ -150,5 +182,33 @@ var Keys = KeyMap{
 	Restart: key.NewBinding(
 		key.WithKeys("ctrl+r"),
 		key.WithHelp("ctrl+r", "restart"),
+	),
+	Attach: key.NewBinding(
+		key.WithKeys("ctrl+a"),
+		key.WithHelp("ctrl+a", "attach"),
+	),
+	Detach: key.NewBinding(
+		key.WithKeys("ctrl+t"),
+		key.WithHelp("ctrl+t", "detach"),
+	),
+	Allocate: key.NewBinding(
+		key.WithKeys("ctrl+n"),
+		key.WithHelp("ctrl+n", "allocate"),
+	),
+	PageUp: key.NewBinding(
+		key.WithKeys("pgup"),
+		key.WithHelp("pgup", "page up"),
+	),
+	PageDown: key.NewBinding(
+		key.WithKeys("pgdown"),
+		key.WithHelp("pgdown", "page down"),
+	),
+	Sort: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "sort"),
+	),
+	ReverseSort: key.NewBinding(
+		key.WithKeys("S"),
+		key.WithHelp("S", "reverse sort"),
 	),
 }

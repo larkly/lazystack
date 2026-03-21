@@ -100,9 +100,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.scroll < max {
 				m.scroll++
 			}
-		case key.Matches(msg, shared.Keys.Refresh):
-			m.loading = true
-			return m, tea.Batch(m.spinner.Tick, m.fetchActions())
+		case key.Matches(msg, shared.Keys.PageDown):
+			m.scroll += m.viewHeight()
+			max := len(m.actions) - m.viewHeight()
+			if max < 0 {
+				max = 0
+			}
+			if m.scroll > max {
+				m.scroll = max
+			}
+		case key.Matches(msg, shared.Keys.PageUp):
+			m.scroll -= m.viewHeight()
+			if m.scroll < 0 {
+				m.scroll = 0
+			}
 		}
 	}
 	return m, nil
@@ -191,6 +202,12 @@ func (m Model) fetchActions() tea.Cmd {
 		}
 		return actionsLoadedMsg{actions: actions}
 	}
+}
+
+// ForceRefresh triggers a manual reload of the action history.
+func (m *Model) ForceRefresh() tea.Cmd {
+	m.loading = true
+	return tea.Batch(m.spinner.Tick, m.fetchActions())
 }
 
 // SetSize updates dimensions.
