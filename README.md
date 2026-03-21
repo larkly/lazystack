@@ -44,6 +44,10 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 
 ## Installation
 
+### Pre-built binaries
+
+Grab the latest release for your platform from the [releases page](https://github.com/larkly/lazystack/releases/latest).
+
 ### From source
 
 ```bash
@@ -80,6 +84,8 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 |------|---------|-------------|
 | `--pick-cloud` | `false` | Always show cloud picker, even with one cloud |
 | `--refresh N` | `5` | Auto-refresh interval in seconds |
+| `--check-update` | `false` | Check if a newer version is available |
+| `--update` | `false` | Self-update to the latest release |
 | `--version` | | Print version and exit |
 
 ## Keybindings
