@@ -7,6 +7,7 @@ import (
 	"github.com/bosse/lazystack/internal/shared"
 	"github.com/bosse/lazystack/internal/ui/floatingiplist"
 	"github.com/bosse/lazystack/internal/ui/keypairlist"
+	"github.com/bosse/lazystack/internal/ui/lblist"
 	"github.com/bosse/lazystack/internal/ui/secgroupview"
 	"github.com/bosse/lazystack/internal/ui/volumelist"
 	"charm.land/bubbletea/v2"
@@ -32,7 +33,7 @@ func DefaultTabs() []TabDef {
 
 func (m Model) isTopLevelView() bool {
 	switch m.view {
-	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList:
+	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBList:
 		return true
 	}
 	return false
@@ -92,6 +93,19 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.secGroupView.Init()
 		}
 		m.statusBar.Hint = m.secGroupView.Hints()
+		return m, nil
+
+	case "loadbalancers":
+		m.view = viewLBList
+		m.statusBar.CurrentView = "lblist"
+		if !m.tabInited[idx] {
+			m.lbList = lblist.New(m.client.LoadBalancer, m.refreshInterval)
+			m.lbList.SetSize(m.width, m.height)
+			m.tabInited[idx] = true
+			m.statusBar.Hint = m.lbList.Hints()
+			return m, m.lbList.Init()
+		}
+		m.statusBar.Hint = m.lbList.Hints()
 		return m, nil
 
 	case "keypairs":

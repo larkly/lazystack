@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bosse/lazystack/internal/compute"
+	"github.com/bosse/lazystack/internal/loadbalancer"
 	"github.com/bosse/lazystack/internal/network"
 	"github.com/bosse/lazystack/internal/shared"
 	"github.com/bosse/lazystack/internal/ui/actionlog"
@@ -526,6 +527,17 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 				return shared.ResourceActionErrMsg{Action: "Delete rule", Name: name, Err: err}
 			}
 			return shared.ResourceActionMsg{Action: "Deleted rule from", Name: name}
+		}
+	case "delete_lb":
+		lbClient := m.client.LoadBalancer
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := loadbalancer.DeleteLoadBalancer(context.Background(), lbClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete LB", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted LB", Name: name}
 		}
 	case "delete_keypair":
 		computeC := m.client.Compute

@@ -6,6 +6,7 @@ import (
 
 	"github.com/bosse/lazystack/internal/network"
 	"github.com/bosse/lazystack/internal/shared"
+	"github.com/bosse/lazystack/internal/ui/lbdetail"
 	"github.com/bosse/lazystack/internal/ui/modal"
 	"github.com/bosse/lazystack/internal/ui/volumedetail"
 	"charm.land/bubbletea/v2"
@@ -133,6 +134,46 @@ func (m Model) openSGRuleDeleteConfirm() (Model, tea.Cmd) {
 	m.confirm = modal.NewConfirm("delete_sg_rule", ruleID, groupName)
 	m.confirm.Title = "Delete Security Group Rule"
 	m.confirm.Body = fmt.Sprintf("Delete rule from security group %q?", groupName)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Load Balancer actions ---
+
+func (m Model) openLBDetail() (Model, tea.Cmd) {
+	lb := m.lbList.SelectedLB()
+	if lb == nil {
+		return m, nil
+	}
+	m.lbDetail = lbdetail.New(m.client.LoadBalancer, lb.ID, m.refreshInterval)
+	m.lbDetail.SetSize(m.width, m.height)
+	m.view = viewLBDetail
+	m.statusBar.CurrentView = "lbdetail"
+	m.statusBar.Hint = m.lbDetail.Hints()
+	return m, m.lbDetail.Init()
+}
+
+func (m Model) openLBDeleteConfirm() (Model, tea.Cmd) {
+	var id, name string
+	switch m.view {
+	case viewLBList:
+		if lb := m.lbList.SelectedLB(); lb != nil {
+			id, name = lb.ID, lb.Name
+			if name == "" {
+				name = id
+			}
+		}
+	case viewLBDetail:
+		id = m.lbDetail.LBID()
+		name = m.lbDetail.LBName()
+	}
+	if id == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_lb", id, name)
+	m.confirm.Title = "Delete Load Balancer"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete load balancer %q?\nThis will cascade-delete all listeners, pools and members.", name)
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil

@@ -33,6 +33,10 @@ func (m Model) viewName() string {
 		return "secgroupview"
 	case viewKeypairList:
 		return "keypairlist"
+	case viewLBList:
+		return "lblist"
+	case viewLBDetail:
+		return "lbdetail"
 	}
 	return ""
 }
@@ -93,6 +97,10 @@ func (m Model) viewContent() string {
 		content = m.secGroupView.View()
 	case viewKeypairList:
 		content = m.keypairList.View()
+	case viewLBList:
+		content = m.lbList.View()
+	case viewLBDetail:
+		content = m.lbDetail.View()
 	}
 
 	// Add tab bar for top-level views

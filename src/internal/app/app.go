@@ -15,6 +15,8 @@ import (
 	"github.com/bosse/lazystack/internal/ui/floatingiplist"
 	"github.com/bosse/lazystack/internal/ui/help"
 	"github.com/bosse/lazystack/internal/ui/keypairlist"
+	"github.com/bosse/lazystack/internal/ui/lbdetail"
+	"github.com/bosse/lazystack/internal/ui/lblist"
 	"github.com/bosse/lazystack/internal/ui/modal"
 	"github.com/bosse/lazystack/internal/ui/secgroupview"
 	"github.com/bosse/lazystack/internal/ui/servercreate"
@@ -42,6 +44,8 @@ const (
 	viewFloatingIPList
 	viewSecGroupView
 	viewKeypairList
+	viewLBList
+	viewLBDetail
 )
 
 type modalType int
@@ -79,6 +83,8 @@ type Model struct {
 	floatingIPList floatingiplist.Model
 	secGroupView  secgroupview.Model
 	keypairList   keypairlist.Model
+	lbList        lblist.Model
+	lbDetail      lbdetail.Model
 	statusBar     statusbar.Model
 	tabs      []TabDef
 	activeTab int
@@ -331,6 +337,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Load balancer list: Enter to open detail, ctrl+d to delete
+		if m.view == viewLBList {
+			if key.Matches(msg, shared.Keys.Enter) {
+				return m.openLBDetail()
+			}
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openLBDeleteConfirm()
+			}
+		}
+
+		// Load balancer detail: ctrl+d delete
+		if m.view == viewLBDetail {
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openLBDeleteConfirm()
+			}
+		}
+
 		// Key pair list: ctrl+d delete
 		if m.view == viewKeypairList {
 			if key.Matches(msg, shared.Keys.Delete) {
@@ -435,6 +458,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = viewVolumeList
 			m.statusBar.CurrentView = "volumelist"
 			m.statusBar.Hint = m.volumeList.Hints()
+		}
+		if m.view == viewLBDetail {
+			m.view = viewLBList
+			m.statusBar.CurrentView = "lblist"
+			m.statusBar.Hint = m.lbList.Hints()
 		}
 		return m, nil
 

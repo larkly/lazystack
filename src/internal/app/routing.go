@@ -42,6 +42,12 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewKeypairList:
 		m.keypairList, cmd = m.keypairList.Update(msg)
 		m.statusBar.Hint = m.keypairList.Hints()
+	case viewLBList:
+		m.lbList, cmd = m.lbList.Update(msg)
+		m.statusBar.Hint = m.lbList.Hints()
+	case viewLBDetail:
+		m.lbDetail, cmd = m.lbDetail.Update(msg)
+		m.statusBar.Hint = m.lbDetail.Hints()
 	}
 	return m, cmd
 }
@@ -76,6 +82,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 		case "keypairs":
 			m.keypairList, cmd = m.keypairList.Update(msg)
 			cmds = append(cmds, cmd)
+		case "loadbalancers":
+			m.lbList, cmd = m.lbList.Update(msg)
+			cmds = append(cmds, cmd)
 		}
 	}
 
@@ -86,6 +95,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case viewVolumeDetail:
 		m.volumeDetail, cmd = m.volumeDetail.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewLBDetail:
+		m.lbDetail, cmd = m.lbDetail.Update(msg)
 		cmds = append(cmds, cmd)
 	case viewConsoleLog:
 		m.consoleLog, cmd = m.consoleLog.Update(msg)
@@ -154,6 +166,12 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		m.statusBar.Hint = m.volumeList.Hints()
 		return m, nil
 
+	case "lblist":
+		m.view = viewLBList
+		m.statusBar.CurrentView = "lblist"
+		m.statusBar.Hint = m.lbList.Hints()
+		return m, nil
+
 	case "servercreate":
 		m.serverCreate = servercreate.New(m.client.Compute, m.client.Image, m.client.Network)
 		m.serverCreate.SetSize(m.width, m.height)
@@ -185,6 +203,10 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.secGroupView.ForceRefresh()
 	case viewKeypairList:
 		return m, m.keypairList.ForceRefresh()
+	case viewLBList:
+		return m, m.lbList.ForceRefresh()
+	case viewLBDetail:
+		return m, m.lbDetail.ForceRefresh()
 	case viewConsoleLog:
 		return m, m.consoleLog.ForceRefresh()
 	case viewActionLog:
