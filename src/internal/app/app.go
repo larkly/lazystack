@@ -139,6 +139,7 @@ func (m Model) ShouldRestart() bool {
 // Options configures the application.
 type Options struct {
 	AlwaysPickCloud bool
+	Cloud           string
 	RefreshInterval time.Duration
 	IdleTimeout     time.Duration
 	Version         string
@@ -156,8 +157,12 @@ func New(opts Options) Model {
 
 	tabs := DefaultTabs()
 
-	// Auto-select if exactly one cloud and not forced to pick
-	if err == nil && len(clouds) == 1 && !opts.AlwaysPickCloud {
+	// Auto-select if --cloud flag is set, or exactly one cloud and not forced to pick
+	if opts.Cloud != "" || (err == nil && len(clouds) == 1 && !opts.AlwaysPickCloud) {
+		autoName := opts.Cloud
+		if autoName == "" {
+			autoName = clouds[0]
+		}
 		return Model{
 			view:            viewCloudPicker,
 			cloudPicker:     cloudpicker.New(clouds, nil),
@@ -166,7 +171,7 @@ func New(opts Options) Model {
 			quotaView:       quotaview.New(),
 			minWidth:        80,
 			minHeight:       20,
-			autoCloud:       clouds[0],
+			autoCloud:       autoName,
 			refreshInterval: refresh,
 			idleTimeout:     opts.IdleTimeout,
 			version:         opts.Version,

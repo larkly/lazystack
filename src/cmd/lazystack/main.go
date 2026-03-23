@@ -4,10 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/larkly/lazystack/internal/app"
+	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/selfupdate"
 	"charm.land/bubbletea/v2"
 )
@@ -19,6 +22,7 @@ func main() {
 	noCheckUpdate := flag.Bool("no-check-update", false, "skip automatic update check on startup")
 	doUpdate := flag.Bool("update", false, "update to the latest version")
 	alwaysPick := flag.Bool("pick-cloud", false, "always show cloud picker, even if only one cloud is configured")
+	cloudFlag := flag.String("cloud", "", "connect directly to named cloud, skip picker")
 	refreshSec := flag.Int("refresh", 5, "server list auto-refresh interval in seconds")
 	idleTimeoutMin := flag.Int("idle-timeout", 0, "pause polling after N minutes of no input (0 = disabled)")
 	flag.Parse()
@@ -47,8 +51,21 @@ func main() {
 		return
 	}
 
+	if *cloudFlag != "" {
+		clouds, err := cloud.ListCloudNames()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading clouds.yaml: %v\n", err)
+			os.Exit(1)
+		}
+		if !slices.Contains(clouds, *cloudFlag) {
+			fmt.Fprintf(os.Stderr, "Cloud %q not found. Available clouds: %s\n", *cloudFlag, strings.Join(clouds, ", "))
+			os.Exit(1)
+		}
+	}
+
 	m := app.New(app.Options{
 		AlwaysPickCloud: *alwaysPick,
+		Cloud:           *cloudFlag,
 		RefreshInterval: time.Duration(*refreshSec) * time.Second,
 		IdleTimeout:     time.Duration(*idleTimeoutMin) * time.Minute,
 		Version:         version,
