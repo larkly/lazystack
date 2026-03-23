@@ -16,7 +16,7 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
-	checkUpdate := flag.Bool("check-update", false, "check if a newer version is available")
+	noCheckUpdate := flag.Bool("no-check-update", false, "skip automatic update check on startup")
 	doUpdate := flag.Bool("update", false, "update to the latest version")
 	alwaysPick := flag.Bool("pick-cloud", false, "always show cloud picker, even if only one cloud is configured")
 	refreshSec := flag.Int("refresh", 5, "server list auto-refresh interval in seconds")
@@ -24,20 +24,6 @@ func main() {
 
 	if *showVersion {
 		fmt.Println("lazystack " + version)
-		return
-	}
-
-	if *checkUpdate {
-		latest, _, _, err := selfupdate.CheckLatest(version)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		if latest == "" {
-			fmt.Printf("lazystack %s is already up to date.\n", version)
-		} else {
-			fmt.Printf("A new version is available: %s (current: %s)\nRun with --update to install it.\n", latest, version)
-		}
 		return
 	}
 
@@ -64,6 +50,7 @@ func main() {
 		AlwaysPickCloud: *alwaysPick,
 		RefreshInterval: time.Duration(*refreshSec) * time.Second,
 		Version:         version,
+		CheckUpdate: !*noCheckUpdate,
 	})
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()

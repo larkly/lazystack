@@ -7,6 +7,7 @@ import (
 
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/selfupdate"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
@@ -51,6 +52,18 @@ const (
 )
 
 type modalType int
+
+// UpdateAvailableMsg is sent when a newer version is found.
+type UpdateAvailableMsg struct {
+	Latest      string
+	DownloadURL string
+	ChecksumsURL string
+}
+
+// UpdateResultMsg is sent after selfupdate.Apply completes.
+type UpdateResultMsg struct {
+	Err error
+}
 
 type delayedDetailRefreshMsg struct {
 	id string
@@ -106,8 +119,13 @@ type Model struct {
 	minWidth        int
 	minHeight    int
 	tooSmall     bool
-	restart      bool
-	version      string
+	restart        bool
+	version        string
+	checkUpdate    bool
+	updating       bool
+	latestVersion  string
+	downloadURL    string
+	checksumsURL   string
 }
 
 // ShouldRestart returns true if the app quit due to a restart request.
@@ -120,6 +138,7 @@ type Options struct {
 	AlwaysPickCloud bool
 	RefreshInterval time.Duration
 	Version         string
+	CheckUpdate bool
 }
 
 // New creates the root model.
@@ -146,6 +165,7 @@ func New(opts Options) Model {
 			autoCloud:       clouds[0],
 			refreshInterval: refresh,
 			version:         opts.Version,
+			checkUpdate: opts.CheckUpdate,
 			tabs:            tabs,
 			tabInited:       make([]bool, len(tabs)),
 		}
@@ -162,6 +182,7 @@ func New(opts Options) Model {
 		minHeight:       20,
 		refreshInterval: refresh,
 		version:         opts.Version,
+		checkUpdate:     opts.CheckUpdate,
 		tabs:            tabs,
 		tabInited:       make([]bool, len(tabs)),
 	}
@@ -169,13 +190,24 @@ func New(opts Options) Model {
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
+	var cmds []tea.Cmd
 	if m.autoCloud != "" {
 		name := m.autoCloud
-		return func() tea.Msg {
+		cmds = append(cmds, func() tea.Msg {
 			return shared.CloudSelectedMsg{CloudName: name}
-		}
+		})
 	}
-	return nil
+	if m.checkUpdate && m.version != "dev" {
+		ver := m.version
+		cmds = append(cmds, func() tea.Msg {
+			latest, dlURL, csURL, err := selfupdate.CheckLatest(ver)
+			if err != nil || latest == "" {
+				return nil
+			}
+			return UpdateAvailableMsg{Latest: latest, DownloadURL: dlURL, ChecksumsURL: csURL}
+		})
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update handles all messages.
@@ -218,6 +250,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.activeModal != modalNone {
+			if m.updating {
+				return m, nil // swallow keys while update is downloading
+			}
 			return m.updateModal(msg)
 		}
 
@@ -520,13 +555,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeModal = modalError
 		return m, nil
 
+	case UpdateAvailableMsg:
+		m.latestVersion = msg.Latest
+		m.downloadURL = msg.DownloadURL
+		m.checksumsURL = msg.ChecksumsURL
+		m.confirm = modal.ConfirmModel{
+			Action: "update",
+			Title:  "Update Available",
+			Body:   fmt.Sprintf("New version available: %s (current: %s). Upgrade now?", msg.Latest, m.version),
+		}
+		m.confirm.SetSize(m.width, m.height)
+		m.activeModal = modalConfirm
+		return m, nil
+
+	case UpdateResultMsg:
+		m.updating = false
+		if msg.Err != nil {
+			m.errModal = modal.NewError("Update failed", msg.Err)
+			m.errModal.SetSize(m.width, m.height)
+			m.activeModal = modalError
+			return m, nil
+		}
+		m.restart = true
+		return m, tea.Quit
+
 	case shared.ViewChangeMsg:
 		return m.handleViewChange(msg)
 
 	case modal.ConfirmAction:
+		if msg.Confirm && msg.Action == "update" {
+			m.updating = true
+			m.confirm.Title = "Updating"
+			m.confirm.Body = fmt.Sprintf("Downloading %s, please wait...", m.latestVersion)
+			dlURL := m.downloadURL
+			csURL := m.checksumsURL
+			return m, func() tea.Msg {
+				return UpdateResultMsg{Err: selfupdate.Apply(dlURL, csURL)}
+			}
+		}
 		m.activeModal = modalNone
 		if msg.Confirm {
 			return m.executeAction(msg)
+		}
+		if msg.Action == "update" {
+			m.statusBar.Hint = fmt.Sprintf("Upgrade available: %s — use --update", m.latestVersion)
 		}
 		return m, nil
 
