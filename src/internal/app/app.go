@@ -121,9 +121,9 @@ type Model struct {
 	tooSmall     bool
 	restart        bool
 	version        string
-	checkUpdate       bool
-	forceUpdatePrompt bool
-	latestVersion     string
+	checkUpdate    bool
+	updating       bool
+	latestVersion  string
 	downloadURL    string
 	checksumsURL   string
 }
@@ -138,8 +138,7 @@ type Options struct {
 	AlwaysPickCloud bool
 	RefreshInterval time.Duration
 	Version         string
-	CheckUpdate       bool
-	ForceUpdatePrompt bool
+	CheckUpdate bool
 }
 
 // New creates the root model.
@@ -166,8 +165,7 @@ func New(opts Options) Model {
 			autoCloud:       clouds[0],
 			refreshInterval: refresh,
 			version:         opts.Version,
-			checkUpdate:       opts.CheckUpdate,
-			forceUpdatePrompt: opts.ForceUpdatePrompt,
+			checkUpdate: opts.CheckUpdate,
 			tabs:            tabs,
 			tabInited:       make([]bool, len(tabs)),
 		}
@@ -199,16 +197,7 @@ func (m Model) Init() tea.Cmd {
 			return shared.CloudSelectedMsg{CloudName: name}
 		})
 	}
-	if m.forceUpdatePrompt {
-		ver := m.version
-		cmds = append(cmds, func() tea.Msg {
-			latest, dlURL, csURL, _ := selfupdate.CheckLatest(ver)
-			if latest == "" {
-				latest = ver // pretend current version is "new"
-			}
-			return UpdateAvailableMsg{Latest: latest, DownloadURL: dlURL, ChecksumsURL: csURL}
-		})
-	} else if m.checkUpdate && m.version != "dev" {
+	if m.checkUpdate && m.version != "dev" {
 		ver := m.version
 		cmds = append(cmds, func() tea.Msg {
 			latest, dlURL, csURL, err := selfupdate.CheckLatest(ver)
@@ -261,6 +250,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.activeModal != modalNone {
+			if m.updating {
+				return m, nil // swallow keys while update is downloading
+			}
 			return m.updateModal(msg)
 		}
 
@@ -577,6 +569,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case UpdateResultMsg:
+		m.updating = false
 		if msg.Err != nil {
 			m.errModal = modal.NewError("Update failed", msg.Err)
 			m.errModal.SetSize(m.width, m.height)
@@ -590,21 +583,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleViewChange(msg)
 
 	case modal.ConfirmAction:
+		if msg.Confirm && msg.Action == "update" {
+			m.updating = true
+			m.confirm.Title = "Updating"
+			m.confirm.Body = fmt.Sprintf("Downloading %s, please wait...", m.latestVersion)
+			dlURL := m.downloadURL
+			csURL := m.checksumsURL
+			return m, func() tea.Msg {
+				return UpdateResultMsg{Err: selfupdate.Apply(dlURL, csURL)}
+			}
+		}
 		m.activeModal = modalNone
 		if msg.Confirm {
-			if msg.Action == "update" {
-				dlURL := m.downloadURL
-				csURL := m.checksumsURL
-				if dlURL == "" {
-					// --force-update-prompt with no real update; just restart
-					m.restart = true
-					return m, tea.Quit
-				}
-				m.statusBar.Hint = "Updating..."
-				return m, func() tea.Msg {
-					return UpdateResultMsg{Err: selfupdate.Apply(dlURL, csURL)}
-				}
-			}
 			return m.executeAction(msg)
 		}
 		if msg.Action == "update" {
