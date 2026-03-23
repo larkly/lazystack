@@ -16,28 +16,15 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
-	checkUpdate := flag.Bool("check-update", false, "check if a newer version is available")
+	noCheckUpdate := flag.Bool("no-check-update", false, "skip automatic update check on startup")
 	doUpdate := flag.Bool("update", false, "update to the latest version")
+	forceUpdate := flag.Bool("force-update-prompt", false, "force the in-app update prompt (for testing)")
 	alwaysPick := flag.Bool("pick-cloud", false, "always show cloud picker, even if only one cloud is configured")
 	refreshSec := flag.Int("refresh", 5, "server list auto-refresh interval in seconds")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println("lazystack " + version)
-		return
-	}
-
-	if *checkUpdate {
-		latest, _, _, err := selfupdate.CheckLatest(version)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		if latest == "" {
-			fmt.Printf("lazystack %s is already up to date.\n", version)
-		} else {
-			fmt.Printf("A new version is available: %s (current: %s)\nRun with --update to install it.\n", latest, version)
-		}
 		return
 	}
 
@@ -64,6 +51,8 @@ func main() {
 		AlwaysPickCloud: *alwaysPick,
 		RefreshInterval: time.Duration(*refreshSec) * time.Second,
 		Version:         version,
+		CheckUpdate:      !*noCheckUpdate,
+		ForceUpdatePrompt: *forceUpdate,
 	})
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
@@ -78,6 +67,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "restart failed: %v\n", err)
 			os.Exit(1)
 		}
-		syscall.Exec(exe, os.Args, os.Environ())
+		// Strip --force-update-prompt from args on restart to avoid looping
+		var args []string
+		for _, a := range os.Args {
+			if a != "--force-update-prompt" {
+				args = append(args, a)
+			}
+		}
+		syscall.Exec(exe, args, os.Environ())
 	}
 }

@@ -84,7 +84,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 |------|---------|-------------|
 | `--pick-cloud` | `false` | Always show cloud picker, even with one cloud |
 | `--refresh N` | `5` | Auto-refresh interval in seconds |
-| `--check-update` | `false` | Check if a newer version is available |
+| `--no-check-update` | `false` | Skip the automatic update check on startup |
 | `--update` | `false` | Self-update to the latest release |
 | `--version` | | Print version and exit |
 
