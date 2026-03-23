@@ -63,7 +63,7 @@ var (
 				Bold(true)
 
 	StyleHelp = lipgloss.NewStyle().
-			Foreground(ColorMuted)
+			Foreground(ColorFg)
 
 	StyleModal = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
