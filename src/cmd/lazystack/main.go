@@ -20,6 +20,7 @@ func main() {
 	doUpdate := flag.Bool("update", false, "update to the latest version")
 	alwaysPick := flag.Bool("pick-cloud", false, "always show cloud picker, even if only one cloud is configured")
 	refreshSec := flag.Int("refresh", 5, "server list auto-refresh interval in seconds")
+	idleTimeoutMin := flag.Int("idle-timeout", 0, "pause polling after N minutes of no input (0 = disabled)")
 	flag.Parse()
 
 	if *showVersion {
@@ -49,8 +50,9 @@ func main() {
 	m := app.New(app.Options{
 		AlwaysPickCloud: *alwaysPick,
 		RefreshInterval: time.Duration(*refreshSec) * time.Second,
+		IdleTimeout:     time.Duration(*idleTimeoutMin) * time.Minute,
 		Version:         version,
-		CheckUpdate: !*noCheckUpdate,
+		CheckUpdate:     !*noCheckUpdate,
 	})
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
