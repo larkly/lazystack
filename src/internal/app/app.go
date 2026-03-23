@@ -123,6 +123,9 @@ type Model struct {
 	version        string
 	checkUpdate    bool
 	updating       bool
+	idleTimeout    time.Duration
+	lastActivity   time.Time
+	idlePaused     bool
 	latestVersion  string
 	downloadURL    string
 	checksumsURL   string
@@ -137,8 +140,9 @@ func (m Model) ShouldRestart() bool {
 type Options struct {
 	AlwaysPickCloud bool
 	RefreshInterval time.Duration
+	IdleTimeout     time.Duration
 	Version         string
-	CheckUpdate bool
+	CheckUpdate     bool
 }
 
 // New creates the root model.
@@ -164,8 +168,9 @@ func New(opts Options) Model {
 			minHeight:       20,
 			autoCloud:       clouds[0],
 			refreshInterval: refresh,
+			idleTimeout:     opts.IdleTimeout,
 			version:         opts.Version,
-			checkUpdate: opts.CheckUpdate,
+			checkUpdate:     opts.CheckUpdate,
 			tabs:            tabs,
 			tabInited:       make([]bool, len(tabs)),
 		}
@@ -181,6 +186,7 @@ func New(opts Options) Model {
 		minWidth:        80,
 		minHeight:       20,
 		refreshInterval: refresh,
+		idleTimeout:     opts.IdleTimeout,
 		version:         opts.Version,
 		checkUpdate:     opts.CheckUpdate,
 		tabs:            tabs,
@@ -231,6 +237,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateActiveView(msg)
 
 	case tea.KeyMsg:
+		m.lastActivity = time.Now()
+		if m.idlePaused {
+			m.idlePaused = false
+			m.statusBar.Hint = ""
+			return m, func() tea.Msg { return shared.TickMsg{} }
+		}
+
 		if m.help.Visible {
 			var cmd tea.Cmd
 			m.help, cmd = m.help.Update(msg)
@@ -435,11 +448,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateActiveView(msg)
 
 	case shared.CloudSelectedMsg:
+		m.lastActivity = time.Now()
 		m.cloudName = msg.CloudName
 		m.statusBar.Hint = "Connecting..."
 		return m, m.connectToCloud(msg.CloudName)
 
 	case shared.CloudConnectedMsg:
+		m.lastActivity = time.Now()
+		m.idlePaused = false
 		m.client = &cloud.Client{
 			CloudName:      m.cloudName,
 			Compute:        msg.ComputeClient,
@@ -526,6 +542,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case shared.ProjectSelectedMsg:
+		m.lastActivity = time.Now()
 		m.projectPicker.Active = false
 		m.statusBar.Hint = fmt.Sprintf("Switching to project %s...", msg.ProjectName)
 		m.currentProjectID = msg.ProjectID
@@ -688,6 +705,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	default:
+		// Idle timeout: swallow ticks when paused, or pause if idle too long
+		if _, ok := msg.(shared.TickMsg); ok {
+			if m.idlePaused {
+				return m, nil
+			}
+			if m.idleTimeout > 0 && !m.lastActivity.IsZero() && time.Since(m.lastActivity) > m.idleTimeout {
+				m.idlePaused = true
+				m.statusBar.Hint = "⏸ Paused — press any key to resume"
+				return m, nil
+			}
+		}
 		// Route to all views first so background ticks keep firing
 		m2, viewCmd := m.updateAllViews(msg)
 		m = m2
