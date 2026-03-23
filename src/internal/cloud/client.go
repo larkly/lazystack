@@ -26,7 +26,7 @@ type Client struct {
 
 // Connect authenticates to the given cloud and initializes service clients.
 func Connect(ctx context.Context, cloudName string) (*Client, error) {
-	ao, eo, tlsConfig, err := clouds.Parse(clouds.WithCloudName(cloudName))
+	ao, eo, tlsConfig, err := clouds.Parse(clouds.WithCloudName(cloudName), clouds.WithLocations(CloudsYamlPaths()...))
 	if err != nil {
 		return nil, fmt.Errorf("parsing cloud %q: %w", cloudName, err)
 	}
@@ -35,7 +35,7 @@ func Connect(ctx context.Context, cloudName string) (*Client, error) {
 
 // ConnectWithProject authenticates scoped to a specific project.
 func ConnectWithProject(ctx context.Context, cloudName, projectID string) (*Client, error) {
-	ao, eo, tlsConfig, err := clouds.Parse(clouds.WithCloudName(cloudName))
+	ao, eo, tlsConfig, err := clouds.Parse(clouds.WithCloudName(cloudName), clouds.WithLocations(CloudsYamlPaths()...))
 	if err != nil {
 		return nil, fmt.Errorf("parsing cloud %q: %w", cloudName, err)
 	}
