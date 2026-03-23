@@ -16,7 +16,7 @@ type cloudsFile struct {
 
 // ListCloudNames parses clouds.yaml and returns sorted cloud names.
 func ListCloudNames() ([]string, error) {
-	paths := cloudsYamlPaths()
+	paths := CloudsYamlPaths()
 
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
@@ -40,7 +40,8 @@ func ListCloudNames() ([]string, error) {
 	return nil, fmt.Errorf("no clouds.yaml found (searched: %v)", paths)
 }
 
-func cloudsYamlPaths() []string {
+// CloudsYamlPaths returns the list of paths searched for clouds.yaml.
+func CloudsYamlPaths() []string {
 	var paths []string
 
 	// Current directory
