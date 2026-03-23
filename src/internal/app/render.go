@@ -83,6 +83,10 @@ func (m Model) viewContent() string {
 	var content string
 	switch m.view {
 	case viewCloudPicker:
+		if m.autoCloud != "" {
+			msg := shared.StyleModalTitle.Render("Connecting to " + m.autoCloud + "...")
+			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
+		}
 		return m.cloudPicker.View()
 	case viewServerList:
 		content = m.serverList.View()
