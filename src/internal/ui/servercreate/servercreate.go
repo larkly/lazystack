@@ -86,12 +86,14 @@ func New(computeClient, imageClient, networkClient *gophercloud.ServiceClient) M
 	ni.Prompt = ""
 	ni.Placeholder = "server name"
 	ni.CharLimit = 255
+	ni.SetWidth(40)
 	ni.Focus()
 
 	ci := textinput.New()
 	ci.Prompt = ""
 	ci.Placeholder = "1"
 	ci.CharLimit = 4
+	ci.SetWidth(10)
 
 	pf := textinput.New()
 	pf.Prompt = "/ "
