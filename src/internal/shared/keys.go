@@ -141,8 +141,8 @@ var Keys = KeyMap{
 		key.WithHelp("a", "action history"),
 	),
 	Console: key.NewBinding(
-		key.WithKeys("l"),
-		key.WithHelp("l", "console log"),
+		key.WithKeys("L"),
+		key.WithHelp("L", "console log"),
 	),
 	Select: key.NewBinding(
 		key.WithKeys("space"),
