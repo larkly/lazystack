@@ -3,6 +3,7 @@ package servercreate
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -22,21 +23,23 @@ import (
 
 // Field indices.
 const (
-	fieldName    = 0
-	fieldImage   = 1
-	fieldFlavor  = 2
-	fieldNetwork = 3
-	fieldKeypair = 4
-	fieldCount   = 5
-	fieldSubmit  = 6
-	fieldCancel  = 7
-	numFields    = 8
+	fieldName     = 0
+	fieldImage    = 1
+	fieldFlavor   = 2
+	fieldNetwork  = 3
+	fieldKeypair  = 4
+	fieldSecGroup = 5
+	fieldCount    = 6
+	fieldSubmit   = 7
+	fieldCancel   = 8
+	numFields     = 9
 )
 
 type imagesLoadedMsg struct{ images []img.Image }
 type flavorsLoadedMsg struct{ flavors []compute.Flavor }
 type networksLoadedMsg struct{ networks []network.Network }
 type keypairsLoadedMsg struct{ keypairs []compute.KeyPair }
+type secGroupsLoadedMsg struct{ secGroups []network.SecurityGroup }
 type fetchErrMsg struct{ err error }
 
 type serverCreatedMsg struct{ server *compute.Server }
@@ -51,15 +54,17 @@ type Model struct {
 	nameInput  textinput.Model
 	countInput textinput.Model
 
-	images   []img.Image
-	flavors  []compute.Flavor
-	networks []network.Network
-	keypairs []compute.KeyPair
+	images     []img.Image
+	flavors    []compute.Flavor
+	networks   []network.Network
+	keypairs   []compute.KeyPair
+	secGroups  []network.SecurityGroup
 
-	selectedImage   int
-	selectedFlavor  int
-	selectedNetwork int
-	selectedKeypair int
+	selectedImage     int
+	selectedFlavor    int
+	selectedNetwork   int
+	selectedKeypair   int
+	selectedSecGroups map[int]bool
 
 	// Inline picker state
 	pickerOpen   bool
@@ -80,14 +85,16 @@ type Model struct {
 func New(computeClient, imageClient, networkClient *gophercloud.ServiceClient) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
-	ni.Placeholder = "enter server name"
+	ni.Placeholder = "server name"
 	ni.CharLimit = 255
+	ni.SetWidth(40)
 	ni.Focus()
 
 	ci := textinput.New()
 	ci.Prompt = ""
 	ci.Placeholder = "1"
 	ci.CharLimit = 4
+	ci.SetWidth(10)
 
 	pf := textinput.New()
 	pf.Prompt = "/ "
@@ -99,18 +106,19 @@ func New(computeClient, imageClient, networkClient *gophercloud.ServiceClient) M
 	s.Spinner = spinner.Dot
 
 	return Model{
-		computeClient: computeClient,
-		imageClient:   imageClient,
-		networkClient: networkClient,
-		nameInput:     ni,
-		countInput:    ci,
-		pickerFilter:  pf,
-		spinner:       s,
-		loading:       4,
-		selectedImage: -1,
-		selectedFlavor: -1,
-		selectedNetwork: -1,
-		selectedKeypair: -1,
+		computeClient:     computeClient,
+		imageClient:       imageClient,
+		networkClient:     networkClient,
+		nameInput:         ni,
+		countInput:        ci,
+		pickerFilter:      pf,
+		spinner:           s,
+		loading:           5,
+		selectedImage:     -1,
+		selectedFlavor:    -1,
+		selectedNetwork:   -1,
+		selectedKeypair:   -1,
+		selectedSecGroups: make(map[int]bool),
 	}
 }
 
@@ -122,6 +130,7 @@ func (m Model) Init() tea.Cmd {
 		m.fetchFlavors(),
 		m.fetchNetworks(),
 		m.fetchKeypairs(),
+		m.fetchSecGroups(),
 	)
 }
 
@@ -142,6 +151,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case keypairsLoadedMsg:
 		m.keypairs = msg.keypairs
+		m.loading--
+		return m, nil
+	case secGroupsLoadedMsg:
+		m.secGroups = msg.secGroups
 		m.loading--
 		return m, nil
 	case fetchErrMsg:
@@ -188,13 +201,31 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return shared.ViewChangeMsg{View: "serverlist"}
 		}
 
-	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down) && m.focusField != fieldName && m.focusField != fieldCount:
+	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
 		m.focusField = (m.focusField + 1) % numFields
 		m.updateFocus()
 		return m, nil
 
-	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up) && m.focusField != fieldName && m.focusField != fieldCount:
+	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
 		m.focusField = (m.focusField - 1 + numFields) % numFields
+		m.updateFocus()
+		return m, nil
+
+	case key.Matches(msg, shared.Keys.Right) && (m.focusField == fieldSubmit || m.focusField == fieldCancel):
+		if m.focusField == fieldSubmit {
+			m.focusField = fieldCancel
+		} else {
+			m.focusField = fieldSubmit
+		}
+		m.updateFocus()
+		return m, nil
+
+	case key.Matches(msg, shared.Keys.Left) && (m.focusField == fieldSubmit || m.focusField == fieldCancel):
+		if m.focusField == fieldCancel {
+			m.focusField = fieldSubmit
+		} else {
+			m.focusField = fieldCancel
+		}
 		m.updateFocus()
 		return m, nil
 
@@ -243,16 +274,32 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	items := m.pickerItems()
+	isMultiSelect := m.pickerField == fieldSecGroup
 
 	switch msg.String() {
 	case "esc":
 		m.pickerOpen = false
 		m.pickerFilter.Blur()
 		return m, nil
+	case "space":
+		if isMultiSelect {
+			filtered := m.filteredPickerItems(items)
+			if len(filtered) > 0 && m.pickerCursor < len(filtered) {
+				idx := filtered[m.pickerCursor].id
+				if m.selectedSecGroups[idx] {
+					delete(m.selectedSecGroups, idx)
+				} else {
+					m.selectedSecGroups[idx] = true
+				}
+			}
+			return m, nil
+		}
 	case "enter":
-		filtered := m.filteredPickerItems(items)
-		if len(filtered) > 0 && m.pickerCursor < len(filtered) {
-			m.setPickerSelection(filtered[m.pickerCursor].id)
+		if !isMultiSelect {
+			filtered := m.filteredPickerItems(items)
+			if len(filtered) > 0 && m.pickerCursor < len(filtered) {
+				m.setPickerSelection(filtered[m.pickerCursor].id)
+			}
 		}
 		m.pickerOpen = false
 		m.pickerFilter.Blur()
@@ -319,6 +366,12 @@ func (m Model) pickerItems() []pickerItem {
 			items[i] = pickerItem{id: i, name: kp.Name, desc: kp.Type}
 		}
 		return items
+	case fieldSecGroup:
+		items := make([]pickerItem, len(m.secGroups))
+		for i, sg := range m.secGroups {
+			items[i] = pickerItem{id: i, name: sg.Name, desc: sg.Description}
+		}
+		return items
 	}
 	return nil
 }
@@ -349,6 +402,17 @@ func (m *Model) setPickerSelection(idx int) {
 	case fieldKeypair:
 		m.selectedKeypair = idx
 	}
+}
+
+func (m Model) sortedSecGroupIndices() []int {
+	indices := make([]int, 0, len(m.selectedSecGroups))
+	for idx := range m.selectedSecGroups {
+		if idx < len(m.secGroups) {
+			indices = append(indices, idx)
+		}
+	}
+	sort.Ints(indices)
+	return indices
 }
 
 func (m *Model) updateFocus() {
@@ -411,6 +475,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 		}
 	}
 
+	if len(m.selectedSecGroups) > 0 {
+		var sgNames []string
+		for _, idx := range m.sortedSecGroupIndices() {
+			sgNames = append(sgNames, m.secGroups[idx].Name)
+		}
+		opts.SecurityGroups = sgNames
+	}
+
 	var createOpts servers.CreateOptsBuilder = opts
 	if m.selectedKeypair >= 0 {
 		createOpts = keypairs.CreateOptsExt{
@@ -454,11 +526,12 @@ func (m Model) View() string {
 		focused  bool
 		isInput  bool
 	}{
-		{"Name", m.nameInput.View(), m.focusField == fieldName, true},
+		{"Server Name", m.nameInput.View(), m.focusField == fieldName, true},
 		{"Image", m.selectionDisplay(fieldImage), m.focusField == fieldImage, false},
 		{"Flavor", m.selectionDisplay(fieldFlavor), m.focusField == fieldFlavor, false},
 		{"Network", m.selectionDisplay(fieldNetwork), m.focusField == fieldNetwork, false},
 		{"Key Pair", m.selectionDisplay(fieldKeypair), m.focusField == fieldKeypair, false},
+		{"Security Groups", m.selectionDisplay(fieldSecGroup), m.focusField == fieldSecGroup, false},
 		{"Count", m.countInput.View(), m.focusField == fieldCount, true},
 	}
 
@@ -522,6 +595,15 @@ func (m Model) selectionDisplay(field int) string {
 		if m.selectedKeypair >= 0 && m.selectedKeypair < len(m.keypairs) {
 			return m.keypairs[m.selectedKeypair].Name
 		}
+	case fieldSecGroup:
+		if len(m.selectedSecGroups) > 0 {
+			var names []string
+			for _, idx := range m.sortedSecGroupIndices() {
+				names = append(names, m.secGroups[idx].Name)
+			}
+			return strings.Join(names, ", ")
+		}
+		return "<enter to select, optional>"
 	}
 	return "<press enter to select>"
 }
@@ -548,6 +630,7 @@ func (m Model) renderPicker() string {
 		end = len(filtered)
 	}
 
+	isMultiSelect := m.pickerField == fieldSecGroup
 	for i := start; i < end; i++ {
 		item := filtered[i]
 		cursor := "  "
@@ -556,11 +639,17 @@ func (m Model) renderPicker() string {
 			cursor = "▸ "
 			style = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
 		}
+		check := ""
+		if isMultiSelect && m.selectedSecGroups[item.id] {
+			check = "● "
+		} else if isMultiSelect {
+			check = "○ "
+		}
 		desc := ""
 		if item.desc != "" {
 			desc = shared.StyleHelp.Render(" " + item.desc)
 		}
-		b.WriteString(fmt.Sprintf("      %s%s%s\n", cursor, style.Render(item.name), desc))
+		b.WriteString(fmt.Sprintf("      %s%s%s%s\n", cursor, check, style.Render(item.name), desc))
 	}
 
 	return b.String()
@@ -610,6 +699,17 @@ func (m Model) fetchKeypairs() tea.Cmd {
 	}
 }
 
+func (m Model) fetchSecGroups() tea.Cmd {
+	client := m.networkClient
+	return func() tea.Msg {
+		sgs, err := network.ListSecurityGroups(context.Background(), client)
+		if err != nil {
+			return fetchErrMsg{err: err}
+		}
+		return secGroupsLoadedMsg{secGroups: sgs}
+	}
+}
+
 // SetSize updates the dimensions.
 func (m *Model) SetSize(w, h int) {
 	m.width = w
@@ -618,6 +718,9 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
+	if m.pickerOpen && m.pickerField == fieldSecGroup {
+		return "↑↓ navigate • space toggle • enter confirm • esc close • type to filter"
+	}
 	if m.pickerOpen {
 		return "↑↓ navigate • enter select • esc close • type to filter"
 	}
