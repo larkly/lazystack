@@ -3,6 +3,7 @@ package servercreate
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -403,6 +404,17 @@ func (m *Model) setPickerSelection(idx int) {
 	}
 }
 
+func (m Model) sortedSecGroupIndices() []int {
+	indices := make([]int, 0, len(m.selectedSecGroups))
+	for idx := range m.selectedSecGroups {
+		if idx < len(m.secGroups) {
+			indices = append(indices, idx)
+		}
+	}
+	sort.Ints(indices)
+	return indices
+}
+
 func (m *Model) updateFocus() {
 	if m.focusField == fieldName {
 		m.nameInput.Focus()
@@ -465,10 +477,8 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	if len(m.selectedSecGroups) > 0 {
 		var sgNames []string
-		for idx := range m.selectedSecGroups {
-			if idx < len(m.secGroups) {
-				sgNames = append(sgNames, m.secGroups[idx].Name)
-			}
+		for _, idx := range m.sortedSecGroupIndices() {
+			sgNames = append(sgNames, m.secGroups[idx].Name)
 		}
 		opts.SecurityGroups = sgNames
 	}
@@ -588,10 +598,8 @@ func (m Model) selectionDisplay(field int) string {
 	case fieldSecGroup:
 		if len(m.selectedSecGroups) > 0 {
 			var names []string
-			for idx := range m.selectedSecGroups {
-				if idx < len(m.secGroups) {
-					names = append(names, m.secGroups[idx].Name)
-				}
+			for _, idx := range m.sortedSecGroupIndices() {
+				names = append(names, m.secGroups[idx].Name)
 			}
 			return strings.Join(names, ", ")
 		}
