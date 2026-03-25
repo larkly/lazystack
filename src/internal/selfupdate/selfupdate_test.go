@@ -17,6 +17,7 @@ func TestIsNewer(t *testing.T) {
 		{"v0.0.1", "v0.1.0", false},
 		{"v1.0.0", "v1.0.0", false},
 		{"v2.0.0", "v1.99.99", true},
+		{"v0.3.1", "v0.3.0-7-g09160b8", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.latest+"_vs_"+tt.current, func(t *testing.T) {
@@ -55,6 +56,8 @@ func TestParseVersion(t *testing.T) {
 		{"v1.2.3", []int{1, 2, 3}},
 		{"0.1.0", []int{0, 1, 0}},
 		{"v0.0.0", []int{0, 0, 0}},
+		{"v0.3.0-7-g09160b8", []int{0, 3, 0}},
+		{"v1.2.3-rc1", []int{1, 2, 3}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
