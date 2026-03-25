@@ -278,7 +278,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.pickerOpen = false
 		m.pickerFilter.Blur()
 		return m, nil
-	case " ":
+	case "space":
 		if isMultiSelect {
 			filtered := m.filteredPickerItems(items)
 			if len(filtered) > 0 && m.pickerCursor < len(filtered) {
@@ -593,7 +593,7 @@ func (m Model) selectionDisplay(field int) string {
 			}
 			return strings.Join(names, ", ")
 		}
-		return "<none>"
+		return "<enter to select, optional>"
 	}
 	return "<press enter to select>"
 }
