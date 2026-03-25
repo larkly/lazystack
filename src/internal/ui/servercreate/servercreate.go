@@ -514,7 +514,7 @@ func (m Model) View() string {
 		focused  bool
 		isInput  bool
 	}{
-		{"Name", m.nameInput.View(), m.focusField == fieldName, true},
+		{"Server Name", m.nameInput.View(), m.focusField == fieldName, true},
 		{"Image", m.selectionDisplay(fieldImage), m.focusField == fieldImage, false},
 		{"Flavor", m.selectionDisplay(fieldFlavor), m.focusField == fieldFlavor, false},
 		{"Network", m.selectionDisplay(fieldNetwork), m.focusField == fieldNetwork, false},
