@@ -519,7 +519,7 @@ func (m Model) View() string {
 		{"Flavor", m.selectionDisplay(fieldFlavor), m.focusField == fieldFlavor, false},
 		{"Network", m.selectionDisplay(fieldNetwork), m.focusField == fieldNetwork, false},
 		{"Key Pair", m.selectionDisplay(fieldKeypair), m.focusField == fieldKeypair, false},
-		{"Sec Groups", m.selectionDisplay(fieldSecGroup), m.focusField == fieldSecGroup, false},
+		{"Security Groups", m.selectionDisplay(fieldSecGroup), m.focusField == fieldSecGroup, false},
 		{"Count", m.countInput.View(), m.focusField == fieldCount, true},
 	}
 
