@@ -172,6 +172,10 @@ func isNewer(latest, current string) bool {
 
 func parseVersion(v string) []int {
 	v = strings.TrimPrefix(v, "v")
+	// Strip git-describe suffix (e.g. "0.3.0-7-g09160b8" → "0.3.0")
+	if idx := strings.Index(v, "-"); idx >= 0 {
+		v = v[:idx]
+	}
 	parts := strings.Split(v, ".")
 	if len(parts) != 3 {
 		return nil
