@@ -84,7 +84,7 @@ type Model struct {
 func New(computeClient, imageClient, networkClient *gophercloud.ServiceClient) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
-	ni.Placeholder = "enter server name"
+	ni.Placeholder = "server name"
 	ni.CharLimit = 255
 	ni.Focus()
 
