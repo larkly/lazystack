@@ -156,6 +156,42 @@ func UnshelveServer(ctx context.Context, client *gophercloud.ServiceClient, id s
 	return nil
 }
 
+// StopServer stops (shuts down) a server.
+func StopServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Stop(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("stopping server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// StartServer starts a stopped server.
+func StartServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Start(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("starting server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// LockServer prevents modifications to a server.
+func LockServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Lock(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("locking server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// UnlockServer removes the lock on a server.
+func UnlockServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Unlock(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("unlocking server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
 // ResizeServer resizes a server to a new flavor.
 func ResizeServer(ctx context.Context, client *gophercloud.ServiceClient, id, flavorRef string) error {
 	r := servers.Resize(ctx, client, id, servers.ResizeOpts{FlavorRef: flavorRef})

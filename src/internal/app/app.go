@@ -426,6 +426,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.Shelve) {
 				return m.openToggleConfirm("shelve/unshelve")
 			}
+			if key.Matches(msg, shared.Keys.StopStart) {
+				return m.openToggleConfirm("stop/start")
+			}
+			if key.Matches(msg, shared.Keys.Lock) {
+				return m.openToggleConfirm("lock/unlock")
+			}
 			if key.Matches(msg, shared.Keys.Console) {
 				return m.openConsoleLog()
 			}

@@ -108,6 +108,18 @@ func (m Model) openToggleConfirm(action string) (Model, tea.Cmd) {
 				} else {
 					actualAction = "shelve"
 				}
+			case "stop/start":
+				if status == "SHUTOFF" {
+					actualAction = "start"
+				} else {
+					actualAction = "stop"
+				}
+			case "lock/unlock":
+				if len(servers) > 0 && servers[0].Locked {
+					actualAction = "unlock"
+				} else {
+					actualAction = "lock"
+				}
 			}
 		}
 		refs := make([]modal.ServerRef, len(servers))
@@ -154,6 +166,28 @@ func (m Model) openToggleConfirm(action string) (Model, tea.Cmd) {
 			actualAction = "unshelve"
 		} else {
 			actualAction = "shelve"
+		}
+	case "stop/start":
+		if status == "SHUTOFF" {
+			actualAction = "start"
+		} else {
+			actualAction = "stop"
+		}
+	case "lock/unlock":
+		// Lock status needs to be checked from the server object
+		var locked bool
+		switch m.view {
+		case viewServerList:
+			if s := m.serverList.SelectedServer(); s != nil {
+				locked = s.Locked
+			}
+		case viewServerDetail:
+			locked = m.serverDetail.ServerLocked()
+		}
+		if locked {
+			actualAction = "unlock"
+		} else {
+			actualAction = "lock"
 		}
 	}
 
@@ -465,6 +499,38 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			return shared.ServerActionMsg{Action: "Unshelve", Name: action.Name}
 		}
+	case "stop":
+		return m, func() tea.Msg {
+			err := compute.StopServer(context.Background(), client, action.ServerID)
+			if err != nil {
+				return shared.ServerActionErrMsg{Action: "Stop", Name: action.Name, Err: err}
+			}
+			return shared.ServerActionMsg{Action: "Stop", Name: action.Name}
+		}
+	case "start":
+		return m, func() tea.Msg {
+			err := compute.StartServer(context.Background(), client, action.ServerID)
+			if err != nil {
+				return shared.ServerActionErrMsg{Action: "Start", Name: action.Name, Err: err}
+			}
+			return shared.ServerActionMsg{Action: "Start", Name: action.Name}
+		}
+	case "lock":
+		return m, func() tea.Msg {
+			err := compute.LockServer(context.Background(), client, action.ServerID)
+			if err != nil {
+				return shared.ServerActionErrMsg{Action: "Lock", Name: action.Name, Err: err}
+			}
+			return shared.ServerActionMsg{Action: "Lock", Name: action.Name}
+		}
+	case "unlock":
+		return m, func() tea.Msg {
+			err := compute.UnlockServer(context.Background(), client, action.ServerID)
+			if err != nil {
+				return shared.ServerActionErrMsg{Action: "Unlock", Name: action.Name, Err: err}
+			}
+			return shared.ServerActionMsg{Action: "Unlock", Name: action.Name}
+		}
 	case "delete_volume":
 		bsClient := m.client.BlockStorage
 		id := action.ServerID
@@ -610,6 +676,14 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 				err = compute.ShelveServer(context.Background(), client, s.ID)
 			case "unshelve":
 				err = compute.UnshelveServer(context.Background(), client, s.ID)
+			case "stop":
+				err = compute.StopServer(context.Background(), client, s.ID)
+			case "start":
+				err = compute.StartServer(context.Background(), client, s.ID)
+			case "lock":
+				err = compute.LockServer(context.Background(), client, s.ID)
+			case "unlock":
+				err = compute.UnlockServer(context.Background(), client, s.ID)
 			}
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("%s: %v", s.Name, err))

@@ -41,6 +41,8 @@ type KeyMap struct {
 	ReverseSort key.Binding
 	ProjectPick key.Binding
 	Quota       key.Binding
+	StopStart   key.Binding
+	Lock        key.Binding
 }
 
 var Keys = KeyMap{
@@ -195,5 +197,13 @@ var Keys = KeyMap{
 	Quota: key.NewBinding(
 		key.WithKeys("Q"),
 		key.WithHelp("Q", "quotas"),
+	),
+	StopStart: key.NewBinding(
+		key.WithKeys("o"),
+		key.WithHelp("o", "stop/start"),
+	),
+	Lock: key.NewBinding(
+		key.WithKeys("ctrl+l"),
+		key.WithHelp("ctrl+l", "lock/unlock"),
 	),
 }

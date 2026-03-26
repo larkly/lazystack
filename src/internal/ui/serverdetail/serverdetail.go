@@ -307,6 +307,14 @@ func (m Model) ServerFlavor() string {
 	return ""
 }
 
+// ServerLocked returns whether the server is locked.
+func (m Model) ServerLocked() bool {
+	if m.server != nil {
+		return m.server.Locked
+	}
+	return false
+}
+
 // SetServer updates the server data directly.
 func (m *Model) SetServer(s *compute.Server) {
 	if m.pendingAction != "" && s != nil && s.Status != "VERIFY_RESIZE" {
