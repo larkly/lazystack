@@ -136,7 +136,49 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) isTextInput() bool {
+	return m.focusField == fieldPortMin || m.focusField == fieldPortMax || m.focusField == fieldRemoteIP
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	// Route to text input first — only intercept navigation keys
+	if m.isTextInput() {
+		switch {
+		case key.Matches(msg, shared.Keys.Back):
+			m.Active = false
+			return m, nil
+		case key.Matches(msg, shared.Keys.Tab):
+			m.focusField = (m.focusField + 1) % numFields
+			m.updateFocus()
+			return m, nil
+		case key.Matches(msg, shared.Keys.ShiftTab):
+			m.focusField = (m.focusField - 1 + numFields) % numFields
+			m.updateFocus()
+			return m, nil
+		case key.Matches(msg, shared.Keys.Enter):
+			m.focusField++
+			m.updateFocus()
+			return m, nil
+		case msg.String() == "ctrl+s":
+			return m.submit()
+		default:
+			switch m.focusField {
+			case fieldPortMin:
+				var cmd tea.Cmd
+				m.portMinInput, cmd = m.portMinInput.Update(msg)
+				return m, cmd
+			case fieldPortMax:
+				var cmd tea.Cmd
+				m.portMaxInput, cmd = m.portMaxInput.Update(msg)
+				return m, cmd
+			case fieldRemoteIP:
+				var cmd tea.Cmd
+				m.remoteIPInput, cmd = m.remoteIPInput.Update(msg)
+				return m, cmd
+			}
+		}
+	}
+
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		m.Active = false

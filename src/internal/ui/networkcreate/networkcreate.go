@@ -100,7 +100,38 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) isTextInput() bool {
+	return m.focusField == fieldName
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	// Route to text input first — only intercept navigation keys
+	if m.isTextInput() {
+		switch {
+		case key.Matches(msg, shared.Keys.Back):
+			m.Active = false
+			return m, nil
+		case key.Matches(msg, shared.Keys.Tab):
+			m.focusField = (m.focusField + 1) % numFields
+			m.updateFocus()
+			return m, nil
+		case key.Matches(msg, shared.Keys.ShiftTab):
+			m.focusField = (m.focusField - 1 + numFields) % numFields
+			m.updateFocus()
+			return m, nil
+		case key.Matches(msg, shared.Keys.Enter):
+			m.focusField++
+			m.updateFocus()
+			return m, nil
+		case msg.String() == "ctrl+s":
+			return m.submit()
+		default:
+			var cmd tea.Cmd
+			m.nameInput, cmd = m.nameInput.Update(msg)
+			return m, cmd
+		}
+	}
+
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		m.Active = false
