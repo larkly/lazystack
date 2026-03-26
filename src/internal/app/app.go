@@ -15,18 +15,24 @@ import (
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/help"
+	"github.com/larkly/lazystack/internal/ui/keypaircreate"
+	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/lblist"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/networklist"
 	"github.com/larkly/lazystack/internal/ui/projectpicker"
 	"github.com/larkly/lazystack/internal/ui/quotaview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
+	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
+	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/serverlist"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/ui/statusbar"
+	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 	"charm.land/bubbles/v2/key"
@@ -49,6 +55,10 @@ const (
 	viewKeypairList
 	viewLBList
 	viewLBDetail
+	viewVolumeCreate
+	viewKeypairCreate
+	viewNetworkList
+	viewKeypairDetail
 )
 
 type modalType int
@@ -93,12 +103,18 @@ type Model struct {
 	actionLog     actionlog.Model
 	serverResize  serverresize.Model
 	fipPicker     fippicker.Model
+	serverPicker  serverpicker.Model
+	sgRuleCreate  sgrulecreate.Model
 	projectPicker projectpicker.Model
 	volumeList    volumelist.Model
 	volumeDetail  volumedetail.Model
+	volumeCreate  volumecreate.Model
 	floatingIPList floatingiplist.Model
 	secGroupView  secgroupview.Model
-	keypairList   keypairlist.Model
+	keypairList    keypairlist.Model
+	keypairCreate  keypaircreate.Model
+	keypairDetail  keypairdetail.Model
+	networkList   networklist.Model
 	lbList        lblist.Model
 	lbDetail      lbdetail.Model
 	statusBar     statusbar.Model
@@ -237,12 +253,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quotaView.Height = m.height
 		m.serverResize.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
+		m.serverPicker.SetSize(m.width, m.height)
+		m.sgRuleCreate.SetSize(m.width, m.height)
 		m.projectPicker.SetSize(m.width, m.height)
 		m.statusBar.Width = m.width
 		return m.updateActiveView(msg)
 
 	case tea.KeyMsg:
 		m.lastActivity = time.Now()
+		m.statusBar.StickyHint = ""
 		if m.idlePaused {
 			m.idlePaused = false
 			m.statusBar.Hint = ""
@@ -288,6 +307,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Server picker modal intercepts all keys when active
+		if m.serverPicker.Active {
+			var cmd tea.Cmd
+			m.serverPicker, cmd = m.serverPicker.Update(msg)
+			return m, cmd
+		}
+
+		// SG rule create modal intercepts all keys when active
+		if m.sgRuleCreate.Active {
+			var cmd tea.Cmd
+			m.sgRuleCreate, cmd = m.sgRuleCreate.Update(msg)
+			return m, cmd
+		}
+
 		// Project picker modal intercepts all keys when active
 		if m.projectPicker.Active {
 			var cmd tea.Cmd
@@ -295,7 +328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		if m.view != viewServerCreate {
+		if m.view != viewServerCreate && m.view != viewVolumeCreate && m.view != viewKeypairCreate {
 			switch {
 			case key.Matches(msg, shared.Keys.Quit) && m.view != viewCloudPicker:
 				return m, tea.Quit
@@ -383,13 +416,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Volume list: Enter to open detail, ctrl+d to delete
+		// Volume list: Enter to open detail, ctrl+d to delete, ctrl+n to create
 		if m.view == viewVolumeList {
 			if key.Matches(msg, shared.Keys.Enter) {
 				return m.openVolumeDetail()
 			}
 			if key.Matches(msg, shared.Keys.Delete) {
 				return m.openVolumeDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Create) {
+				return m.openVolumeCreate()
 			}
 		}
 
@@ -419,10 +455,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Security group view: ctrl+d delete rule (when on a rule)
+		// Security group view: ctrl+d delete rule, ctrl+n add rule
 		if m.view == viewSecGroupView {
 			if key.Matches(msg, shared.Keys.Delete) {
 				return m.openSGRuleDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Create) {
+				return m.openSGRuleCreate()
 			}
 		}
 
@@ -443,8 +482,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Key pair list: ctrl+d delete
+		// Key pair list: enter detail, ctrl+d delete, ctrl+n create
 		if m.view == viewKeypairList {
+			if key.Matches(msg, shared.Keys.Enter) {
+				return m.openKeypairDetail()
+			}
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openKeyPairDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Create) {
+				return m.openKeypairCreate()
+			}
+		}
+
+		// Key pair detail: ctrl+d delete
+		if m.view == viewKeypairDetail {
 			if key.Matches(msg, shared.Keys.Delete) {
 				return m.openKeyPairDeleteConfirm()
 			}
@@ -478,6 +530,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.tabs = append(m.tabs, TabDef{Name: "Floating IPs", Key: "floatingips"})
 		m.tabs = append(m.tabs, TabDef{Name: "Sec Groups", Key: "secgroups"})
+		m.tabs = append(m.tabs, TabDef{Name: "Networks", Key: "networks"})
 		if msg.LoadBalancerClient != nil {
 			m.tabs = append(m.tabs, TabDef{Name: "Load Balancers", Key: "loadbalancers"})
 		}
@@ -629,7 +682,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case shared.ServerActionMsg:
-		m.statusBar.Hint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
+		m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
 		m.statusBar.Error = ""
 		// Ensure resize modal is dismissed
 		m.serverResize.Active = false
@@ -660,18 +713,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
 
 	case shared.ResourceActionMsg:
-		m.statusBar.Hint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
+		m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
 		m.statusBar.Error = ""
 		// Navigate back to list view if we were on a detail view
 		if m.view == viewVolumeDetail {
 			m.view = viewVolumeList
 			m.statusBar.CurrentView = "volumelist"
-			m.statusBar.Hint = m.volumeList.Hints()
+		}
+		if m.view == viewKeypairDetail {
+			m.view = viewKeypairList
+			m.statusBar.CurrentView = "keypairlist"
 		}
 		if m.view == viewLBDetail {
 			m.view = viewLBList
 			m.statusBar.CurrentView = "lblist"
-			m.statusBar.Hint = m.lbList.Hints()
 		}
 		return m, nil
 
@@ -739,6 +794,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fipPicker.Active {
 			var cmd tea.Cmd
 			m.fipPicker, cmd = m.fipPicker.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.serverPicker.Active {
+			var cmd tea.Cmd
+			m.serverPicker, cmd = m.serverPicker.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.sgRuleCreate.Active {
+			var cmd tea.Cmd
+			m.sgRuleCreate, cmd = m.sgRuleCreate.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.projectPicker.Active {

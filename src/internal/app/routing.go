@@ -39,9 +39,21 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewSecGroupView:
 		m.secGroupView, cmd = m.secGroupView.Update(msg)
 		m.statusBar.Hint = m.secGroupView.Hints()
+	case viewVolumeCreate:
+		m.volumeCreate, cmd = m.volumeCreate.Update(msg)
+		m.statusBar.Hint = m.volumeCreate.Hints()
+	case viewKeypairCreate:
+		m.keypairCreate, cmd = m.keypairCreate.Update(msg)
+		m.statusBar.Hint = m.keypairCreate.Hints()
+	case viewKeypairDetail:
+		m.keypairDetail, cmd = m.keypairDetail.Update(msg)
+		m.statusBar.Hint = m.keypairDetail.Hints()
 	case viewKeypairList:
 		m.keypairList, cmd = m.keypairList.Update(msg)
 		m.statusBar.Hint = m.keypairList.Hints()
+	case viewNetworkList:
+		m.networkList, cmd = m.networkList.Update(msg)
+		m.statusBar.Hint = m.networkList.Hints()
 	case viewLBList:
 		m.lbList, cmd = m.lbList.Update(msg)
 		m.statusBar.Hint = m.lbList.Hints()
@@ -82,6 +94,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 		case "keypairs":
 			m.keypairList, cmd = m.keypairList.Update(msg)
 			cmds = append(cmds, cmd)
+		case "networks":
+			m.networkList, cmd = m.networkList.Update(msg)
+			cmds = append(cmds, cmd)
 		case "loadbalancers":
 			m.lbList, cmd = m.lbList.Update(msg)
 			cmds = append(cmds, cmd)
@@ -107,6 +122,15 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case viewServerCreate:
 		m.serverCreate, cmd = m.serverCreate.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewVolumeCreate:
+		m.volumeCreate, cmd = m.volumeCreate.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewKeypairCreate:
+		m.keypairCreate, cmd = m.keypairCreate.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewKeypairDetail:
+		m.keypairDetail, cmd = m.keypairDetail.Update(msg)
 		cmds = append(cmds, cmd)
 	case viewCloudPicker:
 		m.cloudPicker, cmd = m.cloudPicker.Update(msg)
@@ -166,6 +190,18 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		m.statusBar.Hint = m.volumeList.Hints()
 		return m, nil
 
+	case "volumecreate":
+		return m.openVolumeCreate()
+
+	case "keypairlist":
+		m.view = viewKeypairList
+		m.statusBar.CurrentView = "keypairlist"
+		m.statusBar.Hint = m.keypairList.Hints()
+		return m, nil
+
+	case "keypaircreate":
+		return m.openKeypairCreate()
+
 	case "lblist":
 		m.view = viewLBList
 		m.statusBar.CurrentView = "lblist"
@@ -203,6 +239,8 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.secGroupView.ForceRefresh()
 	case viewKeypairList:
 		return m, m.keypairList.ForceRefresh()
+	case viewNetworkList:
+		return m, m.networkList.ForceRefresh()
 	case viewLBList:
 		return m, m.lbList.ForceRefresh()
 	case viewLBDetail:

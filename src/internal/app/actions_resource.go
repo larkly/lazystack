@@ -6,11 +6,25 @@ import (
 
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/keypaircreate"
+	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/serverpicker"
+	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
+	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 	"charm.land/bubbletea/v2"
 )
+
+func (m Model) openVolumeCreate() (Model, tea.Cmd) {
+	m.volumeCreate = volumecreate.New(m.client.BlockStorage)
+	m.volumeCreate.SetSize(m.width, m.height)
+	m.view = viewVolumeCreate
+	m.statusBar.CurrentView = "volumecreate"
+	m.statusBar.Hint = m.volumeCreate.Hints()
+	return m, m.volumeCreate.Init()
+}
 
 func (m Model) openVolumeDetail() (Model, tea.Cmd) {
 	v := m.volumeList.SelectedVolume()
@@ -51,12 +65,14 @@ func (m Model) openVolumeDeleteConfirm() (Model, tea.Cmd) {
 }
 
 func (m Model) openVolumeAttach() (Model, tea.Cmd) {
-	// Attach requires a server ID — for now, show an error that this needs CLI
-	// A full implementation would need a server picker modal
-	m.errModal = modal.NewError("Attach Volume", fmt.Errorf("use 'openstack server add volume' CLI to attach volumes"))
-	m.errModal.SetSize(m.width, m.height)
-	m.activeModal = modalError
-	return m, nil
+	id := m.volumeDetail.SelectedVolumeID()
+	name := m.volumeDetail.SelectedVolumeName()
+	if id == "" {
+		return m, nil
+	}
+	m.serverPicker = serverpicker.New(m.client.Compute, id, name)
+	m.serverPicker.SetSize(m.width, m.height)
+	return m, m.serverPicker.Init()
 }
 
 func (m Model) openVolumeDetach() (Model, tea.Cmd) {
@@ -139,6 +155,17 @@ func (m Model) openSGRuleDeleteConfirm() (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) openSGRuleCreate() (Model, tea.Cmd) {
+	sgID := m.secGroupView.SelectedGroupID()
+	sgName := m.secGroupView.SelectedGroupName()
+	if sgID == "" {
+		return m, nil
+	}
+	m.sgRuleCreate = sgrulecreate.New(m.client.Network, sgID, sgName)
+	m.sgRuleCreate.SetSize(m.width, m.height)
+	return m, m.sgRuleCreate.Init()
+}
+
 // --- Load Balancer actions ---
 
 func (m Model) openLBDetail() (Model, tea.Cmd) {
@@ -181,14 +208,44 @@ func (m Model) openLBDeleteConfirm() (Model, tea.Cmd) {
 
 // --- Key Pair actions ---
 
-func (m Model) openKeyPairDeleteConfirm() (Model, tea.Cmd) {
+func (m Model) openKeypairDetail() (Model, tea.Cmd) {
 	kp := m.keypairList.SelectedKeyPair()
 	if kp == nil {
 		return m, nil
 	}
-	m.confirm = modal.NewConfirm("delete_keypair", kp.Name, kp.Name)
+	m.keypairDetail = keypairdetail.New(m.client.Compute, kp.Name)
+	m.keypairDetail.SetSize(m.width, m.height)
+	m.view = viewKeypairDetail
+	m.statusBar.CurrentView = "keypairdetail"
+	m.statusBar.Hint = m.keypairDetail.Hints()
+	return m, m.keypairDetail.Init()
+}
+
+func (m Model) openKeypairCreate() (Model, tea.Cmd) {
+	m.keypairCreate = keypaircreate.New(m.client.Compute)
+	m.keypairCreate.SetSize(m.width, m.height)
+	m.view = viewKeypairCreate
+	m.statusBar.CurrentView = "keypaircreate"
+	m.statusBar.Hint = m.keypairCreate.Hints()
+	return m, m.keypairCreate.Init()
+}
+
+func (m Model) openKeyPairDeleteConfirm() (Model, tea.Cmd) {
+	var name string
+	switch m.view {
+	case viewKeypairList:
+		if kp := m.keypairList.SelectedKeyPair(); kp != nil {
+			name = kp.Name
+		}
+	case viewKeypairDetail:
+		name = m.keypairDetail.KeyPairName()
+	}
+	if name == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_keypair", name, name)
 	m.confirm.Title = "Delete Key Pair"
-	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete key pair %q?", kp.Name)
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete key pair %q?", name)
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil

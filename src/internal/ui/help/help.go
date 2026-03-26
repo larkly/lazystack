@@ -109,6 +109,7 @@ func (m *Model) buildLines() {
 			binds: []string{
 				"↑/k ↓/j      navigate / scroll",
 				"enter         view detail",
+				"ctrl+n        create volume",
 				"ctrl+d        delete volume",
 				"ctrl+a        attach to server",
 				"ctrl+t        detach from server",
@@ -129,15 +130,26 @@ func (m *Model) buildLines() {
 			binds: []string{
 				"↑/k ↓/j      navigate groups / rules",
 				"enter         expand / collapse group",
+				"ctrl+n        add rule to group",
 				"ctrl+d        delete selected rule",
 				"esc           back to group list",
+			},
+		},
+		{
+			name: "Networks",
+			binds: []string{
+				"↑/k ↓/j      navigate networks",
+				"enter         expand / collapse subnets",
 			},
 		},
 		{
 			name: "Key Pairs",
 			binds: []string{
 				"↑/k ↓/j      navigate",
+				"enter         view detail (public key)",
+				"ctrl+n        create / import key pair",
 				"ctrl+d        delete key pair",
+				"esc           back to list",
 			},
 		},
 		{

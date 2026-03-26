@@ -118,6 +118,34 @@ func CreateVolume(ctx context.Context, client *gophercloud.ServiceClient, opts v
 	return vol, nil
 }
 
+// VolumeType is a simplified block storage volume type.
+type VolumeType struct {
+	ID   string
+	Name string
+}
+
+// ListVolumeTypes fetches all volume types.
+func ListVolumeTypes(ctx context.Context, client *gophercloud.ServiceClient) ([]VolumeType, error) {
+	url := client.ServiceURL("types")
+	var body struct {
+		VolumeTypes []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"volume_types"`
+	}
+	resp, err := client.Get(ctx, url, &body, nil)
+	if err != nil {
+		return nil, fmt.Errorf("listing volume types: %w", err)
+	}
+	resp.Body.Close()
+
+	result := make([]VolumeType, len(body.VolumeTypes))
+	for i, vt := range body.VolumeTypes {
+		result[i] = VolumeType{ID: vt.ID, Name: vt.Name}
+	}
+	return result, nil
+}
+
 // DeleteVolume deletes a volume.
 func DeleteVolume(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
 	r := volumes.Delete(ctx, client, id, volumes.DeleteOpts{})
@@ -134,7 +162,9 @@ func AttachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient,
 			"volumeId": volumeID,
 		},
 	}
-	resp, err := computeClient.Post(ctx, computeClient.ServiceURL("servers", serverID, "os-volume_attachments"), body, nil, nil)
+	resp, err := computeClient.Post(ctx, computeClient.ServiceURL("servers", serverID, "os-volume_attachments"), body, nil, &gophercloud.RequestOpts{
+		OkCodes: []int{200, 201, 202},
+	})
 	if err != nil {
 		return fmt.Errorf("attaching volume %s to server %s: %w", volumeID, serverID, err)
 	}

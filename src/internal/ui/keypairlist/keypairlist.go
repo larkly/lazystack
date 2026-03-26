@@ -19,6 +19,7 @@ import (
 type keypairsLoadedMsg struct{ keypairs []compute.KeyPair }
 type keypairsErrMsg struct{ err error }
 type sortClearMsg struct{}
+type tickMsg struct{}
 
 var kpSortColumns = []string{"name", "type"}
 
@@ -34,25 +35,27 @@ type Model struct {
 	err           string
 	sortCol       int
 	sortAsc       bool
-	sortHighlight bool
-	sortClearAt   time.Time
+	sortHighlight   bool
+	sortClearAt     time.Time
+	refreshInterval time.Duration
 }
 
 // New creates a keypair list model.
-func New(client *gophercloud.ServiceClient) Model {
+func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	return Model{
-		client:  client,
-		loading: true,
-		spinner: s,
-		sortAsc: true,
+		client:          client,
+		loading:         true,
+		spinner:         s,
+		sortAsc:         true,
+		refreshInterval: refreshInterval,
 	}
 }
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchKeypairs())
+	return tea.Batch(m.spinner.Tick, m.fetchKeypairs(), m.tickCmd())
 }
 
 // Update handles messages.
@@ -69,6 +72,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
+
+	case tickMsg:
+		return m, tea.Batch(m.fetchKeypairs(), m.tickCmd())
+
+	case shared.TickMsg:
+		return m, tea.Batch(m.fetchKeypairs(), m.tickCmd())
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -242,6 +251,12 @@ func (m Model) fetchKeypairs() tea.Cmd {
 	}
 }
 
+func (m Model) tickCmd() tea.Cmd {
+	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
+		return tickMsg{}
+	})
+}
+
 // ForceRefresh triggers a manual reload of the keypair list.
 func (m *Model) ForceRefresh() tea.Cmd {
 	m.loading = true
@@ -256,5 +271,5 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints.
 func (m Model) Hints() string {
-	return "↑↓ navigate • ^d delete • R refresh • 1-5/←→ switch tab • ? help"
+	return "↑↓ navigate • enter detail • ^n create • ^d delete • R refresh • 1-5/←→ switch tab • ? help"
 }
