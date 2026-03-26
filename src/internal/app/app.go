@@ -22,6 +22,10 @@ import (
 	"github.com/larkly/lazystack/internal/ui/lblist"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/networkcreate"
+	"github.com/larkly/lazystack/internal/ui/routercreate"
+	"github.com/larkly/lazystack/internal/ui/routerdetail"
+	"github.com/larkly/lazystack/internal/ui/routerlist"
+	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/networklist"
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/projectpicker"
@@ -62,6 +66,8 @@ const (
 	viewKeypairCreate
 	viewNetworkList
 	viewKeypairDetail
+	viewRouterList
+	viewRouterDetail
 )
 
 type modalType int
@@ -110,6 +116,10 @@ type Model struct {
 	sgCreate       sgcreate.Model
 	networkCreate  networkcreate.Model
 	subnetCreate   subnetcreate.Model
+	routerList     routerlist.Model
+	routerDetail   routerdetail.Model
+	routerCreate   routercreate.Model
+	subnetPicker   subnetpicker.Model
 	sgRuleCreate  sgrulecreate.Model
 	projectPicker projectpicker.Model
 	volumeList    volumelist.Model
@@ -264,6 +274,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sgRuleCreate.SetSize(m.width, m.height)
 		m.networkCreate.SetSize(m.width, m.height)
 		m.subnetCreate.SetSize(m.width, m.height)
+		m.routerCreate.SetSize(m.width, m.height)
+		m.subnetPicker.SetSize(m.width, m.height)
 		m.projectPicker.SetSize(m.width, m.height)
 		m.statusBar.Width = m.width
 		return m.updateActiveView(msg)
@@ -320,6 +332,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverPicker.Active {
 			var cmd tea.Cmd
 			m.serverPicker, cmd = m.serverPicker.Update(msg)
+			return m, cmd
+		}
+
+		// Router create modal intercepts all keys when active
+		if m.routerCreate.Active {
+			var cmd tea.Cmd
+			m.routerCreate, cmd = m.routerCreate.Update(msg)
+			return m, cmd
+		}
+
+		// Subnet picker modal intercepts all keys when active
+		if m.subnetPicker.Active {
+			var cmd tea.Cmd
+			m.subnetPicker, cmd = m.subnetPicker.Update(msg)
 			return m, cmd
 		}
 
@@ -426,6 +452,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.Shelve) {
 				return m.openToggleConfirm("shelve/unshelve")
 			}
+			if key.Matches(msg, shared.Keys.StopStart) {
+				return m.openToggleConfirm("stop/start")
+			}
+			if key.Matches(msg, shared.Keys.Lock) {
+				return m.openToggleConfirm("lock/unlock")
+			}
 			if key.Matches(msg, shared.Keys.Console) {
 				return m.openConsoleLog()
 			}
@@ -519,6 +551,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Router list: Enter detail, ctrl+n create, ctrl+d delete
+		if m.view == viewRouterList {
+			if key.Matches(msg, shared.Keys.Enter) {
+				return m.openRouterDetail()
+			}
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openRouterDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Create) {
+				return m.openRouterCreate()
+			}
+		}
+
+		// Router detail: ctrl+a add interface, ctrl+t remove interface, ctrl+d delete
+		if m.view == viewRouterDetail {
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openRouterDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Attach) {
+				return m.openAddRouterInterface()
+			}
+			if key.Matches(msg, shared.Keys.Detach) {
+				return m.openRemoveRouterInterfaceConfirm()
+			}
+		}
+
 		// Load balancer list: Enter to open detail, ctrl+d to delete
 		if m.view == viewLBList {
 			if key.Matches(msg, shared.Keys.Enter) {
@@ -585,6 +643,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tabs = append(m.tabs, TabDef{Name: "Floating IPs", Key: "floatingips"})
 		m.tabs = append(m.tabs, TabDef{Name: "Sec Groups", Key: "secgroups"})
 		m.tabs = append(m.tabs, TabDef{Name: "Networks", Key: "networks"})
+		m.tabs = append(m.tabs, TabDef{Name: "Routers", Key: "routers"})
 		if msg.LoadBalancerClient != nil {
 			m.tabs = append(m.tabs, TabDef{Name: "Load Balancers", Key: "loadbalancers"})
 		}
@@ -778,6 +837,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = viewKeypairList
 			m.statusBar.CurrentView = "keypairlist"
 		}
+		if m.view == viewRouterDetail {
+			m.view = viewRouterList
+			m.statusBar.CurrentView = "routerlist"
+		}
 		if m.view == viewLBDetail {
 			m.view = viewLBList
 			m.statusBar.CurrentView = "lblist"
@@ -853,6 +916,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverPicker.Active {
 			var cmd tea.Cmd
 			m.serverPicker, cmd = m.serverPicker.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.routerCreate.Active {
+			var cmd tea.Cmd
+			m.routerCreate, cmd = m.routerCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.subnetPicker.Active {
+			var cmd tea.Cmd
+			m.subnetPicker, cmd = m.subnetPicker.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.networkCreate.Active {

@@ -12,7 +12,10 @@ import (
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/routercreate"
+	"github.com/larkly/lazystack/internal/ui/routerdetail"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
+	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
@@ -232,6 +235,81 @@ func (m Model) openSubnetDeleteConfirm() (Model, tea.Cmd) {
 	m.confirm = modal.NewConfirm("delete_subnet", subID, subName)
 	m.confirm.Title = "Delete Subnet"
 	m.confirm.Body = fmt.Sprintf("Delete subnet %q from network %q?", subName, netName)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Router actions ---
+
+func (m Model) openRouterDetail() (Model, tea.Cmd) {
+	r := m.routerList.SelectedRouter()
+	if r == nil {
+		return m, nil
+	}
+	m.routerDetail = routerdetail.New(m.client.Network, r.ID, m.refreshInterval)
+	m.routerDetail.SetSize(m.width, m.height)
+	m.view = viewRouterDetail
+	m.statusBar.CurrentView = "routerdetail"
+	m.statusBar.Hint = m.routerDetail.Hints()
+	return m, m.routerDetail.Init()
+}
+
+func (m Model) openRouterCreate() (Model, tea.Cmd) {
+	m.routerCreate = routercreate.New(m.client.Network)
+	m.routerCreate.SetSize(m.width, m.height)
+	return m, m.routerCreate.Init()
+}
+
+func (m Model) openRouterDeleteConfirm() (Model, tea.Cmd) {
+	var id, name string
+	switch m.view {
+	case viewRouterList:
+		if r := m.routerList.SelectedRouter(); r != nil {
+			id, name = r.ID, r.Name
+		}
+	case viewRouterDetail:
+		id = m.routerDetail.RouterID()
+		name = m.routerDetail.RouterName()
+	}
+	if id == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_router", id, name)
+	m.confirm.Title = "Delete Router"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete router %q?\nAll interfaces will be removed.", name)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+func (m Model) openAddRouterInterface() (Model, tea.Cmd) {
+	if m.view != viewRouterDetail {
+		return m, nil
+	}
+	id := m.routerDetail.RouterID()
+	name := m.routerDetail.RouterName()
+	if id == "" {
+		return m, nil
+	}
+	m.subnetPicker = subnetpicker.New(m.client.Network, id, name)
+	m.subnetPicker.SetSize(m.width, m.height)
+	return m, m.subnetPicker.Init()
+}
+
+func (m Model) openRemoveRouterInterfaceConfirm() (Model, tea.Cmd) {
+	if m.view != viewRouterDetail {
+		return m, nil
+	}
+	subnetID := m.routerDetail.SelectedInterfaceSubnetID()
+	if subnetID == "" {
+		return m, nil
+	}
+	routerID := m.routerDetail.RouterID()
+	routerName := m.routerDetail.RouterName()
+	m.confirm = modal.NewConfirm("remove_router_interface", routerID, routerName)
+	m.confirm.Title = "Remove Interface"
+	m.confirm.Body = fmt.Sprintf("Remove subnet interface from router %q?", routerName)
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil

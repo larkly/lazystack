@@ -9,6 +9,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/lblist"
 	"github.com/larkly/lazystack/internal/ui/networklist"
+	"github.com/larkly/lazystack/internal/ui/routerlist"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 	"charm.land/bubbletea/v2"
@@ -35,7 +36,7 @@ func DefaultTabs() []TabDef {
 
 func (m Model) isTopLevelView() bool {
 	switch m.view {
-	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBList, viewNetworkList:
+	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBList, viewNetworkList, viewRouterList:
 		return true
 	}
 	return false
@@ -121,6 +122,19 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.lbList.Init()
 		}
 		m.statusBar.Hint = m.lbList.Hints()
+		return m, nil
+
+	case "routers":
+		m.view = viewRouterList
+		m.statusBar.CurrentView = "routerlist"
+		if !m.tabInited[idx] {
+			m.routerList = routerlist.New(m.client.Network, m.refreshInterval)
+			m.routerList.SetSize(m.width, m.height)
+			m.tabInited[idx] = true
+			m.statusBar.Hint = m.routerList.Hints()
+			return m, m.routerList.Init()
+		}
+		m.statusBar.Hint = m.routerList.Hints()
 		return m, nil
 
 	case "keypairs":

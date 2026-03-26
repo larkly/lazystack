@@ -628,6 +628,26 @@ src/
 - ~~**Volume Attach from detail**~~: ✓ Complete — server picker modal
 - ~~**Network/subnet browsing**~~: ✓ Complete — Networks tab with expandable subnets
 
+### Server Action Gaps
+
+Actions available in Nova but not yet implemented, prioritized by usefulness:
+
+#### High-value (Phase 5 candidates)
+- **Rename server** — Update server name from detail view (`servers.Update`). Quick inline edit, no modal needed.
+- **Rebuild** — Rebuild with new image, keeping same ID/IPs. Modal with image picker + confirmation (destructive). Uses `servers.Rebuild`.
+- **Create snapshot** — Create image from running server (`servers.CreateImage`). Show progress in status bar.
+
+#### Medium-value (specific scenarios)
+- **Rescue/Unrescue** — Boot into rescue mode for broken servers. Rare but valuable for recovery.
+- **Get password** — Retrieve auto-generated password for Windows VMs (`servers.GetPassword`).
+
+#### Admin-only (Phase 6)
+- **Migrate / Live Migrate** — Move server to different hypervisor. Admin privilege required.
+- **Evacuate** — Emergency recovery from failed host. Admin-only.
+- **Force Delete** — Bypass normal deletion flow. Admin-only.
+- **Reset State** — Force server into a specific state. Recovery from stuck transitions.
+- **Metadata browser** — Full CRUD on server metadata key-value pairs.
+
 ### Phase 5: Quality of Life
 - Configuration file (`~/.config/lazystack/config.yaml`) for defaults
 - Custom column selection and ordering
@@ -637,11 +657,13 @@ src/
 - Copy-to-clipboard for IDs, IPs
 - Log/audit trail of actions taken
 - Designate (DNS) tab
+- Server rename, rebuild, snapshot (see Server Action Gaps above)
 
 ### Phase 6: Operational
 - Hypervisor view (admin)
 - User management (admin)
 - Service catalog browser
+- Migrate/evacuate, force delete, reset state (see Server Action Gaps above)
 
 ## Non-Goals
 

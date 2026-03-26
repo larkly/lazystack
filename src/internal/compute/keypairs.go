@@ -115,9 +115,7 @@ func ImportKeyPair(ctx context.Context, client *gophercloud.ServiceClient, name,
 		Name:      name,
 		PublicKey: publicKey,
 	}
-	client.Microversion = "2.2"
 	kp, err := keypairs.Create(ctx, client, opts).Extract()
-	client.Microversion = ""
 	if err != nil {
 		return nil, fmt.Errorf("importing keypair %s: %w", name, err)
 	}
