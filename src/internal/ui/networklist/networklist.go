@@ -30,7 +30,7 @@ type Model struct {
 	subnets         map[string]network.Subnet
 	ports           map[string][]network.Port // NetworkID → Ports
 	cursor          int
-	expanded        map[int]bool
+	expanded        map[string]bool // network ID → expanded
 	inSubnets       bool
 	subnetCursor    int
 	scrollOff       int
@@ -50,7 +50,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 		client:          client,
 		loading:         true,
 		spinner:         s,
-		expanded:        make(map[int]bool),
+		expanded:        make(map[string]bool),
 		subnets:         make(map[string]network.Subnet),
 		refreshInterval: refreshInterval,
 	}
@@ -75,6 +75,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.subnets = msg.subnets
 		m.ports = msg.ports
 		m.err = ""
+		if m.cursor >= len(m.networks) && len(m.networks) > 0 {
+			m.cursor = len(m.networks) - 1
+			m.inSubnets = false
+		}
 		return m, nil
 	case networksErrMsg:
 		m.loading = false
@@ -101,6 +105,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) isExpanded(idx int) bool {
+	if idx < 0 || idx >= len(m.networks) {
+		return false
+	}
+	return m.expanded[m.networks[idx].ID]
+}
+
+func (m *Model) toggleExpanded(idx int) {
+	if idx < 0 || idx >= len(m.networks) {
+		return
+	}
+	id := m.networks[idx].ID
+	m.expanded[id] = !m.expanded[id]
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.inSubnets {
 		return m.handleSubnetKey(msg)
@@ -113,16 +132,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.ensureVisible()
 		}
 	case key.Matches(msg, shared.Keys.Down):
-		if m.cursor < len(m.networks)-1 {
-			m.cursor++
-			m.ensureVisible()
-		} else if m.expanded[m.cursor] && len(m.networks[m.cursor].SubnetIDs) > 0 {
+		if m.isExpanded(m.cursor) && len(m.networks[m.cursor].SubnetIDs) > 0 {
 			m.inSubnets = true
 			m.subnetCursor = 0
+		} else if m.cursor < len(m.networks)-1 {
+			m.cursor++
+			m.ensureVisible()
 		}
 	case key.Matches(msg, shared.Keys.Enter):
-		m.expanded[m.cursor] = !m.expanded[m.cursor]
-		if !m.expanded[m.cursor] {
+		m.toggleExpanded(m.cursor)
+		if !m.isExpanded(m.cursor) {
 			m.inSubnets = false
 		}
 	case key.Matches(msg, shared.Keys.PageDown):
@@ -256,7 +275,7 @@ func (m Model) View() string {
 		}
 
 		// Show expanded subnets
-		if m.expanded[i] {
+		if m.isExpanded(i) {
 			for j, subID := range net.SubnetIDs {
 				sub, ok := m.subnets[subID]
 				isSubSel := m.inSubnets && i == m.cursor && j == m.subnetCursor
