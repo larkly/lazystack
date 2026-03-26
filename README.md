@@ -44,6 +44,12 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 
 ## Installation
 
+### Homebrew (macOS & Linux)
+
+```bash
+brew install larkly/tap/lazystack
+```
+
 ### Pre-built binaries
 
 Grab the latest release for your platform from the [releases page](https://github.com/larkly/lazystack/releases/latest).
