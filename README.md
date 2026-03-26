@@ -26,11 +26,13 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 
 ## Features
 
-- **Server management** — list, create, delete, reboot, pause, suspend, shelve, resize with bulk operations
-- **Volume management** — list, detail, delete, detach
+- **Server management** — list, create, delete, reboot, stop/start, pause, suspend, shelve, lock/unlock, resize with bulk operations
+- **Volume management** — list, detail, create, delete, attach (server picker), detach
 - **Floating IPs** — allocate, associate, disassociate, release
-- **Security groups** — browse groups, expand rules, delete rules
-- **Key pairs** — list and delete
+- **Security groups** — create/delete groups, create/delete rules, expandable rule view
+- **Networks** — create/delete networks, create/delete subnets, read-only port listing
+- **Routers** — create/delete routers, add/remove interfaces (subnet picker), detail with routes
+- **Key pairs** — create (RSA 2048/4096, ED25519), import with ~/.ssh/ file browser, detail view, save private key to file
 - **Load balancers** (Octavia) — list, detail tree (listeners/pools/members), cascade delete
 - **Project switching** — switch between accessible Keystone projects without restarting
 - **Quota overlay** — compute, network, and storage quotas with color-coded progress bars
@@ -122,12 +124,14 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+N` | Create server |
 | `Ctrl+D` | Delete |
 | `Ctrl+O` | Soft reboot |
+| `o` | Stop / start |
 | `p` | Pause / unpause |
 | `Ctrl+Z` | Suspend / resume |
 | `Ctrl+E` | Shelve / unshelve |
+| `Ctrl+L` | Lock / unlock |
 | `Ctrl+F` | Resize |
 | `Ctrl+A` | Assign floating IP |
-| `l` | Console log |
+| `L` | Console log |
 | `a` | Action history |
 
 ### Server detail
@@ -137,13 +141,15 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `j` / `k` | Scroll |
 | `Ctrl+D` | Delete |
 | `Ctrl+O` / `Ctrl+P` | Soft / hard reboot |
+| `o` | Stop / start |
 | `p` | Pause / unpause |
 | `Ctrl+Z` | Suspend / resume |
 | `Ctrl+E` | Shelve / unshelve |
+| `Ctrl+L` | Lock / unlock |
 | `Ctrl+F` | Resize |
 | `Ctrl+Y` / `Ctrl+X` | Confirm / revert resize |
 | `Ctrl+A` | Assign floating IP |
-| `l` | Console log |
+| `L` | Console log |
 | `a` | Action history |
 | `Esc` | Back to list |
 
@@ -152,7 +158,9 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | Key | Action |
 |-----|--------|
 | `Enter` | View detail |
+| `Ctrl+N` | Create volume |
 | `Ctrl+D` | Delete |
+| `Ctrl+A` | Attach to server (from detail) |
 | `Ctrl+T` | Detach (from detail) |
 
 ### Floating IPs
@@ -168,7 +176,34 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | Key | Action |
 |-----|--------|
 | `Enter` | Expand / collapse rules |
-| `Ctrl+D` | Delete selected rule |
+| `Ctrl+N` | Create group (or add rule when in rules) |
+| `Ctrl+D` | Delete group (or rule when in rules) |
+
+### Networks
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Expand / collapse subnets |
+| `Ctrl+N` | Create network (or subnet when expanded) |
+| `Ctrl+D` | Delete network (or subnet in subnets) |
+
+### Routers
+
+| Key | Action |
+|-----|--------|
+| `Enter` | View detail (interfaces) |
+| `Ctrl+N` | Create router |
+| `Ctrl+D` | Delete router |
+| `Ctrl+A` | Add interface (from detail) |
+| `Ctrl+T` | Remove interface (from detail) |
+
+### Key pairs
+
+| Key | Action |
+|-----|--------|
+| `Enter` | View detail (public key) |
+| `Ctrl+N` | Create / import |
+| `Ctrl+D` | Delete |
 
 ### Load balancers
 
@@ -200,12 +235,12 @@ src/internal/
   app/            # Root model, routing, actions, rendering (7 files)
   cloud/          # Auth, service detection, project listing
   compute/        # Nova: servers, flavors, keypairs, actions
-  network/        # Neutron: networks, floating IPs, security groups
-  volume/         # Cinder: volumes
+  network/        # Neutron: networks, subnets, ports, routers, floating IPs, security groups
+  volume/         # Cinder: volumes, volume types
   loadbalancer/   # Octavia: LBs, listeners, pools, members
   quota/          # Quota fetching (compute, network, storage)
   shared/         # Keys, styles, messages
-  ui/             # All view components (14 packages)
+  ui/             # All view components (25 packages)
 ```
 
 ## License
