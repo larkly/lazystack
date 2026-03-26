@@ -18,6 +18,7 @@ type Model struct {
 	Hint        string
 	Error       string
 	Version     string
+	StickyHint  string // survives until next key press
 }
 
 // New creates a new status bar.
@@ -59,6 +60,8 @@ func (m Model) Render() string {
 		right = lipgloss.NewStyle().
 			Foreground(shared.ColorError).
 			Render(fmt.Sprintf(" ⚠ %s ", m.Error))
+	} else if m.StickyHint != "" {
+		right = shared.StyleHelp.Render(fmt.Sprintf(" %s ", m.StickyHint))
 	} else if m.Hint != "" {
 		right = shared.StyleHelp.Render(fmt.Sprintf(" %s ", m.Hint))
 	}

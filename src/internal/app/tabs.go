@@ -8,6 +8,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/lblist"
+	"github.com/larkly/lazystack/internal/ui/networklist"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 	"charm.land/bubbletea/v2"
@@ -27,13 +28,14 @@ func DefaultTabs() []TabDef {
 		{Name: "Volumes", Key: "volumes"},
 		{Name: "Floating IPs", Key: "floatingips"},
 		{Name: "Sec Groups", Key: "secgroups"},
+		{Name: "Networks", Key: "networks"},
 		{Name: "Key Pairs", Key: "keypairs"},
 	}
 }
 
 func (m Model) isTopLevelView() bool {
 	switch m.view {
-	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBList:
+	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBList, viewNetworkList:
 		return true
 	}
 	return false
@@ -95,6 +97,19 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 		m.statusBar.Hint = m.secGroupView.Hints()
 		return m, nil
 
+	case "networks":
+		m.view = viewNetworkList
+		m.statusBar.CurrentView = "networklist"
+		if !m.tabInited[idx] {
+			m.networkList = networklist.New(m.client.Network, m.refreshInterval)
+			m.networkList.SetSize(m.width, m.height)
+			m.tabInited[idx] = true
+			m.statusBar.Hint = m.networkList.Hints()
+			return m, m.networkList.Init()
+		}
+		m.statusBar.Hint = m.networkList.Hints()
+		return m, nil
+
 	case "loadbalancers":
 		m.view = viewLBList
 		m.statusBar.CurrentView = "lblist"
@@ -112,7 +127,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 		m.view = viewKeypairList
 		m.statusBar.CurrentView = "keypairlist"
 		if !m.tabInited[idx] {
-			m.keypairList = keypairlist.New(m.client.Compute)
+			m.keypairList = keypairlist.New(m.client.Compute, m.refreshInterval)
 			m.keypairList.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
 			m.statusBar.Hint = m.keypairList.Hints()

@@ -27,12 +27,20 @@ func (m Model) viewName() string {
 		return "volumelist"
 	case viewVolumeDetail:
 		return "volumedetail"
+	case viewVolumeCreate:
+		return "volumecreate"
 	case viewFloatingIPList:
 		return "floatingiplist"
 	case viewSecGroupView:
 		return "secgroupview"
 	case viewKeypairList:
 		return "keypairlist"
+	case viewNetworkList:
+		return "networklist"
+	case viewKeypairCreate:
+		return "keypaircreate"
+	case viewKeypairDetail:
+		return "keypairdetail"
 	case viewLBList:
 		return "lblist"
 	case viewLBDetail:
@@ -73,6 +81,12 @@ func (m Model) viewContent() string {
 	if m.fipPicker.Active {
 		return m.fipPicker.View()
 	}
+	if m.serverPicker.Active {
+		return m.serverPicker.View()
+	}
+	if m.sgRuleCreate.Active {
+		return m.sgRuleCreate.View()
+	}
 	if m.projectPicker.Active {
 		return m.projectPicker.View()
 	}
@@ -102,12 +116,20 @@ func (m Model) viewContent() string {
 		content = m.volumeList.View()
 	case viewVolumeDetail:
 		content = m.volumeDetail.View()
+	case viewVolumeCreate:
+		content = m.volumeCreate.View()
 	case viewFloatingIPList:
 		content = m.floatingIPList.View()
 	case viewSecGroupView:
 		content = m.secGroupView.View()
 	case viewKeypairList:
 		content = m.keypairList.View()
+	case viewNetworkList:
+		content = m.networkList.View()
+	case viewKeypairCreate:
+		content = m.keypairCreate.View()
+	case viewKeypairDetail:
+		content = m.keypairDetail.View()
 	case viewLBList:
 		content = m.lbList.View()
 	case viewLBDetail:

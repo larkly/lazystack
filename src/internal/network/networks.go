@@ -7,15 +7,36 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 )
 
 // Network is a simplified representation of a Neutron network.
 type Network struct {
-	ID     string
-	Name   string
-	Status string
-	Shared bool
+	ID        string
+	Name      string
+	Status    string
+	Shared    bool
+	External  bool
+	SubnetIDs []string
+}
+
+// Subnet is a simplified representation of a Neutron subnet.
+type Subnet struct {
+	ID              string
+	Name            string
+	NetworkID       string
+	CIDR            string
+	GatewayIP       string
+	IPVersion       int
+	EnableDHCP      bool
+	AllocationPools []AllocationPool
+}
+
+// AllocationPool is a DHCP allocation pool range.
+type AllocationPool struct {
+	Start string
+	End   string
 }
 
 // ListNetworks fetches all available networks.
@@ -30,16 +51,51 @@ func ListNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Net
 		}
 		for _, n := range extracted {
 			result = append(result, Network{
-				ID:     n.ID,
-				Name:   n.Name,
-				Status: n.Status,
-				Shared: n.Shared,
+				ID:        n.ID,
+				Name:      n.Name,
+				Status:    n.Status,
+				Shared:    n.Shared,
+				SubnetIDs: n.Subnets,
 			})
 		}
 		return true, nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("listing networks: %w", err)
+	}
+	return result, nil
+}
+
+// ListSubnets fetches all subnets.
+func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subnet, error) {
+	var result []Subnet
+	err := subnets.List(client, subnets.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+		extracted, err := subnets.ExtractSubnets(page)
+		if err != nil {
+			return false, err
+		}
+		for _, s := range extracted {
+			sub := Subnet{
+				ID:         s.ID,
+				Name:       s.Name,
+				NetworkID:  s.NetworkID,
+				CIDR:       s.CIDR,
+				GatewayIP:  s.GatewayIP,
+				IPVersion:  s.IPVersion,
+				EnableDHCP: s.EnableDHCP,
+			}
+			for _, pool := range s.AllocationPools {
+				sub.AllocationPools = append(sub.AllocationPools, AllocationPool{
+					Start: pool.Start,
+					End:   pool.End,
+				})
+			}
+			result = append(result, sub)
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing subnets: %w", err)
 	}
 	return result, nil
 }
