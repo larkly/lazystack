@@ -502,6 +502,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Network list: context-sensitive create/delete for networks and subnets
+		// When expanded: ctrl+n creates subnet, ctrl+d on subnet deletes subnet
+		// When collapsed: ctrl+n creates network, ctrl+d deletes network
 		if m.view == viewNetworkList {
 			if key.Matches(msg, shared.Keys.Delete) {
 				if m.networkList.InSubnets() {
@@ -510,7 +512,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openNetworkDeleteConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Create) {
-				if m.networkList.InSubnets() {
+				if m.networkList.InSubnets() || m.networkList.IsExpanded() {
 					return m.openSubnetCreate()
 				}
 				return m.openNetworkCreate()

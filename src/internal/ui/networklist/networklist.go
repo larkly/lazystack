@@ -364,6 +364,11 @@ func (m Model) InSubnets() bool {
 	return m.inSubnets
 }
 
+// IsExpanded returns true if the network at the cursor is expanded.
+func (m Model) IsExpanded() bool {
+	return m.isExpanded(m.cursor)
+}
+
 // SelectedNetworkID returns the ID of the network at the cursor.
 func (m Model) SelectedNetworkID() string {
 	if m.cursor >= 0 && m.cursor < len(m.networks) {
@@ -409,7 +414,10 @@ func (m Model) Hints() string {
 	if m.inSubnets {
 		return "↑↓ navigate subnets • ^n create subnet • ^d delete subnet • esc back • R refresh • ? help"
 	}
-	return "↑↓ navigate • enter expand/collapse • ^n create network • ^d delete network • R refresh • 1-5/←→ switch tab • ? help"
+	if m.isExpanded(m.cursor) {
+		return "↑↓ navigate • enter collapse • ^n create subnet • ^d delete network • R refresh • 1-5/←→ switch tab • ? help"
+	}
+	return "↑↓ navigate • enter expand • ^n create network • ^d delete network • R refresh • 1-5/←→ switch tab • ? help"
 }
 
 func (m Model) fetchNetworks() tea.Cmd {
