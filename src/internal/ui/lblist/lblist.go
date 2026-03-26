@@ -165,11 +165,18 @@ func (m Model) View() string {
 		return b.String()
 	}
 
+	// Name column gets remaining width after fixed columns
+	fixedW := 18 + 16 + 14 + 3 + 2 // vip + prov + oper + gaps + prefix
+	nameW := m.width - fixedW
+	if nameW < 20 {
+		nameW = 20
+	}
+
 	headerTitles := []struct {
 		title string
 		width int
 	}{
-		{"Name", 28},
+		{"Name", nameW},
 		{"VIP Address", 18},
 		{"Prov. Status", 16},
 		{"Oper. Status", 14},
@@ -222,7 +229,7 @@ func (m Model) View() string {
 			hasBg = true
 		}
 
-		nameStyle := lipgloss.NewStyle().Width(28)
+		nameStyle := lipgloss.NewStyle().Width(nameW)
 		vipStyle := lipgloss.NewStyle().Width(18)
 		psStyle := provStyle.Width(16)
 		osStyle := operStyle.Width(14)
@@ -235,7 +242,7 @@ func (m Model) View() string {
 		}
 
 		parts := []string{
-			nameStyle.Render(truncate(name, 28)),
+			nameStyle.Render(truncate(name, nameW)),
 			vipStyle.Render(truncate(lb.VipAddress, 18)),
 			psStyle.Render(truncate(lb.ProvisioningStatus, 16)),
 			osStyle.Render(truncate(lb.OperatingStatus, 14)),
@@ -266,8 +273,11 @@ func (m Model) View() string {
 }
 
 func truncate(s string, w int) string {
-	if len(s) > w && w > 1 {
-		return s[:w-1] + "..."
+	if len(s) > w && w > 3 {
+		return s[:w-3] + "..."
+	}
+	if len(s) > w {
+		return s[:w]
 	}
 	return s
 }

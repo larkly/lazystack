@@ -18,6 +18,7 @@ import (
 type networksLoadedMsg struct {
 	networks []network.Network
 	subnets  map[string]network.Subnet // ID → Subnet
+	ports    map[string][]network.Port // NetworkID → Ports
 }
 type networksErrMsg struct{ err error }
 type tickMsg struct{}
@@ -27,8 +28,11 @@ type Model struct {
 	client          *gophercloud.ServiceClient
 	networks        []network.Network
 	subnets         map[string]network.Subnet
+	ports           map[string][]network.Port // NetworkID → Ports
 	cursor          int
 	expanded        map[int]bool
+	inSubnets       bool
+	subnetCursor    int
 	scrollOff       int
 	width           int
 	height          int
@@ -69,6 +73,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.networks = msg.networks
 		m.subnets = msg.subnets
+		m.ports = msg.ports
 		m.err = ""
 		return m, nil
 	case networksErrMsg:
@@ -97,6 +102,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.inSubnets {
+		return m.handleSubnetKey(msg)
+	}
+
 	switch {
 	case key.Matches(msg, shared.Keys.Up):
 		if m.cursor > 0 {
@@ -107,9 +116,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.cursor < len(m.networks)-1 {
 			m.cursor++
 			m.ensureVisible()
+		} else if m.expanded[m.cursor] && len(m.networks[m.cursor].SubnetIDs) > 0 {
+			m.inSubnets = true
+			m.subnetCursor = 0
 		}
 	case key.Matches(msg, shared.Keys.Enter):
 		m.expanded[m.cursor] = !m.expanded[m.cursor]
+		if !m.expanded[m.cursor] {
+			m.inSubnets = false
+		}
 	case key.Matches(msg, shared.Keys.PageDown):
 		th := m.tableHeight()
 		m.cursor += th
@@ -124,6 +139,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.cursor = 0
 		}
 		m.ensureVisible()
+	}
+	return m, nil
+}
+
+func (m Model) handleSubnetKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	subnetIDs := m.networks[m.cursor].SubnetIDs
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
+		m.inSubnets = false
+		return m, nil
+	case key.Matches(msg, shared.Keys.Up):
+		if m.subnetCursor > 0 {
+			m.subnetCursor--
+		} else {
+			m.inSubnets = false
+		}
+	case key.Matches(msg, shared.Keys.Down):
+		if m.subnetCursor < len(subnetIDs)-1 {
+			m.subnetCursor++
+		} else {
+			m.inSubnets = false
+			if m.cursor < len(m.networks)-1 {
+				m.cursor++
+				m.ensureVisible()
+			}
+		}
 	}
 	return m, nil
 }
@@ -216,17 +257,24 @@ func (m Model) View() string {
 
 		// Show expanded subnets
 		if m.expanded[i] {
-			for _, subID := range net.SubnetIDs {
+			for j, subID := range net.SubnetIDs {
 				sub, ok := m.subnets[subID]
+				isSubSel := m.inSubnets && i == m.cursor && j == m.subnetCursor
 
 				subStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+				prefix := "      "
+				if isSubSel {
+					subStyle = subStyle.Foreground(shared.ColorHighlight).Bold(true)
+					prefix = "    ▸ "
+				}
 
 				if ok {
 					dhcp := "off"
 					if sub.EnableDHCP {
 						dhcp = "on"
 					}
-					subLine := fmt.Sprintf("      %s  CIDR: %s  GW: %s  IPv%d  DHCP: %s",
+					subLine := fmt.Sprintf("%s%s  CIDR: %s  GW: %s  IPv%d  DHCP: %s",
+						prefix,
 						sub.Name,
 						sub.CIDR,
 						sub.GatewayIP,
@@ -235,7 +283,25 @@ func (m Model) View() string {
 					)
 					lines = append(lines, line{text: subStyle.Render(subLine)})
 				} else {
-					lines = append(lines, line{text: subStyle.Render("      " + subID[:8] + "...")})
+					lines = append(lines, line{text: subStyle.Render(prefix + subID[:8] + "...")})
+				}
+			}
+			// Show ports for this network
+			if netPorts, ok := m.ports[net.ID]; ok && len(netPorts) > 0 {
+				portStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+				for _, p := range netPorts {
+					var ips []string
+					for _, ip := range p.FixedIPs {
+						ips = append(ips, ip.IPAddress)
+					}
+					ipStr := strings.Join(ips, ", ")
+					name := p.Name
+					if name == "" {
+						name = p.ID[:8]
+					}
+					portLine := fmt.Sprintf("      port: %s  MAC: %s  IPs: %s  %s",
+						name, p.MACAddress, ipStr, p.DeviceOwner)
+					lines = append(lines, line{text: portStyle.Render(portLine)})
 				}
 			}
 		}
@@ -274,9 +340,57 @@ func (m *Model) SetSize(w, h int) {
 	m.height = h
 }
 
+// InSubnets returns true when navigating subnets within an expanded network.
+func (m Model) InSubnets() bool {
+	return m.inSubnets
+}
+
+// SelectedNetworkID returns the ID of the network at the cursor.
+func (m Model) SelectedNetworkID() string {
+	if m.cursor >= 0 && m.cursor < len(m.networks) {
+		return m.networks[m.cursor].ID
+	}
+	return ""
+}
+
+// SelectedNetworkName returns the name of the network at the cursor.
+func (m Model) SelectedNetworkName() string {
+	if m.cursor >= 0 && m.cursor < len(m.networks) {
+		return m.networks[m.cursor].Name
+	}
+	return ""
+}
+
+// SelectedSubnetID returns the ID of the selected subnet (when in subnet navigation).
+func (m Model) SelectedSubnetID() string {
+	if !m.inSubnets || m.cursor < 0 || m.cursor >= len(m.networks) {
+		return ""
+	}
+	ids := m.networks[m.cursor].SubnetIDs
+	if m.subnetCursor < 0 || m.subnetCursor >= len(ids) {
+		return ""
+	}
+	return ids[m.subnetCursor]
+}
+
+// SelectedSubnetName returns the name of the selected subnet.
+func (m Model) SelectedSubnetName() string {
+	id := m.SelectedSubnetID()
+	if id == "" {
+		return ""
+	}
+	if sub, ok := m.subnets[id]; ok {
+		return sub.Name
+	}
+	return id[:8] + "..."
+}
+
 // Hints returns key hints.
 func (m Model) Hints() string {
-	return "↑↓ navigate • enter expand/collapse • R refresh • 1-5/←→ switch tab • ? help"
+	if m.inSubnets {
+		return "↑↓ navigate subnets • ^n create subnet • ^d delete subnet • esc back • R refresh • ? help"
+	}
+	return "↑↓ navigate • enter expand/collapse • ^n create network • ^d delete network • R refresh • 1-5/←→ switch tab • ? help"
 }
 
 func (m Model) fetchNetworks() tea.Cmd {
@@ -294,6 +408,14 @@ func (m Model) fetchNetworks() tea.Cmd {
 		for _, s := range subs {
 			subMap[s.ID] = s
 		}
-		return networksLoadedMsg{networks: nets, subnets: subMap}
+		// Fetch ports for all networks
+		portMap := make(map[string][]network.Port)
+		for _, n := range nets {
+			ps, err := network.ListPorts(context.Background(), client, n.ID)
+			if err == nil && len(ps) > 0 {
+				portMap[n.ID] = ps
+			}
+		}
+		return networksLoadedMsg{networks: nets, subnets: subMap, ports: portMap}
 	}
 }

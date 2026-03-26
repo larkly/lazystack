@@ -21,11 +21,14 @@ import (
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/lblist"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/networkcreate"
 	"github.com/larkly/lazystack/internal/ui/networklist"
+	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/projectpicker"
 	"github.com/larkly/lazystack/internal/ui/quotaview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
+	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
@@ -104,6 +107,9 @@ type Model struct {
 	serverResize  serverresize.Model
 	fipPicker     fippicker.Model
 	serverPicker  serverpicker.Model
+	sgCreate       sgcreate.Model
+	networkCreate  networkcreate.Model
+	subnetCreate   subnetcreate.Model
 	sgRuleCreate  sgrulecreate.Model
 	projectPicker projectpicker.Model
 	volumeList    volumelist.Model
@@ -254,7 +260,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.serverResize.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
 		m.serverPicker.SetSize(m.width, m.height)
+		m.sgCreate.SetSize(m.width, m.height)
 		m.sgRuleCreate.SetSize(m.width, m.height)
+		m.networkCreate.SetSize(m.width, m.height)
+		m.subnetCreate.SetSize(m.width, m.height)
 		m.projectPicker.SetSize(m.width, m.height)
 		m.statusBar.Width = m.width
 		return m.updateActiveView(msg)
@@ -311,6 +320,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverPicker.Active {
 			var cmd tea.Cmd
 			m.serverPicker, cmd = m.serverPicker.Update(msg)
+			return m, cmd
+		}
+
+		// Network create modal intercepts all keys when active
+		if m.networkCreate.Active {
+			var cmd tea.Cmd
+			m.networkCreate, cmd = m.networkCreate.Update(msg)
+			return m, cmd
+		}
+
+		// Subnet create modal intercepts all keys when active
+		if m.subnetCreate.Active {
+			var cmd tea.Cmd
+			m.subnetCreate, cmd = m.subnetCreate.Update(msg)
+			return m, cmd
+		}
+
+		// SG create modal intercepts all keys when active
+		if m.sgCreate.Active {
+			var cmd tea.Cmd
+			m.sgCreate, cmd = m.sgCreate.Update(msg)
 			return m, cmd
 		}
 
@@ -455,13 +485,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Security group view: ctrl+d delete rule, ctrl+n add rule
+		// Security group view: context-sensitive create/delete
 		if m.view == viewSecGroupView {
 			if key.Matches(msg, shared.Keys.Delete) {
-				return m.openSGRuleDeleteConfirm()
+				if m.secGroupView.InRules() {
+					return m.openSGRuleDeleteConfirm()
+				}
+				return m.openSGDeleteConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Create) {
-				return m.openSGRuleCreate()
+				if m.secGroupView.InRules() {
+					return m.openSGRuleCreate()
+				}
+				return m.openSGCreate()
+			}
+		}
+
+		// Network list: context-sensitive create/delete for networks and subnets
+		if m.view == viewNetworkList {
+			if key.Matches(msg, shared.Keys.Delete) {
+				if m.networkList.InSubnets() {
+					return m.openSubnetDeleteConfirm()
+				}
+				return m.openNetworkDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Create) {
+				if m.networkList.InSubnets() {
+					return m.openSubnetCreate()
+				}
+				return m.openNetworkCreate()
 			}
 		}
 
@@ -799,6 +851,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverPicker.Active {
 			var cmd tea.Cmd
 			m.serverPicker, cmd = m.serverPicker.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.networkCreate.Active {
+			var cmd tea.Cmd
+			m.networkCreate, cmd = m.networkCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.subnetCreate.Active {
+			var cmd tea.Cmd
+			m.subnetCreate, cmd = m.subnetCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.sgCreate.Active {
+			var cmd tea.Cmd
+			m.sgCreate, cmd = m.sgCreate.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.sgRuleCreate.Active {

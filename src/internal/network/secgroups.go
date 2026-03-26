@@ -85,6 +85,32 @@ func CreateSecurityGroupRule(ctx context.Context, client *gophercloud.ServiceCli
 	}, nil
 }
 
+// CreateSecurityGroup creates a new security group.
+func CreateSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, name, description string) (*SecurityGroup, error) {
+	r := groups.Create(ctx, client, groups.CreateOpts{
+		Name:        name,
+		Description: description,
+	})
+	sg, err := r.Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating security group: %w", err)
+	}
+	return &SecurityGroup{
+		ID:          sg.ID,
+		Name:        sg.Name,
+		Description: sg.Description,
+	}, nil
+}
+
+// DeleteSecurityGroup deletes a security group.
+func DeleteSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := groups.Delete(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("deleting security group %s: %w", id, r.Err)
+	}
+	return nil
+}
+
 // DeleteSecurityGroupRule deletes a security group rule.
 func DeleteSecurityGroupRule(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
 	r := rules.Delete(ctx, client, id)

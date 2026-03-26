@@ -7,10 +7,13 @@ import (
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
+	"github.com/larkly/lazystack/internal/ui/networkcreate"
+	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
+	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
@@ -141,6 +144,26 @@ func (m Model) openFIPDisassociateConfirm() (Model, tea.Cmd) {
 
 // --- Security Group actions ---
 
+func (m Model) openSGCreate() (Model, tea.Cmd) {
+	m.sgCreate = sgcreate.New(m.client.Network)
+	m.sgCreate.SetSize(m.width, m.height)
+	return m, m.sgCreate.Init()
+}
+
+func (m Model) openSGDeleteConfirm() (Model, tea.Cmd) {
+	sgID := m.secGroupView.SelectedGroupID()
+	sgName := m.secGroupView.SelectedGroupName()
+	if sgID == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_sg", sgID, sgName)
+	m.confirm.Title = "Delete Security Group"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete security group %q?\nAll rules in this group will also be deleted.", sgName)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
 func (m Model) openSGRuleDeleteConfirm() (Model, tea.Cmd) {
 	ruleID := m.secGroupView.SelectedRule()
 	if ruleID == "" {
@@ -164,6 +187,54 @@ func (m Model) openSGRuleCreate() (Model, tea.Cmd) {
 	m.sgRuleCreate = sgrulecreate.New(m.client.Network, sgID, sgName)
 	m.sgRuleCreate.SetSize(m.width, m.height)
 	return m, m.sgRuleCreate.Init()
+}
+
+// --- Network actions ---
+
+func (m Model) openNetworkCreate() (Model, tea.Cmd) {
+	m.networkCreate = networkcreate.New(m.client.Network)
+	m.networkCreate.SetSize(m.width, m.height)
+	return m, m.networkCreate.Init()
+}
+
+func (m Model) openNetworkDeleteConfirm() (Model, tea.Cmd) {
+	netID := m.networkList.SelectedNetworkID()
+	netName := m.networkList.SelectedNetworkName()
+	if netID == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_network", netID, netName)
+	m.confirm.Title = "Delete Network"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete network %q?\nAll subnets will also be deleted.", netName)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+func (m Model) openSubnetCreate() (Model, tea.Cmd) {
+	netID := m.networkList.SelectedNetworkID()
+	netName := m.networkList.SelectedNetworkName()
+	if netID == "" {
+		return m, nil
+	}
+	m.subnetCreate = subnetcreate.New(m.client.Network, netID, netName)
+	m.subnetCreate.SetSize(m.width, m.height)
+	return m, m.subnetCreate.Init()
+}
+
+func (m Model) openSubnetDeleteConfirm() (Model, tea.Cmd) {
+	subID := m.networkList.SelectedSubnetID()
+	subName := m.networkList.SelectedSubnetName()
+	if subID == "" {
+		return m, nil
+	}
+	netName := m.networkList.SelectedNetworkName()
+	m.confirm = modal.NewConfirm("delete_subnet", subID, subName)
+	m.confirm.Title = "Delete Subnet"
+	m.confirm.Body = fmt.Sprintf("Delete subnet %q from network %q?", subName, netName)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
 }
 
 // --- Load Balancer actions ---

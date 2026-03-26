@@ -84,6 +84,15 @@ func (m Model) viewContent() string {
 	if m.serverPicker.Active {
 		return m.serverPicker.View()
 	}
+	if m.networkCreate.Active {
+		return m.networkCreate.View()
+	}
+	if m.subnetCreate.Active {
+		return m.subnetCreate.View()
+	}
+	if m.sgCreate.Active {
+		return m.sgCreate.View()
+	}
 	if m.sgRuleCreate.Active {
 		return m.sgRuleCreate.View()
 	}

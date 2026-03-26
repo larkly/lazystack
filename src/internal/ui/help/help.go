@@ -130,16 +130,19 @@ func (m *Model) buildLines() {
 			binds: []string{
 				"↑/k ↓/j      navigate groups / rules",
 				"enter         expand / collapse group",
-				"ctrl+n        add rule to group",
-				"ctrl+d        delete selected rule",
+				"ctrl+n        create group (or add rule in rules)",
+				"ctrl+d        delete group (or rule in rules)",
 				"esc           back to group list",
 			},
 		},
 		{
 			name: "Networks",
 			binds: []string{
-				"↑/k ↓/j      navigate networks",
+				"↑/k ↓/j      navigate networks / subnets",
 				"enter         expand / collapse subnets",
+				"ctrl+n        create network (or subnet in subnets)",
+				"ctrl+d        delete network (or subnet in subnets)",
+				"esc           back to network list",
 			},
 		},
 		{

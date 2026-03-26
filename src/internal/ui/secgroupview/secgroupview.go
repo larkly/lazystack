@@ -186,6 +186,11 @@ func (m Model) SelectedGroupID() string {
 	return ""
 }
 
+// InRules returns true when the cursor is navigating rules within an expanded group.
+func (m Model) InRules() bool {
+	return m.inRules
+}
+
 // View renders the security group viewer.
 func (m Model) View() string {
 	var b strings.Builder
@@ -321,5 +326,5 @@ func (m Model) Hints() string {
 	if m.inRules {
 		return "↑↓ navigate rules • ^n add rule • ^d delete rule • esc back to groups • R refresh • ? help"
 	}
-	return "↑↓ navigate • enter expand/collapse • ^n add rule • R refresh • 1-5/←→ switch tab • ? help"
+	return "↑↓ navigate • enter expand/collapse • ^n create group • ^d delete group • R refresh • 1-5/←→ switch tab • ? help"
 }
