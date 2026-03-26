@@ -72,3 +72,26 @@ jobs:
           files: |
             lazystack-*
             SHA256SUMS
+
+      - name: Parse checksums
+        id: shas
+        run: |
+          echo "darwin_arm64=$(grep darwin-arm64 SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "darwin_amd64=$(grep darwin-amd64 SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "linux_arm64=$(grep linux-arm64 SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "linux_amd64=$(grep linux-amd64 SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew tap
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          repository: larkly/homebrew-tap
+          event-type: update-formula
+          client-payload: |
+            {
+              "version": "${{ env.VERSION }}",
+              "sha256_darwin_arm64": "${{ steps.shas.outputs.darwin_arm64 }}",
+              "sha256_darwin_amd64": "${{ steps.shas.outputs.darwin_amd64 }}",
+              "sha256_linux_arm64": "${{ steps.shas.outputs.linux_arm64 }}",
+              "sha256_linux_amd64": "${{ steps.shas.outputs.linux_amd64 }}"
+            }
