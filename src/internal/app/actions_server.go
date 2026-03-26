@@ -517,6 +517,39 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			return shared.ResourceActionMsg{Action: "Disassociated", Name: name}
 		}
+	case "delete_network":
+		netClient := m.client.Network
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := network.DeleteNetwork(context.Background(), netClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete network", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted network", Name: name}
+		}
+	case "delete_subnet":
+		netClient := m.client.Network
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := network.DeleteSubnet(context.Background(), netClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete subnet", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted subnet", Name: name}
+		}
+	case "delete_sg":
+		netClient := m.client.Network
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := network.DeleteSecurityGroup(context.Background(), netClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete security group", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted security group", Name: name}
+		}
 	case "delete_sg_rule":
 		netClient := m.client.Network
 		id := action.ServerID

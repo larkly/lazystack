@@ -156,7 +156,50 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) isTextInput() bool {
+	return m.focusField == fieldName || m.focusField == fieldSize || m.focusField == fieldDesc
+}
+
 func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
+	// Route to text input first — only intercept navigation keys
+	if m.isTextInput() {
+		switch {
+		case key.Matches(msg, shared.Keys.Back):
+			return m, func() tea.Msg {
+				return shared.ViewChangeMsg{View: "volumelist"}
+			}
+		case key.Matches(msg, shared.Keys.Tab):
+			m.focusField = (m.focusField + 1) % numFields
+			m.updateFocus()
+			return m, nil
+		case key.Matches(msg, shared.Keys.ShiftTab):
+			m.focusField = (m.focusField - 1 + numFields) % numFields
+			m.updateFocus()
+			return m, nil
+		case key.Matches(msg, shared.Keys.Enter):
+			m.focusField++
+			m.updateFocus()
+			return m, nil
+		case msg.String() == "ctrl+s":
+			return m.submit()
+		default:
+			switch m.focusField {
+			case fieldName:
+				var cmd tea.Cmd
+				m.nameInput, cmd = m.nameInput.Update(msg)
+				return m, cmd
+			case fieldSize:
+				var cmd tea.Cmd
+				m.sizeInput, cmd = m.sizeInput.Update(msg)
+				return m, cmd
+			case fieldDesc:
+				var cmd tea.Cmd
+				m.descInput, cmd = m.descInput.Update(msg)
+				return m, cmd
+			}
+		}
+	}
+
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		return m, func() tea.Msg {

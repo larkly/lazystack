@@ -100,6 +100,87 @@ func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subn
 	return result, nil
 }
 
+// CreateNetwork creates a new network.
+func CreateNetwork(ctx context.Context, client *gophercloud.ServiceClient, name string, adminStateUp bool) (*Network, error) {
+	r := networks.Create(ctx, client, networks.CreateOpts{
+		Name:         name,
+		AdminStateUp: &adminStateUp,
+	})
+	n, err := r.Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating network: %w", err)
+	}
+	return &Network{
+		ID:     n.ID,
+		Name:   n.Name,
+		Status: n.Status,
+		Shared: n.Shared,
+	}, nil
+}
+
+// DeleteNetwork deletes a network.
+func DeleteNetwork(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := networks.Delete(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("deleting network %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// SubnetCreateOpts holds options for creating a subnet.
+type SubnetCreateOpts struct {
+	NetworkID  string
+	Name       string
+	CIDR       string
+	IPVersion  int
+	GatewayIP  string
+	EnableDHCP bool
+}
+
+// CreateSubnet creates a new subnet.
+func CreateSubnet(ctx context.Context, client *gophercloud.ServiceClient, opts SubnetCreateOpts) (*Subnet, error) {
+	createOpts := subnets.CreateOpts{
+		NetworkID:  opts.NetworkID,
+		Name:       opts.Name,
+		CIDR:       opts.CIDR,
+		IPVersion:  gophercloud.IPVersion(opts.IPVersion),
+		EnableDHCP: &opts.EnableDHCP,
+	}
+	if opts.GatewayIP != "" {
+		createOpts.GatewayIP = &opts.GatewayIP
+	}
+	r := subnets.Create(ctx, client, createOpts)
+	s, err := r.Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating subnet: %w", err)
+	}
+	sub := &Subnet{
+		ID:         s.ID,
+		Name:       s.Name,
+		NetworkID:  s.NetworkID,
+		CIDR:       s.CIDR,
+		GatewayIP:  s.GatewayIP,
+		IPVersion:  s.IPVersion,
+		EnableDHCP: s.EnableDHCP,
+	}
+	for _, pool := range s.AllocationPools {
+		sub.AllocationPools = append(sub.AllocationPools, AllocationPool{
+			Start: pool.Start,
+			End:   pool.End,
+		})
+	}
+	return sub, nil
+}
+
+// DeleteSubnet deletes a subnet.
+func DeleteSubnet(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := subnets.Delete(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("deleting subnet %s: %w", id, r.Err)
+	}
+	return nil
+}
+
 // ListExternalNetworks fetches networks where router:external is true.
 func ListExternalNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Network, error) {
 	url := client.ServiceURL("networks") + "?router:external=true"

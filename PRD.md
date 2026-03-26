@@ -126,7 +126,7 @@ src/
       servers.go                    # Server CRUD + pause/suspend/shelve/resize/reboot
       actions.go                    # Instance action history
       flavors.go                    # Flavor listing
-      keypairs.go                   # Keypair listing + delete
+      keypairs.go                   # Keypair CRUD (list, get, create/generate, import, delete)
     image/
       images.go                     # Image listing
     network/
@@ -134,7 +134,7 @@ src/
       floatingips.go                # Floating IP CRUD (allocate, associate, disassociate, release)
       secgroups.go                  # Security group listing, rule create/delete
     volume/
-      volumes.go                    # Volume CRUD (list, get, create, delete, attach, detach)
+      volumes.go                    # Volume CRUD (list, get, create, delete, attach, detach, volume types)
     loadbalancer/
       lb.go                         # Octavia LB, listener, pool, member CRUD
     quota/
@@ -161,12 +161,24 @@ src/
         floatingiplist.go           # Floating IP table with sorting
       secgroupview/
         secgroupview.go             # Security group viewer with expandable rules, rule deletion
+      keypaircreate/
+        keypaircreate.go            # Key pair create/import form with type picker, file browser
+      keypairdetail/
+        keypairdetail.go            # Key pair detail view showing public key
       keypairlist/
-        keypairlist.go              # Key pair table with sorting, delete
+        keypairlist.go              # Key pair table with sorting, delete, auto-refresh
       lblist/
         lblist.go                   # Load balancer table with status colors, sorting
       lbdetail/
         lbdetail.go                 # LB detail with listener/pool/member tree
+      networklist/
+        networklist.go              # Network browser with expandable subnets
+      volumecreate/
+        volumecreate.go             # Volume create form with type/AZ pickers
+      serverpicker/
+        serverpicker.go             # Server picker modal for volume attach
+      sgrulecreate/
+        sgrulecreate.go             # Security group rule create modal
       fippicker/
         fippicker.go                # Floating IP picker modal for server association
       projectpicker/
@@ -292,8 +304,9 @@ src/
 - Scrollable with ↑/↓ when content doesn't fit
 
 #### Status Bar
-- Shows current cloud name and region
+- Shows current cloud name, project, and region
 - Context-sensitive key hints per view (adapts to server state, selection count)
+- Sticky hints for action success messages (survives background auto-refresh, clears on next key press)
 - Error/warning display
 - Truncates gracefully when bar overflows
 
@@ -353,7 +366,7 @@ src/
 ### Phase 3: Additional Resources (Complete)
 
 #### Tabbed Navigation
-- Dynamic tabs built from service catalog (see Phase 4 refactor): Servers, Volumes, Floating IPs, Security Groups, Key Pairs (always present), Load Balancers (if Octavia available)
+- Dynamic tabs built from service catalog (see Phase 4 refactor): Servers, Volumes, Floating IPs, Security Groups, Networks, Key Pairs (always present), Load Balancers (if Octavia available)
 - Switch with number keys `1-9` or `←/→` from any top-level list view
 - Tab bar with active tab highlighted, inactive tabs muted
 - Each tab lazily initializes on first visit, auto-refreshes independently
@@ -362,9 +375,10 @@ src/
 #### Volume Management
 - **Volume List**: Adaptive columns (Name, Status, Size, Type, Attached To, Device, Bootable), auto-refresh, sorting
 - **Volume Detail**: Enter on a volume shows full properties — Name, ID, Status, Size, Type, AZ, Bootable, Encrypted, Multiattach, Description, Created, Updated, Snapshot ID, Source Volume ID, Attached Server (resolved name), Device, Metadata (key=value)
+- **Create** (`Ctrl+N`): Form with name, size (GB), type picker (from volume types API), AZ, description
 - **Delete** (`Ctrl+D`): Confirmation modal, works from list or detail
+- **Attach** (`Ctrl+A`): Server picker modal showing ACTIVE/SHUTOFF servers with type-to-filter
 - **Detach** (`Ctrl+T`): From detail view, finds attached server and detaches
-- **Attach** (`Ctrl+A`): Deferred (complex server picker — use CLI for now)
 - Status colors: available=green, in-use=cyan, creating/extending=yellow, error=red, deleting=muted
 
 #### Floating IP Management
@@ -378,12 +392,21 @@ src/
 - **Group List**: Expandable groups showing name, description, rule count
 - **Rule View**: Enter expands/collapses group rules. Rules show direction, protocol, port range, remote, ethertype
 - **Rule Navigation**: Down arrow enters rule list within expanded group, Up arrow exits back to group level
-- **Delete Rule** (`Ctrl+D`): When cursor is on a rule, confirmation modal then deletes
+- **Create Rule** (`Ctrl+N` in rules): Modal with cycle pickers for direction/ethertype/protocol, port range, remote IP prefix
+- **Delete Rule** (`Ctrl+D` in rules): When cursor is on a rule, confirmation modal then deletes
 - Selected rule highlighted with `▸` prefix and background color
 
 #### Key Pair Management
-- **List**: Columns (Name, Type), sorting
-- **Delete** (`Ctrl+D`): Confirmation modal
+- **List**: Columns (Name, Type), sorting, auto-refresh
+- **Detail** (`Enter`): Shows name, type, and full public key with scroll
+- **Create/Import** (`Ctrl+N`): Form with name, type picker (RSA 2048/RSA 4096/ED25519), public key field with `~/.ssh/` file browser. Keys generated locally using Go crypto (`crypto/rsa`, `crypto/ed25519`, `x/crypto/ssh`), imported via Nova API
+- **Save Private Key** (`s` in private key view): Save generated private key to file (default `~/.ssh/<name>`, 0600 permissions), public key saved alongside as `.pub`
+- **Delete** (`Ctrl+D`): Confirmation modal, works from list or detail
+
+#### Network Browser
+- **Networks Tab**: Network list with Name, Status, Subnets count, Shared columns
+- **Expandable Subnets**: Enter expands/collapses network to show subnet details (name, CIDR, gateway, IP version, DHCP status)
+- Auto-refresh, read-only browsing
 
 #### Column Sorting
 - `s` cycles sort to next visible column (ascending), `S` toggles sort direction
@@ -516,6 +539,7 @@ src/
 |-----|--------|
 | `↑/k` `↓/j` | Navigate |
 | `Enter` | View detail |
+| `Ctrl+N` | Create volume |
 | `Ctrl+D` | Delete volume |
 
 #### Volume Detail
@@ -523,6 +547,7 @@ src/
 |-----|--------|
 | `↑/k` `↓/j` | Scroll |
 | `Ctrl+D` | Delete volume |
+| `Ctrl+A` | Attach to server (server picker modal) |
 | `Ctrl+T` | Detach from server |
 | `Esc` | Back to list |
 
@@ -539,14 +564,23 @@ src/
 |-----|--------|
 | `↑/k` `↓/j` | Navigate groups / rules |
 | `Enter` | Expand / collapse group |
-| `Ctrl+D` | Delete selected rule |
+| `Ctrl+N` | Add rule (when in rules) |
+| `Ctrl+D` | Delete selected rule (when in rules) |
 | `Esc` | Back to group level (from rules) |
 
 #### Key Pairs
 | Key | Action |
 |-----|--------|
 | `↑/k` `↓/j` | Navigate |
+| `Enter` | View detail (public key) |
+| `Ctrl+N` | Create / import key pair |
 | `Ctrl+D` | Delete key pair |
+
+#### Networks
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Navigate |
+| `Enter` | Expand / collapse subnets |
 
 #### Load Balancers
 | Key | Action |
@@ -587,12 +621,12 @@ src/
 
 ## Future Roadmap
 
-### Backlog (deferred from Phase 3)
-- **Create Volume form**: Name, size, type, AZ, description, source snapshot/volume — similar to server create
-- **Create/Import Key Pair**: Generate or paste public key — requires text area input
-- **Create Security Group Rule**: Direction, protocol, port range, remote — complex form, better left to CLI for now
-- **Volume Attach from detail**: Needs a server picker modal (similar to FIP picker)
-- Network/subnet/port browsing
+### Backlog (deferred from Phase 3 — all complete)
+- ~~**Create Volume form**~~: ✓ Complete — name, size, type picker, AZ, description
+- ~~**Create/Import Key Pair**~~: ✓ Complete — RSA/ED25519, file browser, save-to-file
+- ~~**Create Security Group Rule**~~: ✓ Complete — modal with cycle pickers
+- ~~**Volume Attach from detail**~~: ✓ Complete — server picker modal
+- ~~**Network/subnet browsing**~~: ✓ Complete — Networks tab with expandable subnets
 
 ### Phase 5: Quality of Life
 - Configuration file (`~/.config/lazystack/config.yaml`) for defaults
