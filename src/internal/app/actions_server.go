@@ -583,6 +583,30 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			return shared.ResourceActionMsg{Action: "Disassociated", Name: name}
 		}
+	case "delete_router":
+		netClient := m.client.Network
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := network.DeleteRouter(context.Background(), netClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete router", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted router", Name: name}
+		}
+	case "remove_router_interface":
+		netClient := m.client.Network
+		routerID := action.ServerID
+		name := action.Name
+		// Get the selected subnet ID from the detail view
+		subnetID := m.routerDetail.SelectedInterfaceSubnetID()
+		return m, func() tea.Msg {
+			err := network.RemoveRouterInterface(context.Background(), netClient, routerID, subnetID)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Remove interface", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Removed interface from", Name: name}
+		}
 	case "delete_network":
 		netClient := m.client.Network
 		id := action.ServerID

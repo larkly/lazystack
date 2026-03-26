@@ -150,6 +150,18 @@ func (m *Model) buildLines() {
 			},
 		},
 		{
+			name: "Routers",
+			binds: []string{
+				"↑/k ↓/j      navigate",
+				"enter         view detail (interfaces)",
+				"ctrl+n        create router",
+				"ctrl+d        delete router",
+				"ctrl+a        add interface (from detail)",
+				"ctrl+t        remove interface (from detail)",
+				"esc           back to list",
+			},
+		},
+		{
 			name: "Key Pairs",
 			binds: []string{
 				"↑/k ↓/j      navigate",

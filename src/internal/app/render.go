@@ -41,6 +41,10 @@ func (m Model) viewName() string {
 		return "keypaircreate"
 	case viewKeypairDetail:
 		return "keypairdetail"
+	case viewRouterList:
+		return "routerlist"
+	case viewRouterDetail:
+		return "routerdetail"
 	case viewLBList:
 		return "lblist"
 	case viewLBDetail:
@@ -83,6 +87,12 @@ func (m Model) viewContent() string {
 	}
 	if m.serverPicker.Active {
 		return m.serverPicker.View()
+	}
+	if m.routerCreate.Active {
+		return m.routerCreate.View()
+	}
+	if m.subnetPicker.Active {
+		return m.subnetPicker.View()
 	}
 	if m.networkCreate.Active {
 		return m.networkCreate.View()
@@ -139,6 +149,10 @@ func (m Model) viewContent() string {
 		content = m.keypairCreate.View()
 	case viewKeypairDetail:
 		content = m.keypairDetail.View()
+	case viewRouterList:
+		content = m.routerList.View()
+	case viewRouterDetail:
+		content = m.routerDetail.View()
 	case viewLBList:
 		content = m.lbList.View()
 	case viewLBDetail:

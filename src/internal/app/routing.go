@@ -54,6 +54,12 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewNetworkList:
 		m.networkList, cmd = m.networkList.Update(msg)
 		m.statusBar.Hint = m.networkList.Hints()
+	case viewRouterList:
+		m.routerList, cmd = m.routerList.Update(msg)
+		m.statusBar.Hint = m.routerList.Hints()
+	case viewRouterDetail:
+		m.routerDetail, cmd = m.routerDetail.Update(msg)
+		m.statusBar.Hint = m.routerDetail.Hints()
 	case viewLBList:
 		m.lbList, cmd = m.lbList.Update(msg)
 		m.statusBar.Hint = m.lbList.Hints()
@@ -97,6 +103,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 		case "networks":
 			m.networkList, cmd = m.networkList.Update(msg)
 			cmds = append(cmds, cmd)
+		case "routers":
+			m.routerList, cmd = m.routerList.Update(msg)
+			cmds = append(cmds, cmd)
 		case "loadbalancers":
 			m.lbList, cmd = m.lbList.Update(msg)
 			cmds = append(cmds, cmd)
@@ -113,6 +122,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case viewLBDetail:
 		m.lbDetail, cmd = m.lbDetail.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewRouterDetail:
+		m.routerDetail, cmd = m.routerDetail.Update(msg)
 		cmds = append(cmds, cmd)
 	case viewConsoleLog:
 		m.consoleLog, cmd = m.consoleLog.Update(msg)
@@ -193,6 +205,12 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 	case "volumecreate":
 		return m.openVolumeCreate()
 
+	case "routerlist":
+		m.view = viewRouterList
+		m.statusBar.CurrentView = "routerlist"
+		m.statusBar.Hint = m.routerList.Hints()
+		return m, nil
+
 	case "keypairlist":
 		m.view = viewKeypairList
 		m.statusBar.CurrentView = "keypairlist"
@@ -241,6 +259,10 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.keypairList.ForceRefresh()
 	case viewNetworkList:
 		return m, m.networkList.ForceRefresh()
+	case viewRouterList:
+		return m, m.routerList.ForceRefresh()
+	case viewRouterDetail:
+		return m, m.routerDetail.ForceRefresh()
 	case viewLBList:
 		return m, m.lbList.ForceRefresh()
 	case viewLBDetail:
