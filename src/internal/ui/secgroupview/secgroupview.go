@@ -25,7 +25,7 @@ type Model struct {
 	groups          []network.SecurityGroup
 	groupNames      map[string]string // ID → name for resolving remote group references
 	cursor          int
-	expanded        map[int]bool // which groups are expanded to show rules
+	expanded        map[string]bool // group ID → expanded
 	ruleCursor      int          // cursor within expanded group's rules (-1 = on group header)
 	inRules         bool         // true when navigating rules within an expanded group
 	width           int
@@ -45,7 +45,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 		client:          client,
 		loading:         true,
 		spinner:         s,
-		expanded:        make(map[int]bool),
+		expanded:        make(map[string]bool),
 		refreshInterval: refreshInterval,
 	}
 }
@@ -64,6 +64,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.groupNames = make(map[string]string)
 		for _, g := range msg.groups {
 			m.groupNames[g.ID] = g.Name
+		}
+		// Clamp cursor if list shrunk (e.g. after delete)
+		if m.cursor >= len(m.groups) && len(m.groups) > 0 {
+			m.cursor = len(m.groups) - 1
+			m.inRules = false
 		}
 		m.err = ""
 		return m, nil
@@ -113,7 +118,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 						m.cursor++
 					}
 				}
-			} else if m.expanded[m.cursor] && len(m.groups[m.cursor].Rules) > 0 {
+			} else if m.isExpanded(m.cursor) && len(m.groups[m.cursor].Rules) > 0 {
 				// Enter rules navigation
 				m.inRules = true
 				m.ruleCursor = 0
@@ -139,8 +144,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, shared.Keys.Enter):
 			if !m.inRules {
-				wasExpanded := m.expanded[m.cursor]
-				m.expanded[m.cursor] = !wasExpanded
+				wasExpanded := m.isExpanded(m.cursor)
+				m.toggleExpanded(m.cursor)
 				if wasExpanded {
 					m.inRules = false
 				}
@@ -187,6 +192,21 @@ func (m Model) SelectedGroupID() string {
 }
 
 // InRules returns true when the cursor is navigating rules within an expanded group.
+func (m Model) isExpanded(idx int) bool {
+	if idx < 0 || idx >= len(m.groups) {
+		return false
+	}
+	return m.expanded[m.groups[idx].ID]
+}
+
+func (m *Model) toggleExpanded(idx int) {
+	if idx < 0 || idx >= len(m.groups) {
+		return
+	}
+	id := m.groups[idx].ID
+	m.expanded[id] = !m.expanded[id]
+}
+
 func (m Model) InRules() bool {
 	return m.inRules
 }
@@ -224,7 +244,7 @@ func (m Model) View() string {
 		}
 
 		expandIcon := "▶"
-		if m.expanded[i] {
+		if m.isExpanded(i) {
 			expandIcon = "▼"
 		}
 
@@ -237,7 +257,7 @@ func (m Model) View() string {
 		b.WriteString(cursor + expandIcon + " " + nameStyle.Render(sg.Name) +
 			shared.StyleHelp.Render(rulesCount) + desc + "\n")
 
-		if m.expanded[i] {
+		if m.isExpanded(i) {
 			if len(sg.Rules) == 0 {
 				b.WriteString(shared.StyleHelp.Render("      No rules") + "\n")
 			}
