@@ -36,6 +36,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
+	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverlist"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/ui/statusbar"
@@ -110,6 +111,7 @@ type Model struct {
 	serverCreate servercreate.Model
 	consoleLog    consolelog.Model
 	actionLog     actionlog.Model
+	serverRename  serverrename.Model
 	serverResize  serverresize.Model
 	fipPicker     fippicker.Model
 	serverPicker  serverpicker.Model
@@ -267,6 +269,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Height = m.height
 		m.quotaView.Width = m.width
 		m.quotaView.Height = m.height
+		m.serverRename.SetSize(m.width, m.height)
 		m.serverResize.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
 		m.serverPicker.SetSize(m.width, m.height)
@@ -312,6 +315,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil // swallow keys while update is downloading
 			}
 			return m.updateModal(msg)
+		}
+
+		// Rename modal intercepts all keys when active
+		if m.serverRename.Active {
+			var cmd tea.Cmd
+			m.serverRename, cmd = m.serverRename.Update(msg)
+			return m, cmd
 		}
 
 		// Resize modal intercepts all keys when active
@@ -466,6 +476,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, shared.Keys.Resize) {
 				return m.openResize()
+			}
+			if key.Matches(msg, shared.Keys.Rename) {
+				return m.openRename()
 			}
 			if key.Matches(msg, shared.Keys.ConfirmResize) {
 				return m.doConfirmResize()
@@ -903,6 +916,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		// Also route to active modals (for spinner, loaded msgs)
+		if m.serverRename.Active {
+			var cmd tea.Cmd
+			m.serverRename, cmd = m.serverRename.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
 		if m.serverResize.Active {
 			var cmd tea.Cmd
 			m.serverResize, cmd = m.serverResize.Update(msg)

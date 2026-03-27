@@ -109,6 +109,9 @@ func (m Model) viewContent() string {
 	if m.projectPicker.Active {
 		return m.projectPicker.View()
 	}
+	if m.serverRename.Active {
+		return m.serverRename.View()
+	}
 	if m.serverResize.Active {
 		return m.serverResize.View()
 	}

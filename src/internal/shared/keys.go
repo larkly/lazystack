@@ -43,6 +43,7 @@ type KeyMap struct {
 	Quota       key.Binding
 	StopStart   key.Binding
 	Lock        key.Binding
+	Rename      key.Binding
 }
 
 var Keys = KeyMap{
@@ -205,5 +206,9 @@ var Keys = KeyMap{
 	Lock: key.NewBinding(
 		key.WithKeys("ctrl+l"),
 		key.WithHelp("ctrl+l", "lock/unlock"),
+	),
+	Rename: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "rename"),
 	),
 }

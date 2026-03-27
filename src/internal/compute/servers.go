@@ -219,6 +219,15 @@ func RevertResize(ctx context.Context, client *gophercloud.ServiceClient, id str
 	return nil
 }
 
+// RenameServer updates a server's name.
+func RenameServer(ctx context.Context, client *gophercloud.ServiceClient, id, newName string) error {
+	_, err := servers.Update(ctx, client, id, servers.UpdateOpts{Name: newName}).Extract()
+	if err != nil {
+		return fmt.Errorf("renaming server %s: %w", id, err)
+	}
+	return nil
+}
+
 // GetConsoleOutput retrieves console output for a server.
 func GetConsoleOutput(ctx context.Context, client *gophercloud.ServiceClient, id string, lines int) (string, error) {
 	r := servers.ShowConsoleOutput(ctx, client, id, servers.ShowConsoleOutputOpts{Length: lines})
