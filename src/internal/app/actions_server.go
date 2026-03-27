@@ -15,6 +15,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
+	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/volume"
 	"github.com/gophercloud/gophercloud/v2"
@@ -39,6 +40,25 @@ func (m Model) openRename() (Model, tea.Cmd) {
 	m.serverRename = serverrename.New(m.client.Compute, id, name)
 	m.serverRename.SetSize(m.width, m.height)
 	return m, m.serverRename.Init()
+}
+
+func (m Model) openSnapshot() (Model, tea.Cmd) {
+	var id, name string
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			id, name = s.ID, s.Name
+		}
+	case viewServerDetail:
+		id = m.serverDetail.ServerID()
+		name = m.serverDetail.ServerName()
+	}
+	if id == "" {
+		return m, nil
+	}
+	m.serverSnapshot = serversnapshot.New(m.client.Compute, id, name)
+	m.serverSnapshot.SetSize(m.width, m.height)
+	return m, m.serverSnapshot.Init()
 }
 
 func (m Model) openRebuild() (Model, tea.Cmd) {

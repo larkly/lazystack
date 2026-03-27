@@ -45,6 +45,7 @@ type KeyMap struct {
 	Lock        key.Binding
 	Rename      key.Binding
 	Rebuild     key.Binding
+	Snapshot    key.Binding
 }
 
 var Keys = KeyMap{
@@ -215,5 +216,9 @@ var Keys = KeyMap{
 	Rebuild: key.NewBinding(
 		key.WithKeys("ctrl+g"),
 		key.WithHelp("ctrl+g", "rebuild"),
+	),
+	Snapshot: key.NewBinding(
+		key.WithKeys("ctrl+s"),
+		key.WithHelp("ctrl+s", "snapshot"),
 	),
 }
