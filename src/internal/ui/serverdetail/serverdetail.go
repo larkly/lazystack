@@ -307,6 +307,14 @@ func (m Model) ServerFlavor() string {
 	return ""
 }
 
+// ServerImageID returns the current server's image ID.
+func (m Model) ServerImageID() string {
+	if m.server != nil {
+		return m.server.ImageID
+	}
+	return ""
+}
+
 // ServerLocked returns whether the server is locked.
 func (m Model) ServerLocked() bool {
 	if m.server != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/volume"
@@ -38,6 +39,26 @@ func (m Model) openRename() (Model, tea.Cmd) {
 	m.serverRename = serverrename.New(m.client.Compute, id, name)
 	m.serverRename.SetSize(m.width, m.height)
 	return m, m.serverRename.Init()
+}
+
+func (m Model) openRebuild() (Model, tea.Cmd) {
+	var id, name, imageID string
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			id, name, imageID = s.ID, s.Name, s.ImageID
+		}
+	case viewServerDetail:
+		id = m.serverDetail.ServerID()
+		name = m.serverDetail.ServerName()
+		imageID = m.serverDetail.ServerImageID()
+	}
+	if id == "" {
+		return m, nil
+	}
+	m.serverRebuild = serverrebuild.New(m.client.Compute, m.client.Image, id, name, imageID)
+	m.serverRebuild.SetSize(m.width, m.height)
+	return m, m.serverRebuild.Init()
 }
 
 func (m Model) openDeleteConfirm() (Model, tea.Cmd) {

@@ -44,6 +44,7 @@ type KeyMap struct {
 	StopStart   key.Binding
 	Lock        key.Binding
 	Rename      key.Binding
+	Rebuild     key.Binding
 }
 
 var Keys = KeyMap{
@@ -210,5 +211,9 @@ var Keys = KeyMap{
 	Rename: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "rename"),
+	),
+	Rebuild: key.NewBinding(
+		key.WithKeys("ctrl+g"),
+		key.WithHelp("ctrl+g", "rebuild"),
 	),
 }
