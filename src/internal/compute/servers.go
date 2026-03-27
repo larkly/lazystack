@@ -2,6 +2,7 @@ package compute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -223,6 +224,10 @@ func RevertResize(ctx context.Context, client *gophercloud.ServiceClient, id str
 func CreateSnapshot(ctx context.Context, client *gophercloud.ServiceClient, id, snapshotName string) error {
 	r := servers.CreateImage(ctx, client, id, servers.CreateImageOpts{Name: snapshotName})
 	if r.Err != nil {
+		var errCode gophercloud.ErrUnexpectedResponseCode
+		if errors.As(r.Err, &errCode) && errCode.Actual == 409 {
+			return fmt.Errorf("server already has a snapshot in progress")
+		}
 		return fmt.Errorf("creating snapshot of server %s: %w", id, r.Err)
 	}
 	return nil

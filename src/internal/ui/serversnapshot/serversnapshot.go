@@ -67,7 +67,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.submitting = false
 		m.Active = false
 		return m, func() tea.Msg {
-			return shared.ServerActionMsg{Action: "Snapshot created for", Name: msg.name}
+			return shared.ServerActionMsg{Action: "Snapshot started for", Name: msg.name}
 		}
 	case snapshotErrMsg:
 		m.submitting = false
