@@ -112,6 +112,9 @@ func (m Model) viewContent() string {
 	if m.serverRename.Active {
 		return m.serverRename.View()
 	}
+	if m.serverRebuild.Active {
+		return m.serverRebuild.View()
+	}
 	if m.serverResize.Active {
 		return m.serverResize.View()
 	}

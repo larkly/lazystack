@@ -219,6 +219,15 @@ func RevertResize(ctx context.Context, client *gophercloud.ServiceClient, id str
 	return nil
 }
 
+// RebuildServer rebuilds a server with a new image.
+func RebuildServer(ctx context.Context, client *gophercloud.ServiceClient, id, imageRef string) error {
+	_, err := servers.Rebuild(ctx, client, id, servers.RebuildOpts{ImageRef: imageRef}).Extract()
+	if err != nil {
+		return fmt.Errorf("rebuilding server %s: %w", id, err)
+	}
+	return nil
+}
+
 // RenameServer updates a server's name.
 func RenameServer(ctx context.Context, client *gophercloud.ServiceClient, id, newName string) error {
 	_, err := servers.Update(ctx, client, id, servers.UpdateOpts{Name: newName}).Extract()
