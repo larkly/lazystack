@@ -219,6 +219,15 @@ func RevertResize(ctx context.Context, client *gophercloud.ServiceClient, id str
 	return nil
 }
 
+// CreateSnapshot creates an image snapshot of a server.
+func CreateSnapshot(ctx context.Context, client *gophercloud.ServiceClient, id, snapshotName string) error {
+	r := servers.CreateImage(ctx, client, id, servers.CreateImageOpts{Name: snapshotName})
+	if r.Err != nil {
+		return fmt.Errorf("creating snapshot of server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
 // RebuildServer rebuilds a server with a new image.
 func RebuildServer(ctx context.Context, client *gophercloud.ServiceClient, id, imageRef string) error {
 	_, err := servers.Rebuild(ctx, client, id, servers.RebuildOpts{ImageRef: imageRef}).Extract()

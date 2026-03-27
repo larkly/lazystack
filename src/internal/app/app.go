@@ -38,6 +38,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
+	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/serverlist"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/ui/statusbar"
@@ -112,9 +113,10 @@ type Model struct {
 	serverCreate servercreate.Model
 	consoleLog    consolelog.Model
 	actionLog     actionlog.Model
-	serverRename   serverrename.Model
-	serverRebuild  serverrebuild.Model
-	serverResize   serverresize.Model
+	serverRename    serverrename.Model
+	serverRebuild   serverrebuild.Model
+	serverSnapshot  serversnapshot.Model
+	serverResize    serverresize.Model
 	fipPicker     fippicker.Model
 	serverPicker  serverpicker.Model
 	sgCreate       sgcreate.Model
@@ -273,6 +275,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quotaView.Height = m.height
 		m.serverRename.SetSize(m.width, m.height)
 		m.serverRebuild.SetSize(m.width, m.height)
+		m.serverSnapshot.SetSize(m.width, m.height)
 		m.serverResize.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
 		m.serverPicker.SetSize(m.width, m.height)
@@ -331,6 +334,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverRebuild.Active {
 			var cmd tea.Cmd
 			m.serverRebuild, cmd = m.serverRebuild.Update(msg)
+			return m, cmd
+		}
+
+		// Snapshot modal intercepts all keys when active
+		if m.serverSnapshot.Active {
+			var cmd tea.Cmd
+			m.serverSnapshot, cmd = m.serverSnapshot.Update(msg)
 			return m, cmd
 		}
 
@@ -492,6 +502,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, shared.Keys.Rebuild) {
 				return m.openRebuild()
+			}
+			if key.Matches(msg, shared.Keys.Snapshot) {
+				return m.openSnapshot()
 			}
 			if key.Matches(msg, shared.Keys.ConfirmResize) {
 				return m.doConfirmResize()
@@ -937,6 +950,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverRebuild.Active {
 			var cmd tea.Cmd
 			m.serverRebuild, cmd = m.serverRebuild.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.serverSnapshot.Active {
+			var cmd tea.Cmd
+			m.serverSnapshot, cmd = m.serverSnapshot.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.serverResize.Active {

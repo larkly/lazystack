@@ -115,6 +115,9 @@ func (m Model) viewContent() string {
 	if m.serverRebuild.Active {
 		return m.serverRebuild.View()
 	}
+	if m.serverSnapshot.Active {
+		return m.serverSnapshot.View()
+	}
 	if m.serverResize.Active {
 		return m.serverResize.View()
 	}
