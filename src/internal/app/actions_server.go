@@ -13,12 +13,32 @@ import (
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/volume"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"charm.land/bubbletea/v2"
 )
+
+func (m Model) openRename() (Model, tea.Cmd) {
+	var id, name string
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			id, name = s.ID, s.Name
+		}
+	case viewServerDetail:
+		id = m.serverDetail.ServerID()
+		name = m.serverDetail.ServerName()
+	}
+	if id == "" {
+		return m, nil
+	}
+	m.serverRename = serverrename.New(m.client.Compute, id, name)
+	m.serverRename.SetSize(m.width, m.height)
+	return m, m.serverRename.Init()
+}
 
 func (m Model) openDeleteConfirm() (Model, tea.Cmd) {
 	if m.view == viewServerList && m.serverList.SelectionCount() > 0 {
