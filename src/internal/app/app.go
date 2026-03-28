@@ -427,8 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, shared.Keys.Quit) && m.view != viewCloudPicker:
 				return m, tea.Quit
 			case key.Matches(msg, shared.Keys.Help):
-				m.help.Visible = true
-				m.help.View = m.viewName()
+				m.help.Open(m.viewName())
 				return m, nil
 			case key.Matches(msg, shared.Keys.CloudPick) && m.view != viewCloudPicker:
 				return m.switchToCloudPicker()
