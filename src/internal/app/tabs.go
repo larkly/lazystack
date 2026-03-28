@@ -68,11 +68,9 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			m.volumeList = volumelist.New(m.client.BlockStorage, m.client.Compute, m.refreshInterval)
 			m.volumeList.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
-			m.statusBar.Hint = m.volumeList.Hints()
-			return m, m.volumeList.Init()
 		}
 		m.statusBar.Hint = m.volumeList.Hints()
-		return m, nil
+		return m, m.volumeList.Init()
 
 	case "floatingips":
 		m.view = viewFloatingIPList
@@ -81,11 +79,9 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			m.floatingIPList = floatingiplist.New(m.client.Network, m.refreshInterval)
 			m.floatingIPList.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
-			m.statusBar.Hint = m.floatingIPList.Hints()
-			return m, m.floatingIPList.Init()
 		}
 		m.statusBar.Hint = m.floatingIPList.Hints()
-		return m, nil
+		return m, m.floatingIPList.Init()
 
 	case "secgroups":
 		m.view = viewSecGroupView
@@ -94,11 +90,9 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			m.secGroupView = secgroupview.New(m.client.Network, m.refreshInterval)
 			m.secGroupView.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
-			m.statusBar.Hint = m.secGroupView.Hints()
-			return m, m.secGroupView.Init()
 		}
 		m.statusBar.Hint = m.secGroupView.Hints()
-		return m, nil
+		return m, m.secGroupView.Init()
 
 	case "networks":
 		m.view = viewNetworkList
@@ -107,11 +101,9 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			m.networkList = networklist.New(m.client.Network, m.refreshInterval)
 			m.networkList.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
-			m.statusBar.Hint = m.networkList.Hints()
-			return m, m.networkList.Init()
 		}
 		m.statusBar.Hint = m.networkList.Hints()
-		return m, nil
+		return m, m.networkList.Init()
 
 	case "loadbalancers":
 		m.view = viewLBList
@@ -120,11 +112,9 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			m.lbList = lblist.New(m.client.LoadBalancer, m.refreshInterval)
 			m.lbList.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
-			m.statusBar.Hint = m.lbList.Hints()
-			return m, m.lbList.Init()
 		}
 		m.statusBar.Hint = m.lbList.Hints()
-		return m, nil
+		return m, m.lbList.Init()
 
 	case "routers":
 		m.view = viewRouterList
@@ -133,11 +123,9 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			m.routerList = routerlist.New(m.client.Network, m.refreshInterval)
 			m.routerList.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
-			m.statusBar.Hint = m.routerList.Hints()
-			return m, m.routerList.Init()
 		}
 		m.statusBar.Hint = m.routerList.Hints()
-		return m, nil
+		return m, m.routerList.Init()
 
 	case "keypairs":
 		m.view = viewKeypairList
@@ -146,11 +134,9 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			m.keypairList = keypairlist.New(m.client.Compute, m.refreshInterval)
 			m.keypairList.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
-			m.statusBar.Hint = m.keypairList.Hints()
-			return m, m.keypairList.Init()
 		}
 		m.statusBar.Hint = m.keypairList.Hints()
-		return m, nil
+		return m, m.keypairList.Init()
 
 	case "images":
 		m.view = viewImageList
@@ -159,11 +145,9 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			m.imageList = imagelist.New(m.client.Image, m.refreshInterval)
 			m.imageList.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
-			m.statusBar.Hint = m.imageList.Hints()
-			return m, m.imageList.Init()
 		}
 		m.statusBar.Hint = m.imageList.Hints()
-		return m, nil
+		return m, m.imageList.Init()
 	}
 	return m, nil
 }

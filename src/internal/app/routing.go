@@ -88,12 +88,10 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
-	// Route to all initialized tab list views
-	for i, td := range m.tabs {
-		if !m.tabInited[i] {
-			continue
-		}
-		switch td.Key {
+	// Route to active tab's list view only — inactive views don't need
+	// tick messages; their ticker chains restart when they become active.
+	if m.activeTab >= 0 && m.activeTab < len(m.tabs) && m.tabInited[m.activeTab] {
+		switch m.tabs[m.activeTab].Key {
 		case "volumes":
 			m.volumeList, cmd = m.volumeList.Update(msg)
 			cmds = append(cmds, cmd)
@@ -212,7 +210,7 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		m.view = viewVolumeList
 		m.statusBar.CurrentView = "volumelist"
 		m.statusBar.Hint = m.volumeList.Hints()
-		return m, nil
+		return m, m.volumeList.Init()
 
 	case "volumecreate":
 		return m.openVolumeCreate()
@@ -221,13 +219,13 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		m.view = viewRouterList
 		m.statusBar.CurrentView = "routerlist"
 		m.statusBar.Hint = m.routerList.Hints()
-		return m, nil
+		return m, m.routerList.Init()
 
 	case "keypairlist":
 		m.view = viewKeypairList
 		m.statusBar.CurrentView = "keypairlist"
 		m.statusBar.Hint = m.keypairList.Hints()
-		return m, nil
+		return m, m.keypairList.Init()
 
 	case "keypaircreate":
 		return m.openKeypairCreate()
@@ -236,13 +234,13 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		m.view = viewLBList
 		m.statusBar.CurrentView = "lblist"
 		m.statusBar.Hint = m.lbList.Hints()
-		return m, nil
+		return m, m.lbList.Init()
 
 	case "imagelist":
 		m.view = viewImageList
 		m.statusBar.CurrentView = "imagelist"
 		m.statusBar.Hint = m.imageList.Hints()
-		return m, nil
+		return m, m.imageList.Init()
 
 	case "servercreate":
 		m.serverCreate = servercreate.New(m.client.Compute, m.client.Image, m.client.Network)
