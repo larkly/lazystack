@@ -188,7 +188,7 @@ func (m Model) View() string {
 		label := shared.StyleLabel.Render(p.label)
 		var value string
 		if p.style != nil {
-			value = p.style(p.value).Render(p.value)
+			value = p.style(p.value).Render(shared.StatusIcon(p.value) + p.value)
 		} else {
 			value = shared.StyleValue.Render(p.value)
 		}

@@ -215,7 +215,7 @@ func (m Model) View() string {
 			if srv.Status == "ACTIVE" {
 				statusStyle = statusStyle.Foreground(shared.ColorSuccess)
 			}
-			line := cursor + style.Render(srv.Name) + " " + statusStyle.Render(srv.Status)
+			line := cursor + style.Render(srv.Name) + " " + statusStyle.Render(shared.StatusIcon(srv.Status) + srv.Status)
 			lines = append(lines, line)
 		}
 		body = strings.Join(lines, "\n")
