@@ -25,6 +25,7 @@ func main() {
 	cloudFlag := flag.String("cloud", "", "connect directly to named cloud, skip picker")
 	refreshSec := flag.Int("refresh", 5, "server list auto-refresh interval in seconds")
 	idleTimeoutMin := flag.Int("idle-timeout", 0, "pause polling after N minutes of no input (0 = disabled)")
+	plainMode := flag.Bool("plain", false, "disable Unicode status icons")
 	flag.Parse()
 
 	if *showVersion {
@@ -70,6 +71,7 @@ func main() {
 		IdleTimeout:     time.Duration(*idleTimeoutMin) * time.Minute,
 		Version:         version,
 		CheckUpdate:     !*noCheckUpdate,
+		Plain:           *plainMode,
 	})
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
