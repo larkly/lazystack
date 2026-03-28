@@ -262,7 +262,7 @@ func (m Model) View() string {
 		row := fmt.Sprintf("%s%-*s %s %-*d %-*s",
 			cursor,
 			nameW, truncate(net.Name, nameW),
-			statusStyle.Width(statusW).Render(net.Status),
+			statusStyle.Width(statusW).Render(shared.StatusIcon(net.Status) + net.Status),
 			subnetsW, len(net.SubnetIDs),
 			sharedW, sharedStr,
 		)

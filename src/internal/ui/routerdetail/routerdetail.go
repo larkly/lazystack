@@ -207,7 +207,7 @@ func (m Model) View() string {
 		label := labelStyle.Render(p.label)
 		var value string
 		if p.label == "Status" {
-			value = statusStyle(p.value).Render(p.value)
+			value = statusStyle(p.value).Render(shared.StatusIcon(p.value) + p.value)
 		} else if p.label == "Admin State" {
 			value = adminStateStyle(p.value).Render(p.value)
 		} else {

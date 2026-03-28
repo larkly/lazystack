@@ -253,7 +253,7 @@ func (m Model) View() string {
 		}
 
 		line := fmt.Sprintf("%-16s ", f.FloatingIP)
-		statusStr := statusStyle.Width(12).Render(f.Status)
+		statusStr := statusStyle.Width(14).Render(shared.StatusIcon(f.Status) + f.Status)
 		rest := fmt.Sprintf(" %-16s %-36s", fixedIP, portID)
 
 		b.WriteString(cursor + style.Render(line) + statusStr + style.Render(rest) + "\n")
