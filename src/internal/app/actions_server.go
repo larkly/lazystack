@@ -182,6 +182,12 @@ func (m Model) openToggleConfirm(action string) (Model, tea.Cmd) {
 				} else {
 					actualAction = "lock"
 				}
+			case "rescue/unrescue":
+				if status == "RESCUE" {
+					actualAction = "unrescue"
+				} else {
+					actualAction = "rescue"
+				}
 			}
 		}
 		refs := make([]modal.ServerRef, len(servers))
@@ -250,6 +256,12 @@ func (m Model) openToggleConfirm(action string) (Model, tea.Cmd) {
 			actualAction = "unlock"
 		} else {
 			actualAction = "lock"
+		}
+	case "rescue/unrescue":
+		if status == "RESCUE" {
+			actualAction = "unrescue"
+		} else {
+			actualAction = "rescue"
 		}
 	}
 
@@ -593,6 +605,26 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			return shared.ServerActionMsg{Action: "Unlock", Name: action.Name}
 		}
+	case "rescue":
+		return m, func() tea.Msg {
+			adminPass, err := compute.RescueServer(context.Background(), client, action.ServerID)
+			if err != nil {
+				return shared.ServerActionErrMsg{Action: "Rescue", Name: action.Name, Err: err}
+			}
+			msg := shared.ServerActionMsg{Action: "Rescue", Name: action.Name}
+			if adminPass != "" {
+				msg.Action = fmt.Sprintf("Rescue (password: %s)", adminPass)
+			}
+			return msg
+		}
+	case "unrescue":
+		return m, func() tea.Msg {
+			err := compute.UnrescueServer(context.Background(), client, action.ServerID)
+			if err != nil {
+				return shared.ServerActionErrMsg{Action: "Unrescue", Name: action.Name, Err: err}
+			}
+			return shared.ServerActionMsg{Action: "Unrescue", Name: action.Name}
+		}
 	case "delete_volume":
 		bsClient := m.client.BlockStorage
 		id := action.ServerID
@@ -785,6 +817,10 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 				err = compute.LockServer(context.Background(), client, s.ID)
 			case "unlock":
 				err = compute.UnlockServer(context.Background(), client, s.ID)
+			case "rescue":
+				_, err = compute.RescueServer(context.Background(), client, s.ID)
+			case "unrescue":
+				err = compute.UnrescueServer(context.Background(), client, s.ID)
 			}
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("%s: %v", s.Name, err))

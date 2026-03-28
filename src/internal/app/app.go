@@ -494,6 +494,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.Lock) {
 				return m.openToggleConfirm("lock/unlock")
 			}
+			if key.Matches(msg, shared.Keys.Rescue) {
+				return m.openToggleConfirm("rescue/unrescue")
+			}
 			if key.Matches(msg, shared.Keys.Console) {
 				return m.openConsoleLog()
 			}

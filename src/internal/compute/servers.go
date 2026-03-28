@@ -240,6 +240,25 @@ func RebuildServer(ctx context.Context, client *gophercloud.ServiceClient, id, i
 	return nil
 }
 
+// RescueServer places a server into RESCUE mode and returns the admin password.
+func RescueServer(ctx context.Context, client *gophercloud.ServiceClient, id string) (string, error) {
+	r := servers.Rescue(ctx, client, id, servers.RescueOpts{})
+	adminPass, err := r.Extract()
+	if err != nil {
+		return "", fmt.Errorf("rescuing server %s: %w", id, err)
+	}
+	return adminPass, nil
+}
+
+// UnrescueServer returns a server from RESCUE mode.
+func UnrescueServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := servers.Unrescue(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("unrescuing server %s: %w", id, r.Err)
+	}
+	return nil
+}
+
 // RenameServer updates a server's name.
 func RenameServer(ctx context.Context, client *gophercloud.ServiceClient, id, newName string) error {
 	_, err := servers.Update(ctx, client, id, servers.UpdateOpts{Name: newName}).Extract()
