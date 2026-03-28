@@ -981,11 +981,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case cloneprogress.RollbackCompleteMsg:
 		m.cloneProgress.Active = false
-		errMsg := "Volume clone failed — server and volumes rolled back"
-		if len(msg.Errors) > 0 {
-			errMsg += fmt.Sprintf(" (with %d cleanup errors)", len(msg.Errors))
-		}
-		m.errModal = modal.NewError("Clone Failed", fmt.Errorf("%s", errMsg))
+		m.errModal = modal.NewError("Clone Failed", msg.Cause)
 		m.errModal.SetSize(m.width, m.height)
 		m.activeModal = modalError
 		return m, nil

@@ -32,7 +32,8 @@ type AllCompleteMsg struct{}
 
 // RollbackCompleteMsg is sent after rollback finishes.
 type RollbackCompleteMsg struct {
-	Errors []error
+	Cause  error   // the original error that triggered rollback
+	Errors []error // errors during cleanup
 }
 
 type volumeCreatedMsg struct {
@@ -53,6 +54,7 @@ type volumeAttachedMsg struct {
 }
 
 type rollbackDoneMsg struct {
+	cause  error
 	errors []error
 }
 
@@ -240,7 +242,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.running = false
 		m.rollingBack = false
 		return m, func() tea.Msg {
-			return RollbackCompleteMsg{Errors: msg.errors}
+			return RollbackCompleteMsg{Cause: msg.cause, Errors: msg.errors}
 		}
 	}
 	return m, nil
@@ -406,6 +408,15 @@ func (m Model) startRollback() (Model, tea.Cmd) {
 	m.failed = true
 	m.rollingBack = true
 
+	// Find the original error that triggered rollback
+	var cause error
+	for _, op := range m.volumes {
+		if op.Err != nil {
+			cause = op.Err
+			break
+		}
+	}
+
 	// Collect volume IDs to delete and server to delete
 	var volIDs []string
 	for _, op := range m.volumes {
@@ -430,6 +441,6 @@ func (m Model) startRollback() (Model, tea.Cmd) {
 		if err := compute.DeleteServer(context.Background(), computeClient, serverID); err != nil {
 			errs = append(errs, fmt.Errorf("delete server %s: %w", serverID, err))
 		}
-		return rollbackDoneMsg{errors: errs}
+		return rollbackDoneMsg{cause: cause, errors: errs}
 	}
 }
