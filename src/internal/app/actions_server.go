@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/image"
@@ -540,14 +541,35 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		deleteVols := action.DeleteVolumes
 		volIDs := action.VolumeIDs
 		return m, func() tea.Msg {
+			// Detach volumes before deleting the server
+			if deleteVols && bsClient != nil {
+				for _, vid := range volIDs {
+					_ = volume.DetachVolume(context.Background(), computeC, action.ServerID, vid)
+				}
+				// Wait for volumes to detach (up to 30s)
+				for range 10 {
+					allDetached := true
+					for _, vid := range volIDs {
+						v, err := volume.GetVolume(context.Background(), bsClient, vid)
+						if err == nil && v.Status != "available" {
+							allDetached = false
+							break
+						}
+					}
+					if allDetached {
+						break
+					}
+					time.Sleep(3 * time.Second)
+				}
+			}
+
 			err := compute.DeleteServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				return shared.ServerActionErrMsg{Action: "Delete", Name: action.Name, Err: err}
 			}
+
 			if deleteVols && bsClient != nil {
 				for _, vid := range volIDs {
-					// Detach first (may already be detached after server delete)
-					_ = volume.DetachVolume(context.Background(), computeC, action.ServerID, vid)
 					volume.DeleteVolume(context.Background(), bsClient, vid)
 				}
 			}
