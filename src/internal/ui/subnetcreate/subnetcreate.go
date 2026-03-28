@@ -16,14 +16,15 @@ import (
 )
 
 const (
-	fieldName      = 0
-	fieldCIDR      = 1
-	fieldIPVersion = 2
-	fieldGateway   = 3
-	fieldDHCP      = 4
-	fieldSubmit    = 5
-	fieldCancel    = 6
-	numFields      = 7
+	fieldName       = 0
+	fieldIPVersion  = 1
+	fieldSubnetPool = 2
+	fieldCIDR       = 3
+	fieldGateway    = 4
+	fieldDHCP       = 5
+	fieldSubmit     = 6
+	fieldCancel     = 7
+	numFields       = 8
 )
 
 var (
@@ -33,24 +34,30 @@ var (
 
 type subnetCreatedMsg struct{}
 type subnetCreateErrMsg struct{ err error }
+type subnetPoolsLoadedMsg struct{ pools []network.SubnetPool }
+type subnetPoolsFetchErrMsg struct{ err error }
 
 // Model is the subnet create modal.
 type Model struct {
-	Active      bool
-	client      *gophercloud.ServiceClient
-	networkID   string
-	networkName string
-	nameInput   textinput.Model
-	cidrInput   textinput.Model
-	gatewayInput textinput.Model
-	ipVersion   int // 0=IPv4, 1=IPv6
-	dhcp        int // 0=Enabled, 1=Disabled
-	focusField  int
-	submitting  bool
-	spinner     spinner.Model
-	err         string
-	width       int
-	height      int
+	Active         bool
+	client         *gophercloud.ServiceClient
+	networkID      string
+	networkName    string
+	nameInput      textinput.Model
+	cidrInput      textinput.Model
+	gatewayInput   textinput.Model
+	ipVersion      int // 0=IPv4, 1=IPv6
+	dhcp           int // 0=Enabled, 1=Disabled
+	allSubnetPools []network.SubnetPool
+	subnetPools    []network.SubnetPool // filtered by IP version
+	subnetPool     int                  // 0=None, 1..N=pool index
+	loading        bool
+	focusField     int
+	submitting     bool
+	spinner        spinner.Model
+	err            string
+	width          int
+	height         int
 }
 
 // New creates a subnet create modal for the given network.
@@ -85,13 +92,41 @@ func New(client *gophercloud.ServiceClient, networkID, networkName string) Model
 		nameInput:    ni,
 		cidrInput:    ci,
 		gatewayInput: gi,
+		loading:      true,
 		spinner:      s,
 	}
 }
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(m.spinner.Tick, m.fetchSubnetPools())
+}
+
+func (m Model) fetchSubnetPools() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		pools, err := network.ListSubnetPools(context.Background(), client)
+		if err != nil {
+			return subnetPoolsFetchErrMsg{err: err}
+		}
+		return subnetPoolsLoadedMsg{pools: pools}
+	}
+}
+
+func (m *Model) filterSubnetPools() {
+	ipVer := 4
+	if m.ipVersion == 1 {
+		ipVer = 6
+	}
+	m.subnetPools = nil
+	for _, p := range m.allSubnetPools {
+		if p.IPVersion == ipVer {
+			m.subnetPools = append(m.subnetPools, p)
+		}
+	}
+	if m.subnetPool > len(m.subnetPools) {
+		m.subnetPool = 0
+	}
 }
 
 // Update handles messages.
@@ -107,8 +142,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.submitting = false
 		m.err = msg.err.Error()
 		return m, nil
+	case subnetPoolsLoadedMsg:
+		m.loading = false
+		m.allSubnetPools = msg.pools
+		m.filterSubnetPools()
+		return m, nil
+	case subnetPoolsFetchErrMsg:
+		m.loading = false
+		return m, nil
 	case spinner.TickMsg:
-		if m.submitting {
+		if m.loading || m.submitting {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -189,6 +232,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch m.focusField {
 		case fieldIPVersion:
 			m.ipVersion = (m.ipVersion + 1) % len(ipVersions)
+			m.filterSubnetPools()
+			return m, nil
+		case fieldSubnetPool:
+			count := len(m.subnetPools) + 1
+			m.subnetPool = (m.subnetPool + 1) % count
 			return m, nil
 		case fieldDHCP:
 			m.dhcp = (m.dhcp + 1) % len(dhcpOpts)
@@ -205,6 +253,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch m.focusField {
 		case fieldIPVersion:
 			m.ipVersion = (m.ipVersion - 1 + len(ipVersions)) % len(ipVersions)
+			m.filterSubnetPools()
+			return m, nil
+		case fieldSubnetPool:
+			count := len(m.subnetPools) + 1
+			m.subnetPool = (m.subnetPool - 1 + count) % count
 			return m, nil
 		case fieldDHCP:
 			m.dhcp = (m.dhcp - 1 + len(dhcpOpts)) % len(dhcpOpts)
@@ -273,8 +326,9 @@ func (m *Model) updateFocus() {
 
 func (m Model) submit() (Model, tea.Cmd) {
 	cidr := strings.TrimSpace(m.cidrInput.Value())
-	if cidr == "" {
-		m.err = "CIDR is required"
+	poolSelected := m.subnetPool > 0 && m.subnetPool <= len(m.subnetPools)
+	if cidr == "" && !poolSelected {
+		m.err = "CIDR is required (or select a subnet pool)"
 		return m, nil
 	}
 
@@ -290,6 +344,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 		IPVersion:  ipVer,
 		GatewayIP:  strings.TrimSpace(m.gatewayInput.Value()),
 		EnableDHCP: m.dhcp == 0,
+	}
+	if poolSelected {
+		opts.SubnetPoolID = m.subnetPools[m.subnetPool-1].ID
 	}
 
 	m.submitting = true
@@ -328,8 +385,9 @@ func (m Model) View() string {
 	}
 	fields := []field{
 		{"Name", m.nameInput.View(), m.focusField == fieldName},
-		{"CIDR", m.cidrInput.View(), m.focusField == fieldCIDR},
 		{"IP Version", cycleDisplay(ipVersions, m.ipVersion), m.focusField == fieldIPVersion},
+		{"Subnet Pool", m.subnetPoolDisplay(), m.focusField == fieldSubnetPool},
+		{"CIDR", m.cidrInput.View(), m.focusField == fieldCIDR},
 		{"Gateway IP", m.gatewayInput.View(), m.focusField == fieldGateway},
 		{"DHCP", cycleDisplay(dhcpOpts, m.dhcp), m.focusField == fieldDHCP},
 	}
@@ -362,6 +420,28 @@ func (m Model) View() string {
 
 	content := title + "\n\n" + body.String()
 	return m.renderModal(content)
+}
+
+func (m Model) subnetPoolDisplay() string {
+	if m.loading {
+		return m.spinner.View() + " Loading..."
+	}
+	if len(m.subnetPools) == 0 {
+		return lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("None available")
+	}
+	label := "None"
+	if m.subnetPool > 0 && m.subnetPool <= len(m.subnetPools) {
+		p := m.subnetPools[m.subnetPool-1]
+		label = p.Name
+		if len(p.Prefixes) > 0 {
+			prefixStr := strings.Join(p.Prefixes, ", ")
+			if len(prefixStr) > 25 {
+				prefixStr = prefixStr[:22] + "..."
+			}
+			label += " [" + prefixStr + "]"
+		}
+	}
+	return fmt.Sprintf("◀ %s ▶", label)
 }
 
 func cycleDisplay(options []string, selected int) string {
