@@ -20,7 +20,7 @@ type Column struct {
 func DefaultColumns() []Column {
 	return []Column{
 		{Title: "Name", MinWidth: 10, Flex: 2, Priority: 0, Key: "name"},
-		{Title: "Status", MinWidth: 18, Flex: 0, Priority: 0, Key: "status"},
+		{Title: "Status", MinWidth: 20, Flex: 0, Priority: 0, Key: "status"},
 		{Title: "IPv4", MinWidth: 12, Flex: 1, Priority: 1, Key: "ipv4"},
 		{Title: "IPv6", MinWidth: 20, Flex: 4, Priority: 5, Key: "ipv6"},
 		{Title: "Floating IP", MinWidth: 12, Flex: 1, Priority: 3, Key: "floating"},
