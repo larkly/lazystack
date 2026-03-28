@@ -76,9 +76,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tickMsg:
 		return m, tea.Batch(m.fetchKeypairs(), m.tickCmd())
 
-	case shared.TickMsg:
-		return m, tea.Batch(m.fetchKeypairs(), m.tickCmd())
-
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd

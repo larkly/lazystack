@@ -56,9 +56,9 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 	}
 }
 
-// Init starts the initial fetch.
+// Init starts the initial fetch and auto-refresh ticker.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchNetworks())
+	return tea.Batch(m.spinner.Tick, m.fetchNetworks(), m.tickCmd())
 }
 
 // ForceRefresh triggers a manual reload.
@@ -85,9 +85,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.err = msg.err.Error()
 		return m, nil
 	case tickMsg:
-		return m, m.fetchNetworks()
-	case shared.TickMsg:
-		return m, m.fetchNetworks()
+		return m, tea.Batch(m.fetchNetworks(), m.tickCmd())
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd
@@ -418,6 +416,12 @@ func (m Model) Hints() string {
 		return "↑↓ navigate • enter collapse • ^n create subnet • ^d delete network • R refresh • 1-5/←→ switch tab • ? help"
 	}
 	return "↑↓ navigate • enter expand • ^n create network • ^d delete network • R refresh • 1-5/←→ switch tab • ? help"
+}
+
+func (m Model) tickCmd() tea.Cmd {
+	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
+		return tickMsg{}
+	})
 }
 
 func (m Model) fetchNetworks() tea.Cmd {
