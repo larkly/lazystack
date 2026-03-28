@@ -38,7 +38,7 @@ type Column struct {
 func defaultColumns() []Column {
 	return []Column{
 		{Title: "Name", MinWidth: 10, Flex: 3, Priority: 0, Key: "name"},
-		{Title: "Status", MinWidth: 12, Flex: 0, Priority: 0, Key: "status"},
+		{Title: "Status", MinWidth: 14, Flex: 0, Priority: 0, Key: "status"},
 		{Title: "Size", MinWidth: 6, Flex: 0, Priority: 0, Key: "size"},
 		{Title: "Type", MinWidth: 8, Flex: 1, Priority: 1, Key: "type"},
 		{Title: "Attached To", MinWidth: 10, Flex: 2, Priority: 1, Key: "attached"},
@@ -430,7 +430,7 @@ func (m Model) View() string {
 
 		values := map[string]string{
 			"name":     name,
-			"status":   v.Status,
+			"status":   shared.StatusIcon(v.Status) + v.Status,
 			"size":     fmt.Sprintf("%dGB", v.Size),
 			"type":     v.VolumeType,
 			"attached": attached,

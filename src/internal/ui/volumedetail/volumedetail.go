@@ -208,7 +208,7 @@ func (m Model) View() string {
 		label := shared.StyleLabel.Render(p.label)
 		value := shared.StyleValue.Render(p.value)
 		if p.label == "Status" {
-			value = volumeStatusStyle(p.value).Render(p.value)
+			value = volumeStatusStyle(p.value).Render(shared.StatusIcon(p.value) + p.value)
 		}
 		lines = append(lines, fmt.Sprintf("  %s %s", label, value))
 	}
