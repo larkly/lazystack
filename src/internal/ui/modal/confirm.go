@@ -155,7 +155,7 @@ func (m ConfirmModel) View() string {
 		if m.deleteVolumes {
 			check = "[x]"
 		}
-		volCheckbox = fmt.Sprintf("\n%s delete %d attached volume(s)  (space to toggle)", check, len(m.VolumeIDs))
+		volCheckbox = fmt.Sprintf("\n\n%s delete %d attached volume(s)  (space to toggle)", check, len(m.VolumeIDs))
 	}
 
 	content := title + "\n\n" + body + volCheckbox + "\n\n" + buttons
