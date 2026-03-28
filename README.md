@@ -52,6 +52,28 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 brew install larkly/tap/lazystack
 ```
 
+### Arch Linux (AUR)
+
+```bash
+yay -S lazystack
+```
+
+### Debian / Ubuntu
+
+Download the `.deb` from the [releases page](https://github.com/larkly/lazystack/releases/latest) and install:
+
+```bash
+sudo dpkg -i lazystack_*.deb
+```
+
+### Fedora / RHEL
+
+Download the `.rpm` from the [releases page](https://github.com/larkly/lazystack/releases/latest) and install:
+
+```bash
+sudo rpm -i lazystack-*.rpm
+```
+
 ### Pre-built binaries
 
 Grab the latest release for your platform from the [releases page](https://github.com/larkly/lazystack/releases/latest).
