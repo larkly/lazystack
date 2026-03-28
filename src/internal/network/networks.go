@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/subnetpools"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
@@ -37,6 +38,15 @@ type Subnet struct {
 type AllocationPool struct {
 	Start string
 	End   string
+}
+
+// SubnetPool is a simplified representation of a Neutron subnet pool.
+type SubnetPool struct {
+	ID               string
+	Name             string
+	Prefixes         []string
+	IPVersion        int
+	DefaultPrefixLen int
 }
 
 // ListNetworks fetches all available networks.
@@ -100,6 +110,31 @@ func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subn
 	return result, nil
 }
 
+// ListSubnetPools fetches all subnet pools.
+func ListSubnetPools(ctx context.Context, client *gophercloud.ServiceClient) ([]SubnetPool, error) {
+	var result []SubnetPool
+	err := subnetpools.List(client, subnetpools.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+		extracted, err := subnetpools.ExtractSubnetPools(page)
+		if err != nil {
+			return false, err
+		}
+		for _, sp := range extracted {
+			result = append(result, SubnetPool{
+				ID:               sp.ID,
+				Name:             sp.Name,
+				Prefixes:         sp.Prefixes,
+				IPVersion:        sp.IPversion,
+				DefaultPrefixLen: sp.DefaultPrefixLen,
+			})
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing subnet pools: %w", err)
+	}
+	return result, nil
+}
+
 // CreateNetwork creates a new network.
 func CreateNetwork(ctx context.Context, client *gophercloud.ServiceClient, name string, adminStateUp bool) (*Network, error) {
 	r := networks.Create(ctx, client, networks.CreateOpts{
@@ -129,12 +164,13 @@ func DeleteNetwork(ctx context.Context, client *gophercloud.ServiceClient, id st
 
 // SubnetCreateOpts holds options for creating a subnet.
 type SubnetCreateOpts struct {
-	NetworkID  string
-	Name       string
-	CIDR       string
-	IPVersion  int
-	GatewayIP  string
-	EnableDHCP bool
+	NetworkID    string
+	Name         string
+	CIDR         string
+	IPVersion    int
+	GatewayIP    string
+	EnableDHCP   bool
+	SubnetPoolID string
 }
 
 // CreateSubnet creates a new subnet.
@@ -148,6 +184,9 @@ func CreateSubnet(ctx context.Context, client *gophercloud.ServiceClient, opts S
 	}
 	if opts.GatewayIP != "" {
 		createOpts.GatewayIP = &opts.GatewayIP
+	}
+	if opts.SubnetPoolID != "" {
+		createOpts.SubnetPoolID = opts.SubnetPoolID
 	}
 	r := subnets.Create(ctx, client, createOpts)
 	s, err := r.Extract()
