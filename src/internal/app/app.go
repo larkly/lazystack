@@ -10,6 +10,7 @@ import (
 	"github.com/larkly/lazystack/internal/selfupdate"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
+	"github.com/larkly/lazystack/internal/ui/cloneprogress"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
@@ -143,9 +144,10 @@ type Model struct {
 	imageList      imagelist.Model
 	imageDetail    imagedetail.Model
 	networkList   networklist.Model
-	lbList        lblist.Model
-	lbDetail      lbdetail.Model
-	statusBar     statusbar.Model
+	lbList         lblist.Model
+	lbDetail       lbdetail.Model
+	cloneProgress  cloneprogress.Model
+	statusBar      statusbar.Model
 	tabs      []TabDef
 	activeTab int
 	tabInited []bool
@@ -294,6 +296,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.routerCreate.SetSize(m.width, m.height)
 		m.subnetPicker.SetSize(m.width, m.height)
 		m.projectPicker.SetSize(m.width, m.height)
+		m.cloneProgress.SetSize(m.width, m.height)
 		m.statusBar.Width = m.width
 		return m.updateActiveView(msg)
 
@@ -329,6 +332,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil // swallow keys while update is downloading
 			}
 			return m.updateModal(msg)
+		}
+
+		// Clone progress modal intercepts all keys when active
+		if m.cloneProgress.Active {
+			var cmd tea.Cmd
+			m.cloneProgress, cmd = m.cloneProgress.Update(msg)
+			return m, cmd
 		}
 
 		// Rename modal intercepts all keys when active
@@ -524,6 +534,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, shared.Keys.Attach) {
 				return m.doAllocateAndAssociateFIP()
+			}
+			if key.Matches(msg, shared.Keys.Clone) {
+				return m.openClone()
 			}
 		}
 
@@ -938,6 +951,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeModal = modalError
 		return m, nil
 
+	case servercreate.ServerCloneCreatedMsg:
+		// Server created in clone mode with volume cloning — start volume clone progress
+		m.view = viewServerList
+		m.statusBar.CurrentView = "serverlist"
+
+		// Build volume operations — names will be resolved async in Init
+		var ops []cloneprogress.VolumeOp
+		for _, vid := range msg.VolumeIDs {
+			ops = append(ops, cloneprogress.VolumeOp{
+				SourceVolID: vid,
+				SourceName:  vid,
+				CloneName:   vid, // placeholder, resolved in Init
+				Status:      "pending",
+			})
+		}
+
+		m.cloneProgress = cloneprogress.New(m.client.Compute, m.client.BlockStorage, msg.Server.ID, msg.Server.Name, ops)
+		m.cloneProgress.SetSize(m.width, m.height)
+		return m, tea.Batch(
+			m.cloneProgress.Init(),
+			func() tea.Msg { return shared.RefreshServersMsg{} },
+		)
+
+	case cloneprogress.AllCompleteMsg:
+		m.cloneProgress.Active = false
+		m.statusBar.StickyHint = fmt.Sprintf("✓ Clone complete — all volumes attached to %s", m.cloneProgress.ServerName())
+		return m, nil
+
+	case cloneprogress.RollbackCompleteMsg:
+		m.cloneProgress.Active = false
+		m.errModal = modal.NewError("Clone Failed", msg.Cause)
+		m.errModal.SetSize(m.width, m.height)
+		m.activeModal = modalError
+		return m, nil
+
 	case delayedDetailRefreshMsg:
 		if m.view == viewServerDetail && m.serverDetail.ServerID() == msg.id {
 			client := m.client.Compute
@@ -1045,6 +1093,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.projectPicker, cmd = m.projectPicker.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
+		// Route non-key messages to clone progress when running (even if dismissed)
+		if m.cloneProgress.Running() {
+			var cmd tea.Cmd
+			m.cloneProgress, cmd = m.cloneProgress.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
 		return m, viewCmd
 	}
 }
+

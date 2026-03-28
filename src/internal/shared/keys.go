@@ -48,6 +48,7 @@ type KeyMap struct {
 	Snapshot    key.Binding
 	Deactivate  key.Binding
 	Rescue      key.Binding
+	Clone       key.Binding
 }
 
 var Keys = KeyMap{
@@ -230,5 +231,9 @@ var Keys = KeyMap{
 	Rescue: key.NewBinding(
 		key.WithKeys("ctrl+w"),
 		key.WithHelp("ctrl+w", "rescue/unrescue"),
+	),
+	Clone: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "clone"),
 	),
 }

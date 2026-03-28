@@ -315,6 +315,11 @@ func (m Model) ServerImageID() string {
 	return ""
 }
 
+// Server returns the full server object, or nil if not loaded.
+func (m Model) Server() *compute.Server {
+	return m.server
+}
+
 // ServerLocked returns whether the server is locked.
 func (m Model) ServerLocked() bool {
 	if m.server != nil {
