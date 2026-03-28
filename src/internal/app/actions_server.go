@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
@@ -733,6 +734,21 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			return shared.ResourceActionMsg{Action: "Deleted keypair", Name: name}
 		}
+	case "delete_image":
+		imgClient := m.client.Image
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := image.DeleteImage(context.Background(), imgClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete image", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted image", Name: name}
+		}
+	case "deactivate_image":
+		return m, m.doDeactivateImage(action.ServerID, action.Name)
+	case "reactivate_image":
+		return m, m.doReactivateImage(action.ServerID, action.Name)
 	}
 	return m, nil
 }

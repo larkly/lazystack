@@ -43,6 +43,8 @@ import (
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/ui/statusbar"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
+	"github.com/larkly/lazystack/internal/ui/imagedetail"
+	"github.com/larkly/lazystack/internal/ui/imagelist"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 	"charm.land/bubbles/v2/key"
@@ -71,6 +73,8 @@ const (
 	viewKeypairDetail
 	viewRouterList
 	viewRouterDetail
+	viewImageList
+	viewImageDetail
 )
 
 type modalType int
@@ -136,6 +140,8 @@ type Model struct {
 	keypairList    keypairlist.Model
 	keypairCreate  keypaircreate.Model
 	keypairDetail  keypairdetail.Model
+	imageList      imagelist.Model
+	imageDetail    imagedetail.Model
 	networkList   networklist.Model
 	lbList        lblist.Model
 	lbDetail      lbdetail.Model
@@ -653,6 +659,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Image list: Enter to open detail, ctrl+d to delete, d to deactivate/reactivate
+		if m.view == viewImageList {
+			if key.Matches(msg, shared.Keys.Enter) {
+				return m.openImageDetail()
+			}
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openImageDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Deactivate) {
+				return m.openImageDeactivateConfirm()
+			}
+		}
+
+		// Image detail: ctrl+d delete, d to deactivate/reactivate
+		if m.view == viewImageDetail {
+			if key.Matches(msg, shared.Keys.Delete) {
+				return m.openImageDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Deactivate) {
+				return m.openImageDeactivateConfirm()
+			}
+		}
+
 		return m.updateActiveView(msg)
 
 	case shared.CloudSelectedMsg:
@@ -687,6 +716,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tabs = append(m.tabs, TabDef{Name: "Load Balancers", Key: "loadbalancers"})
 		}
 		m.tabs = append(m.tabs, TabDef{Name: "Key Pairs", Key: "keypairs"})
+		m.tabs = append(m.tabs, TabDef{Name: "Images", Key: "images"})
 		m.tabInited = make([]bool, len(m.tabs))
 		m.activeTab = 0
 		m.statusBar.CloudName = m.cloudName
@@ -883,6 +913,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewLBDetail {
 			m.view = viewLBList
 			m.statusBar.CurrentView = "lblist"
+		}
+		if m.view == viewImageDetail {
+			m.view = viewImageList
+			m.statusBar.CurrentView = "imagelist"
 		}
 		return m, nil
 

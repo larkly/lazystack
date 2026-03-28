@@ -6,6 +6,7 @@ import (
 
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
+	"github.com/larkly/lazystack/internal/ui/imagelist"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/lblist"
 	"github.com/larkly/lazystack/internal/ui/networklist"
@@ -31,12 +32,13 @@ func DefaultTabs() []TabDef {
 		{Name: "Sec Groups", Key: "secgroups"},
 		{Name: "Networks", Key: "networks"},
 		{Name: "Key Pairs", Key: "keypairs"},
+		{Name: "Images", Key: "images"},
 	}
 }
 
 func (m Model) isTopLevelView() bool {
 	switch m.view {
-	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBList, viewNetworkList, viewRouterList:
+	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBList, viewNetworkList, viewRouterList, viewImageList:
 		return true
 	}
 	return false
@@ -148,6 +150,19 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.keypairList.Init()
 		}
 		m.statusBar.Hint = m.keypairList.Hints()
+		return m, nil
+
+	case "images":
+		m.view = viewImageList
+		m.statusBar.CurrentView = "imagelist"
+		if !m.tabInited[idx] {
+			m.imageList = imagelist.New(m.client.Image, m.refreshInterval)
+			m.imageList.SetSize(m.width, m.height)
+			m.tabInited[idx] = true
+			m.statusBar.Hint = m.imageList.Hints()
+			return m, m.imageList.Init()
+		}
+		m.statusBar.Hint = m.imageList.Hints()
 		return m, nil
 	}
 	return m, nil
