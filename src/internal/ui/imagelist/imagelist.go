@@ -36,7 +36,7 @@ type Column struct {
 func defaultColumns() []Column {
 	return []Column{
 		{Title: "Name", MinWidth: 10, Flex: 3, Priority: 0, Key: "name"},
-		{Title: "Status", MinWidth: 12, Flex: 0, Priority: 0, Key: "status"},
+		{Title: "Status", MinWidth: 14, Flex: 0, Priority: 0, Key: "status"},
 		{Title: "Size", MinWidth: 8, Flex: 0, Priority: 0, Key: "size"},
 		{Title: "Min Disk", MinWidth: 8, Flex: 0, Priority: 2, Key: "min_disk"},
 		{Title: "Min RAM", MinWidth: 8, Flex: 0, Priority: 2, Key: "min_ram"},
@@ -399,7 +399,7 @@ func (m Model) View() string {
 
 		values := map[string]string{
 			"name":       name,
-			"status":     img.Status,
+			"status":     shared.StatusIcon(img.Status) + img.Status,
 			"size":       formatSize(img.Size),
 			"min_disk":   fmt.Sprintf("%dGB", img.MinDisk),
 			"min_ram":    fmt.Sprintf("%dMB", img.MinRAM),
