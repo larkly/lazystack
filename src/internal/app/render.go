@@ -49,6 +49,10 @@ func (m Model) viewName() string {
 		return "lblist"
 	case viewLBDetail:
 		return "lbdetail"
+	case viewImageList:
+		return "imagelist"
+	case viewImageDetail:
+		return "imagedetail"
 	}
 	return ""
 }
@@ -166,6 +170,10 @@ func (m Model) viewContent() string {
 		content = m.lbList.View()
 	case viewLBDetail:
 		content = m.lbDetail.View()
+	case viewImageList:
+		content = m.imageList.View()
+	case viewImageDetail:
+		content = m.imageDetail.View()
 	}
 
 	// Add tab bar for top-level views
