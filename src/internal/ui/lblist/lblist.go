@@ -244,8 +244,8 @@ func (m Model) View() string {
 		parts := []string{
 			nameStyle.Render(truncate(name, nameW)),
 			vipStyle.Render(truncate(lb.VipAddress, 18)),
-			psStyle.Render(shared.StatusIcon(lb.ProvisioningStatus) + truncate(lb.ProvisioningStatus, 18)),
-			osStyle.Render(shared.StatusIcon(lb.OperatingStatus) + truncate(lb.OperatingStatus, 16)),
+			psStyle.Render(shared.StatusIcon(lb.ProvisioningStatus) + truncate(lb.ProvisioningStatus, 16)),
+			osStyle.Render(shared.StatusIcon(lb.OperatingStatus) + truncate(lb.OperatingStatus, 14)),
 		}
 
 		prefix := "  "

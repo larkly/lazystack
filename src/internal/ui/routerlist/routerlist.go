@@ -249,7 +249,7 @@ func (m Model) View() string {
 
 		parts := []string{
 			nameStyle.Render(truncate(name, nameW)),
-			stStyle.Render(shared.StatusIcon(r.Status) + truncate(r.Status, 14)),
+			stStyle.Render(shared.StatusIcon(r.Status) + truncate(r.Status, 12)),
 			gwStyle.Render(truncate(gateway, 20)),
 			rtStyle.Render(truncate(routes, 8)),
 		}
