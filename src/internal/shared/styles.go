@@ -2,6 +2,7 @@ package shared
 
 import (
 	"image/color"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 )
@@ -46,6 +47,80 @@ var (
 		"NOSTATE":  ColorWarning,
 	}
 
+)
+
+// PlainMode disables status icons when true (set via --plain flag).
+var PlainMode bool
+
+// statusIconMap maps status strings to their Unicode icon prefix.
+var statusIconMap = map[string]string{
+	// Healthy/Active — ●
+	"ACTIVE":    "● ",
+	"RUNNING":   "● ",
+	"available": "● ",
+	"ONLINE":    "● ",
+	"active":    "● ",
+	// In-progress — ▲
+	"BUILD":         "▲ ",
+	"RESIZE":        "▲ ",
+	"VERIFY_RESIZE": "▲ ",
+	"MIGRATING":     "▲ ",
+	"creating":      "▲ ",
+	"downloading":   "▲ ",
+	"uploading":     "▲ ",
+	"extending":     "▲ ",
+	"saving":        "▲ ",
+	"NOSTATE":       "▲ ",
+	// Error — ✘
+	"ERROR":           "✘ ",
+	"CRASHED":         "✘ ",
+	"DELETED":         "✘ ",
+	"SOFT_DELETED":    "✘ ",
+	"error":           "✘ ",
+	"error_deleting":  "✘ ",
+	"error_restoring": "✘ ",
+	"killed":          "✘ ",
+	"OFFLINE":         "✘ ",
+	// Off/Inactive — ○
+	"SHUTOFF":        "○ ",
+	"SHUTDOWN":       "○ ",
+	"DOWN":           "○ ",
+	"deleting":       "○ ",
+	"deleted":        "○ ",
+	"pending_delete": "○ ",
+	// Transitional — ↻
+	"REBOOT":      "↻ ",
+	"HARD_REBOOT": "↻ ",
+	"in-use":      "↻ ",
+	"queued":      "↻ ",
+	"importing":   "↻ ",
+	"DEGRADED":    "↻ ",
+	"NO_MONITOR":  "↻ ",
+	"DRAINING":    "↻ ",
+	// Paused/Held — ■
+	"PAUSED":            "■ ",
+	"SUSPENDED":         "■ ",
+	"SHELVED":           "■ ",
+	"SHELVED_OFFLOADED": "■ ",
+	"deactivated":       "■ ",
+}
+
+// StatusIcon returns the icon prefix for a status string.
+// Returns "" for unknown statuses or when PlainMode is true.
+func StatusIcon(status string) string {
+	if PlainMode {
+		return ""
+	}
+	if icon, ok := statusIconMap[status]; ok {
+		return icon
+	}
+	if strings.HasPrefix(status, "PENDING_") {
+		return "▲ "
+	}
+	return ""
+}
+
+var (
 	StyleTitle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorPrimary).
