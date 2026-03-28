@@ -188,10 +188,12 @@ type Options struct {
 	IdleTimeout     time.Duration
 	Version         string
 	CheckUpdate     bool
+	Plain           bool
 }
 
 // New creates the root model.
 func New(opts Options) Model {
+	shared.PlainMode = opts.Plain
 	clouds, err := cloud.ListCloudNames()
 
 	refresh := opts.RefreshInterval
