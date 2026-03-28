@@ -132,6 +132,7 @@ type Model struct {
 	err             string
 	scrollOff       int
 	refreshInterval time.Duration
+	selected        map[string]bool // selected image IDs for bulk actions
 	sortCol         int
 	sortAsc         bool
 	sortHighlight   bool
@@ -148,6 +149,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 		loading:         true,
 		spinner:         s,
 		refreshInterval: refreshInterval,
+		selected:        make(map[string]bool),
 		sortAsc:         true,
 	}
 }
@@ -164,6 +166,33 @@ func (m Model) SelectedImage() *image.Image {
 		return &img
 	}
 	return nil
+}
+
+// SelectedImages returns all selected images, or the cursor image if none selected.
+func (m Model) SelectedImages() []image.Image {
+	if len(m.selected) > 0 {
+		var result []image.Image
+		for _, img := range m.images {
+			if m.selected[img.ID] {
+				result = append(result, img)
+			}
+		}
+		return result
+	}
+	if img := m.SelectedImage(); img != nil {
+		return []image.Image{*img}
+	}
+	return nil
+}
+
+// ClearSelection clears all selected images.
+func (m *Model) ClearSelection() {
+	m.selected = make(map[string]bool)
+}
+
+// SelectionCount returns the number of selected images.
+func (m Model) SelectionCount() int {
+	return len(m.selected)
 }
 
 // Update handles messages.
@@ -251,6 +280,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.cursor = 0
 			}
 			m.ensureVisible()
+		case key.Matches(msg, shared.Keys.Select):
+			if img := m.SelectedImage(); img != nil {
+				if m.selected[img.ID] {
+					delete(m.selected, img.ID)
+				} else {
+					m.selected[img.ID] = true
+				}
+				if m.cursor < len(m.images)-1 {
+					m.cursor++
+					m.ensureVisible()
+				}
+			}
+		case key.Matches(msg, shared.Keys.Back):
+			if len(m.selected) > 0 {
+				m.selected = make(map[string]bool)
+			}
 		}
 	}
 	return m, nil
@@ -407,7 +452,7 @@ func (m Model) View() string {
 			"created":    img.CreatedAt.Format("2006-01-02"),
 		}
 
-		row := m.renderDataRow(values, img.Status, cursor)
+		row := m.renderDataRow(values, img.Status, cursor, m.selected[img.ID])
 		b.WriteString(row + "\n")
 	}
 
@@ -425,11 +470,14 @@ func (m Model) renderRow(render func(Column) string) string {
 	return "  " + strings.Join(parts, " ")
 }
 
-func (m Model) renderDataRow(values map[string]string, status string, cursor bool) string {
+func (m Model) renderDataRow(values map[string]string, status string, cursor bool, selected bool) string {
 	var rowBg color.Color
 	hasBg := false
 	if cursor {
 		rowBg = lipgloss.Color("#073642")
+		hasBg = true
+	} else if selected {
+		rowBg = lipgloss.Color("#1a1a2e")
 		hasBg = true
 	}
 
@@ -459,6 +507,9 @@ func (m Model) renderDataRow(values map[string]string, status string, cursor boo
 	}
 
 	prefix := "  "
+	if selected {
+		prefix = "● "
+	}
 	prefixStyle := lipgloss.NewStyle()
 	gapStyle := lipgloss.NewStyle()
 	if hasBg {
@@ -554,5 +605,8 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints.
 func (m Model) Hints() string {
-	return "↑↓ navigate • enter detail • ^d delete • d deactivate • R refresh • s/S sort • 1-9/←→ switch tab • ? help"
+	if len(m.selected) > 0 {
+		return fmt.Sprintf("(%d selected) space toggle • ^d delete • d deactivate • esc clear • ? help", len(m.selected))
+	}
+	return "↑↓ navigate • space select • enter detail • ^d delete • d deactivate • R refresh • s/S sort • ? help"
 }

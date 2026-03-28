@@ -15,6 +15,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
+	"github.com/larkly/lazystack/internal/ui/serverrescue"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
@@ -60,6 +61,41 @@ func (m Model) openSnapshot() (Model, tea.Cmd) {
 	m.serverSnapshot = serversnapshot.New(m.client.Compute, id, name)
 	m.serverSnapshot.SetSize(m.width, m.height)
 	return m, m.serverSnapshot.Init()
+}
+
+func (m Model) openRescue() (Model, tea.Cmd) {
+	// Bulk rescue: use simple confirm (no image picker)
+	if m.view == viewServerList && m.serverList.SelectionCount() > 0 {
+		return m.openToggleConfirm("rescue/unrescue")
+	}
+
+	var id, name, status string
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			id, name, status = s.ID, s.Name, s.Status
+		}
+	case viewServerDetail:
+		id = m.serverDetail.ServerID()
+		name = m.serverDetail.ServerName()
+		status = m.serverDetail.ServerStatus()
+	}
+	if id == "" {
+		return m, nil
+	}
+
+	// Unrescue: use simple confirm
+	if status == "RESCUE" {
+		m.confirm = modal.NewConfirm("unrescue", id, name)
+		m.confirm.SetSize(m.width, m.height)
+		m.activeModal = modalConfirm
+		return m, nil
+	}
+
+	// Rescue: open the rescue modal with image selection
+	m.serverRescue = serverrescue.New(m.client.Compute, m.client.Image, id, name)
+	m.serverRescue.SetSize(m.width, m.height)
+	return m, m.serverRescue.Init()
 }
 
 func (m Model) openRebuild() (Model, tea.Cmd) {
@@ -494,10 +530,16 @@ func (m Model) getSelectedServerInfo() (id, name string) {
 func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 	client := m.client.Compute
 
-	// Bulk actions
+	// Bulk image actions
 	if len(action.Servers) > 0 {
+		switch action.Action {
+		case "delete_image", "deactivate_image", "reactivate_image":
+			m.imageList.ClearSelection()
+			return m, m.executeBulkImageAction(action)
+		}
+		// Bulk server actions
 		m.serverList.ClearSelection()
-		return m, m.executeBulkAction(client, action)
+		return m, m.executeBulkServerAction(client, action)
 	}
 
 	switch action.Action {
@@ -606,8 +648,10 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			return shared.ServerActionMsg{Action: "Unlock", Name: action.Name}
 		}
 	case "rescue":
+		// Single rescue without image picker — should not be reached for single servers
+		// (handled by serverrescue modal), but kept for bulk rescue fallback
 		return m, func() tea.Msg {
-			adminPass, err := compute.RescueServer(context.Background(), client, action.ServerID)
+			adminPass, err := compute.RescueServer(context.Background(), client, action.ServerID, "")
 			if err != nil {
 				return shared.ServerActionErrMsg{Action: "Rescue", Name: action.Name, Err: err}
 			}
@@ -785,7 +829,7 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal.ConfirmAction) tea.Cmd {
+func (m Model) executeBulkServerAction(client *gophercloud.ServiceClient, action modal.ConfirmAction) tea.Cmd {
 	targets := action.Servers
 	act := action.Action
 	return func() tea.Msg {
@@ -818,7 +862,7 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 			case "unlock":
 				err = compute.UnlockServer(context.Background(), client, s.ID)
 			case "rescue":
-				_, err = compute.RescueServer(context.Background(), client, s.ID)
+				_, err = compute.RescueServer(context.Background(), client, s.ID, "")
 			case "unrescue":
 				err = compute.UnrescueServer(context.Background(), client, s.ID)
 			}

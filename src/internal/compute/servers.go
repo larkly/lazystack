@@ -241,8 +241,10 @@ func RebuildServer(ctx context.Context, client *gophercloud.ServiceClient, id, i
 }
 
 // RescueServer places a server into RESCUE mode and returns the admin password.
-func RescueServer(ctx context.Context, client *gophercloud.ServiceClient, id string) (string, error) {
-	r := servers.Rescue(ctx, client, id, servers.RescueOpts{})
+// If imageRef is non-empty, the server is rescued with the specified image.
+func RescueServer(ctx context.Context, client *gophercloud.ServiceClient, id, imageRef string) (string, error) {
+	opts := servers.RescueOpts{RescueImageRef: imageRef}
+	r := servers.Rescue(ctx, client, id, opts)
 	adminPass, err := r.Extract()
 	if err != nil {
 		return "", fmt.Errorf("rescuing server %s: %w", id, err)

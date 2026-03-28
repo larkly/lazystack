@@ -28,11 +28,11 @@ func DefaultTabs() []TabDef {
 	return []TabDef{
 		{Name: "Servers", Key: "servers"},
 		{Name: "Volumes", Key: "volumes"},
+		{Name: "Images", Key: "images"},
 		{Name: "Floating IPs", Key: "floatingips"},
 		{Name: "Sec Groups", Key: "secgroups"},
 		{Name: "Networks", Key: "networks"},
 		{Name: "Key Pairs", Key: "keypairs"},
-		{Name: "Images", Key: "images"},
 	}
 }
 

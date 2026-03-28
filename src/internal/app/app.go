@@ -38,6 +38,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
+	"github.com/larkly/lazystack/internal/ui/serverrescue"
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/serverlist"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
@@ -119,6 +120,7 @@ type Model struct {
 	actionLog     actionlog.Model
 	serverRename    serverrename.Model
 	serverRebuild   serverrebuild.Model
+	serverRescue    serverrescue.Model
 	serverSnapshot  serversnapshot.Model
 	serverResize    serverresize.Model
 	fipPicker     fippicker.Model
@@ -281,6 +283,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quotaView.Height = m.height
 		m.serverRename.SetSize(m.width, m.height)
 		m.serverRebuild.SetSize(m.width, m.height)
+		m.serverRescue.SetSize(m.width, m.height)
 		m.serverSnapshot.SetSize(m.width, m.height)
 		m.serverResize.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
@@ -340,6 +343,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverRebuild.Active {
 			var cmd tea.Cmd
 			m.serverRebuild, cmd = m.serverRebuild.Update(msg)
+			return m, cmd
+		}
+
+		// Rescue modal intercepts all keys when active
+		if m.serverRescue.Active {
+			var cmd tea.Cmd
+			m.serverRescue, cmd = m.serverRescue.Update(msg)
 			return m, cmd
 		}
 
@@ -495,7 +505,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openToggleConfirm("lock/unlock")
 			}
 			if key.Matches(msg, shared.Keys.Rescue) {
-				return m.openToggleConfirm("rescue/unrescue")
+				return m.openRescue()
 			}
 			if key.Matches(msg, shared.Keys.Console) {
 				return m.openConsoleLog()
@@ -711,6 +721,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.BlockStorageClient != nil {
 			m.tabs = append(m.tabs, TabDef{Name: "Volumes", Key: "volumes"})
 		}
+		m.tabs = append(m.tabs, TabDef{Name: "Images", Key: "images"})
 		m.tabs = append(m.tabs, TabDef{Name: "Floating IPs", Key: "floatingips"})
 		m.tabs = append(m.tabs, TabDef{Name: "Sec Groups", Key: "secgroups"})
 		m.tabs = append(m.tabs, TabDef{Name: "Networks", Key: "networks"})
@@ -719,7 +730,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tabs = append(m.tabs, TabDef{Name: "Load Balancers", Key: "loadbalancers"})
 		}
 		m.tabs = append(m.tabs, TabDef{Name: "Key Pairs", Key: "keypairs"})
-		m.tabs = append(m.tabs, TabDef{Name: "Images", Key: "images"})
 		m.tabInited = make([]bool, len(m.tabs))
 		m.activeTab = 0
 		m.statusBar.CloudName = m.cloudName
@@ -987,6 +997,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverRebuild.Active {
 			var cmd tea.Cmd
 			m.serverRebuild, cmd = m.serverRebuild.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.serverRescue.Active {
+			var cmd tea.Cmd
+			m.serverRescue, cmd = m.serverRescue.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.serverSnapshot.Active {
