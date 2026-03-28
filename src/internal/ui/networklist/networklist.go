@@ -224,7 +224,7 @@ func (m Model) View() string {
 
 	// Header
 	nameW := 25
-	statusW := 10
+	statusW := 12
 	subnetsW := 8
 	sharedW := 8
 	header := fmt.Sprintf("  %-*s %-*s %-*s %-*s",

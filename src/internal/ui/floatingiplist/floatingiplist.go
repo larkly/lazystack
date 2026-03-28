@@ -196,7 +196,7 @@ func (m Model) View() string {
 		width int
 	}{
 		{"Floating IP", 16},
-		{"Status", 12},
+		{"Status", 14},
 		{"Fixed IP", 16},
 		{"Port ID", 36},
 	}
