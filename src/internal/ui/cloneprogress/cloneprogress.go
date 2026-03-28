@@ -91,13 +91,41 @@ func New(computeClient, volumeClient *gophercloud.ServiceClient, serverID, serve
 	}
 }
 
-// Init kicks off volume creation for all volumes in parallel.
+type volumeNamesResolvedMsg struct {
+	ops []VolumeOp
+}
+
+// Init resolves volume names async, then kicks off creation.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick}
-	for i, op := range m.volumes {
-		cmds = append(cmds, m.createVolume(i, op))
-	}
-	return tea.Batch(cmds...)
+	client := m.volumeClient
+	ops := m.volumes
+	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		// Fetch existing volume names for display and dedup
+		existingNames := make(map[string]bool)
+		nameMap := make(map[string]string)
+		if client != nil {
+			vols, err := volume.ListVolumes(context.Background(), client)
+			if err == nil {
+				for _, v := range vols {
+					existingNames[v.Name] = true
+					nameMap[v.ID] = v.Name
+				}
+			}
+		}
+
+		resolved := make([]VolumeOp, len(ops))
+		for i, op := range ops {
+			resolved[i] = op
+			if name, ok := nameMap[op.SourceVolID]; ok {
+				resolved[i].SourceName = name
+				resolved[i].CloneName = shared.DeduplicateName(name, existingNames)
+			} else {
+				resolved[i].CloneName = shared.DeduplicateName(op.SourceVolID, existingNames)
+			}
+			existingNames[resolved[i].CloneName] = true
+		}
+		return volumeNamesResolvedMsg{ops: resolved}
+	})
 }
 
 // Running returns true if operations are still in progress.
@@ -132,6 +160,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+
+	case volumeNamesResolvedMsg:
+		m.volumes = msg.ops
+		cmds := make([]tea.Cmd, len(m.volumes))
+		for i, op := range m.volumes {
+			cmds[i] = m.createVolume(i, op)
+		}
+		return m, tea.Batch(cmds...)
 
 	case volumeCreatedMsg:
 		if msg.err != nil {

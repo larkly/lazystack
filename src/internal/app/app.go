@@ -9,7 +9,6 @@ import (
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/selfupdate"
 	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/volume"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/cloneprogress"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
@@ -957,50 +956,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = viewServerList
 		m.statusBar.CurrentView = "serverlist"
 
-		// Build volume operations with proper names and dedup
+		// Build volume operations — names will be resolved async in Init
 		var ops []cloneprogress.VolumeOp
-		existingNames := make(map[string]bool)
-
-		// Fetch actual volume names for display and dedup
-		if m.client.BlockStorage != nil {
-			vols, err := volume.ListVolumes(context.Background(), m.client.BlockStorage)
-			if err == nil {
-				for _, v := range vols {
-					existingNames[v.Name] = true
-				}
-				nameMap := make(map[string]string, len(vols))
-				for _, v := range vols {
-					nameMap[v.ID] = v.Name
-				}
-				for _, vid := range msg.VolumeIDs {
-					sourceName := vid
-					if name, ok := nameMap[vid]; ok {
-						sourceName = name
-					}
-					cloneName := shared.DeduplicateName(sourceName, existingNames)
-					existingNames[cloneName] = true
-					ops = append(ops, cloneprogress.VolumeOp{
-						SourceVolID: vid,
-						SourceName:  sourceName,
-						CloneName:   cloneName,
-						Status:      "pending",
-					})
-				}
-			}
-		}
-
-		// Fallback if BlockStorage is nil or list failed
-		if len(ops) == 0 {
-			for _, vid := range msg.VolumeIDs {
-				cloneName := shared.DeduplicateName(vid, existingNames)
-				existingNames[cloneName] = true
-				ops = append(ops, cloneprogress.VolumeOp{
-					SourceVolID: vid,
-					SourceName:  vid,
-					CloneName:   cloneName,
-					Status:      "pending",
-				})
-			}
+		for _, vid := range msg.VolumeIDs {
+			ops = append(ops, cloneprogress.VolumeOp{
+				SourceVolID: vid,
+				SourceName:  vid,
+				CloneName:   vid, // placeholder, resolved in Init
+				Status:      "pending",
+			})
 		}
 
 		m.cloneProgress = cloneprogress.New(m.client.Compute, m.client.BlockStorage, msg.Server.ID, msg.Server.Name, ops)
@@ -1021,7 +985,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(msg.Errors) > 0 {
 			errMsg += fmt.Sprintf(" (with %d cleanup errors)", len(msg.Errors))
 		}
-		m.statusBar.StickyHint = "✘ " + errMsg
+		m.errModal = modal.NewError("Clone Failed", fmt.Errorf("%s", errMsg))
+		m.errModal.SetSize(m.width, m.height)
+		m.activeModal = modalError
 		return m, nil
 
 	case delayedDetailRefreshMsg:
