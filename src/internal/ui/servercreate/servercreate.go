@@ -45,6 +45,24 @@ type fetchErrMsg struct{ err error }
 type serverCreatedMsg struct{ server *compute.Server }
 type serverCreateErrMsg struct{ err error }
 
+// ServerCloneCreatedMsg is sent when a server is created in clone mode with volume cloning enabled.
+type ServerCloneCreatedMsg struct {
+	Server    *compute.Server
+	VolumeIDs []string // source volume IDs to clone
+}
+
+// CloneConfig holds pre-fill data for clone mode.
+type CloneConfig struct {
+	SourceName    string
+	ImageID       string
+	FlavorID      string
+	FlavorName    string
+	KeyName       string
+	SecGroupNames []string
+	NetworkNames  map[string][]string // from Server.Networks
+	VolumeIDs     []string            // from Server.VolAttach
+}
+
 // Model is the server create form.
 type Model struct {
 	computeClient *gophercloud.ServiceClient
@@ -79,6 +97,11 @@ type Model struct {
 	err        string
 	width      int
 	height     int
+
+	// Clone mode
+	cloneMode    bool
+	cloneConfig  *CloneConfig
+	cloneVolumes bool // checkbox state for volume cloning
 }
 
 // New creates a server create form.
@@ -122,6 +145,16 @@ func New(computeClient, imageClient, networkClient *gophercloud.ServiceClient) M
 	}
 }
 
+// NewClone creates a server create form in clone mode with pre-filled data.
+func NewClone(computeClient, imageClient, networkClient *gophercloud.ServiceClient, cfg CloneConfig) Model {
+	m := New(computeClient, imageClient, networkClient)
+	m.cloneMode = true
+	m.cloneConfig = &cfg
+	m.nameInput.SetValue(cfg.SourceName)
+	m.nameInput.CursorEnd()
+	return m
+}
+
 // Init starts parallel fetches.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -140,22 +173,37 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case imagesLoadedMsg:
 		m.images = msg.images
 		m.loading--
+		if m.loading == 0 && m.cloneMode {
+			m.applyClonePreFill()
+		}
 		return m, nil
 	case flavorsLoadedMsg:
 		m.flavors = msg.flavors
 		m.loading--
+		if m.loading == 0 && m.cloneMode {
+			m.applyClonePreFill()
+		}
 		return m, nil
 	case networksLoadedMsg:
 		m.networks = msg.networks
 		m.loading--
+		if m.loading == 0 && m.cloneMode {
+			m.applyClonePreFill()
+		}
 		return m, nil
 	case keypairsLoadedMsg:
 		m.keypairs = msg.keypairs
 		m.loading--
+		if m.loading == 0 && m.cloneMode {
+			m.applyClonePreFill()
+		}
 		return m, nil
 	case secGroupsLoadedMsg:
 		m.secGroups = msg.secGroups
 		m.loading--
+		if m.loading == 0 && m.cloneMode {
+			m.applyClonePreFill()
+		}
 		return m, nil
 	case fetchErrMsg:
 		m.loading--
@@ -164,6 +212,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case serverCreatedMsg:
 		m.submitting = false
+		if m.cloneMode && m.cloneVolumes && m.hasCloneVolumes() {
+			volIDs := m.cloneConfig.VolumeIDs
+			srv := msg.server
+			return m, func() tea.Msg {
+				return ServerCloneCreatedMsg{Server: srv, VolumeIDs: volIDs}
+			}
+		}
 		return m, func() tea.Msg {
 			return shared.ViewChangeMsg{View: "serverlist"}
 		}
@@ -195,7 +250,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) isTextInput() bool {
-	return m.focusField == fieldName || m.focusField == fieldCount
+	if m.focusField == fieldName {
+		return true
+	}
+	if m.focusField == fieldCount && !m.cloneMode {
+		return true
+	}
+	return false
 }
 
 func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -207,16 +268,13 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 				return shared.ViewChangeMsg{View: "serverlist"}
 			}
 		case key.Matches(msg, shared.Keys.Tab):
-			m.focusField = (m.focusField + 1) % numFields
-			m.updateFocus()
+			m.advanceFocus()
 			return m, nil
 		case key.Matches(msg, shared.Keys.ShiftTab):
-			m.focusField = (m.focusField - 1 + numFields) % numFields
-			m.updateFocus()
+			m.retreatFocus()
 			return m, nil
 		case key.Matches(msg, shared.Keys.Enter):
-			m.focusField++
-			m.updateFocus()
+			m.advanceFocus()
 			return m, nil
 		case msg.String() == "ctrl+s":
 			return m.submit()
@@ -241,13 +299,11 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
-		m.focusField = (m.focusField + 1) % numFields
-		m.updateFocus()
+		m.advanceFocus()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
-		m.focusField = (m.focusField - 1 + numFields) % numFields
-		m.updateFocus()
+		m.retreatFocus()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Right) && (m.focusField == fieldSubmit || m.focusField == fieldCancel):
@@ -270,9 +326,15 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, shared.Keys.Enter):
 		switch m.focusField {
-		case fieldName, fieldCount:
-			m.focusField++
-			m.updateFocus()
+		case fieldName:
+			m.advanceFocus()
+			return m, nil
+		case fieldCount:
+			if m.cloneMode && m.hasCloneVolumes() {
+				m.cloneVolumes = !m.cloneVolumes
+				return m, nil
+			}
+			m.advanceFocus()
 			return m, nil
 		case fieldSubmit:
 			return m.submit()
@@ -289,6 +351,12 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.pickerFilter.Focus()
 			return m, nil
 		}
+	}
+
+	// Handle space to toggle clone volumes checkbox
+	if m.cloneMode && m.focusField == fieldCount && m.hasCloneVolumes() && key.Matches(msg, shared.Keys.Select) {
+		m.cloneVolumes = !m.cloneVolumes
+		return m, nil
 	}
 
 	// Handle ctrl+s to submit
@@ -343,8 +411,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.pickerOpen = false
 		m.pickerFilter.Blur()
 		// Advance to next field
-		m.focusField = (m.focusField + 1) % numFields
-		m.updateFocus()
+		m.advanceFocus()
 		return m, nil
 	case "up", "k":
 		if m.pickerCursor > 0 {
@@ -460,11 +527,33 @@ func (m *Model) updateFocus() {
 	} else {
 		m.nameInput.Blur()
 	}
-	if m.focusField == fieldCount {
+	if m.focusField == fieldCount && !m.cloneMode {
 		m.countInput.Focus()
 	} else {
 		m.countInput.Blur()
 	}
+}
+
+// advanceFocus moves focus forward by 1, skipping fieldCount in clone mode without volumes.
+func (m *Model) advanceFocus() {
+	m.focusField = (m.focusField + 1) % numFields
+	if m.focusField == fieldCount && m.cloneMode && !m.hasCloneVolumes() {
+		m.focusField = (m.focusField + 1) % numFields
+	}
+	m.updateFocus()
+}
+
+// retreatFocus moves focus backward by 1, skipping fieldCount in clone mode without volumes.
+func (m *Model) retreatFocus() {
+	m.focusField = (m.focusField - 1 + numFields) % numFields
+	if m.focusField == fieldCount && m.cloneMode && !m.hasCloneVolumes() {
+		m.focusField = (m.focusField - 1 + numFields) % numFields
+	}
+	m.updateFocus()
+}
+
+func (m Model) hasCloneVolumes() bool {
+	return m.cloneConfig != nil && len(m.cloneConfig.VolumeIDs) > 0
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
@@ -483,18 +572,20 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	count := 1
-	countStr := strings.TrimSpace(m.countInput.Value())
-	if countStr != "" {
-		n, err := strconv.Atoi(countStr)
-		if err != nil || n < 1 {
-			m.err = "Count must be a positive number"
-			return m, nil
+	if !m.cloneMode {
+		countStr := strings.TrimSpace(m.countInput.Value())
+		if countStr != "" {
+			n, err := strconv.Atoi(countStr)
+			if err != nil || n < 1 {
+				m.err = "Count must be a positive number"
+				return m, nil
+			}
+			if n > 100 {
+				m.err = "Count must be 100 or less"
+				return m, nil
+			}
+			count = n
 		}
-		if n > 100 {
-			m.err = "Count must be 100 or less"
-			return m, nil
-		}
-		count = n
 	}
 
 	opts := servers.CreateOpts{
@@ -546,7 +637,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 func (m Model) View() string {
 	var b strings.Builder
 
-	title := shared.StyleTitle.Render("Create Server")
+	titleText := "Create Server"
+	if m.cloneMode {
+		titleText = "Clone Server"
+	}
+	title := shared.StyleTitle.Render(titleText)
 	if m.loading > 0 {
 		title += " " + m.spinner.View() + shared.StyleHelp.Render(" loading resources...")
 	}
@@ -559,19 +654,28 @@ func (m Model) View() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  ⚠ "+m.err) + "\n\n")
 	}
 
-	fields := []struct {
-		label    string
-		value    string
-		focused  bool
-		isInput  bool
-	}{
+	type fieldDef struct {
+		label   string
+		value   string
+		focused bool
+		isInput bool
+	}
+	fields := []fieldDef{
 		{"Server Name", m.nameInput.View(), m.focusField == fieldName, true},
 		{"Image", m.selectionDisplay(fieldImage), m.focusField == fieldImage, false},
 		{"Flavor", m.selectionDisplay(fieldFlavor), m.focusField == fieldFlavor, false},
 		{"Network", m.selectionDisplay(fieldNetwork), m.focusField == fieldNetwork, false},
 		{"Key Pair", m.selectionDisplay(fieldKeypair), m.focusField == fieldKeypair, false},
 		{"Security Groups", m.selectionDisplay(fieldSecGroup), m.focusField == fieldSecGroup, false},
-		{"Count", m.countInput.View(), m.focusField == fieldCount, true},
+	}
+	if m.cloneMode && m.hasCloneVolumes() {
+		check := "[ ]"
+		if m.cloneVolumes {
+			check = "[x]"
+		}
+		fields = append(fields, fieldDef{"Clone Volumes", fmt.Sprintf("%s clone all %d attached volumes", check, len(m.cloneConfig.VolumeIDs)), m.focusField == fieldCount, false})
+	} else if !m.cloneMode {
+		fields = append(fields, fieldDef{"Count", m.countInput.View(), m.focusField == fieldCount, true})
 	}
 
 	for i, f := range fields {
@@ -591,7 +695,7 @@ func (m Model) View() string {
 			b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, label, style.Render(f.value)))
 		}
 
-		// Show inline picker if open for this field
+		// Show inline picker if open for this field (field indices map 1:1 with field constants for non-clone)
 		if m.pickerOpen && m.pickerField == i {
 			b.WriteString(m.renderPicker())
 		}
@@ -692,6 +796,57 @@ func (m Model) renderPicker() string {
 	}
 
 	return b.String()
+}
+
+func (m *Model) applyClonePreFill() {
+	cfg := m.cloneConfig
+
+	// Match image by ID
+	for i, img := range m.images {
+		if img.ID == cfg.ImageID {
+			m.selectedImage = i
+			break
+		}
+	}
+
+	// Match flavor by ID, fallback to name
+	for i, f := range m.flavors {
+		if f.ID == cfg.FlavorID {
+			m.selectedFlavor = i
+			break
+		}
+		if f.Name == cfg.FlavorName {
+			m.selectedFlavor = i
+		}
+	}
+
+	// Match network by name (first key from Networks map)
+	for netName := range cfg.NetworkNames {
+		for i, n := range m.networks {
+			if n.Name == netName {
+				m.selectedNetwork = i
+				break
+			}
+		}
+		break // use first network
+	}
+
+	// Match keypair by name
+	for i, kp := range m.keypairs {
+		if kp.Name == cfg.KeyName {
+			m.selectedKeypair = i
+			break
+		}
+	}
+
+	// Match security groups by name
+	for i, sg := range m.secGroups {
+		for _, name := range cfg.SecGroupNames {
+			if sg.Name == name {
+				m.selectedSecGroups[i] = true
+			}
+		}
+	}
 }
 
 func (m Model) fetchImages() tea.Cmd {

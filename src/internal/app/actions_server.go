@@ -14,6 +14,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
@@ -23,6 +24,40 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"charm.land/bubbletea/v2"
 )
+
+func (m Model) openClone() (Model, tea.Cmd) {
+	var srv *compute.Server
+	switch m.view {
+	case viewServerList:
+		srv = m.serverList.SelectedServer()
+	case viewServerDetail:
+		srv = m.serverDetail.Server()
+	}
+	if srv == nil {
+		return m, nil
+	}
+
+	// Deduplicate server name using existing server list
+	cloneName := shared.DeduplicateName(srv.Name, m.serverList.ServerNames())
+
+	cfg := servercreate.CloneConfig{
+		SourceName:    cloneName,
+		ImageID:       srv.ImageID,
+		FlavorID:      srv.FlavorID,
+		FlavorName:    srv.FlavorName,
+		KeyName:       srv.KeyName,
+		SecGroupNames: srv.SecGroups,
+		NetworkNames:  srv.Networks,
+		VolumeIDs:     srv.VolAttach,
+	}
+
+	m.serverCreate = servercreate.NewClone(m.client.Compute, m.client.Image, m.client.Network, cfg)
+	m.serverCreate.SetSize(m.width, m.height)
+	m.view = viewServerCreate
+	m.statusBar.CurrentView = "servercreate"
+	m.statusBar.Hint = m.serverCreate.Hints()
+	return m, m.serverCreate.Init()
+}
 
 func (m Model) openRename() (Model, tea.Cmd) {
 	var id, name string
