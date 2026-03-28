@@ -166,7 +166,7 @@ func (m Model) View() string {
 	}
 
 	// Name column gets remaining width after fixed columns
-	fixedW := 18 + 16 + 14 + 3 + 2 // vip + prov + oper + gaps + prefix
+	fixedW := 18 + 18 + 16 + 3 + 2 // vip + prov + oper + gaps + prefix
 	nameW := m.width - fixedW
 	if nameW < 20 {
 		nameW = 20
@@ -178,8 +178,8 @@ func (m Model) View() string {
 	}{
 		{"Name", nameW},
 		{"VIP Address", 18},
-		{"Prov. Status", 16},
-		{"Oper. Status", 14},
+		{"Prov. Status", 18},
+		{"Oper. Status", 16},
 	}
 	var headerParts []string
 	for i, h := range headerTitles {
@@ -231,8 +231,8 @@ func (m Model) View() string {
 
 		nameStyle := lipgloss.NewStyle().Width(nameW)
 		vipStyle := lipgloss.NewStyle().Width(18)
-		psStyle := provStyle.Width(16)
-		osStyle := operStyle.Width(14)
+		psStyle := provStyle.Width(18)
+		osStyle := operStyle.Width(16)
 
 		if isCursor {
 			nameStyle = nameStyle.Bold(true).Background(rowBg)
@@ -244,8 +244,8 @@ func (m Model) View() string {
 		parts := []string{
 			nameStyle.Render(truncate(name, nameW)),
 			vipStyle.Render(truncate(lb.VipAddress, 18)),
-			psStyle.Render(truncate(lb.ProvisioningStatus, 16)),
-			osStyle.Render(truncate(lb.OperatingStatus, 14)),
+			psStyle.Render(shared.StatusIcon(lb.ProvisioningStatus) + truncate(lb.ProvisioningStatus, 18)),
+			osStyle.Render(shared.StatusIcon(lb.OperatingStatus) + truncate(lb.OperatingStatus, 16)),
 		}
 
 		prefix := "  "
