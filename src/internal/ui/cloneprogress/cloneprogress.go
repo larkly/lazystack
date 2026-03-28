@@ -58,6 +58,11 @@ type rollbackDoneMsg struct {
 	errors []error
 }
 
+type serverReadyMsg struct {
+	ready bool
+	err   error
+}
+
 type pollTickMsg struct{}
 
 // Model is the clone progress modal.
@@ -67,6 +72,7 @@ type Model struct {
 	volumeClient  *gophercloud.ServiceClient
 	serverID      string
 	serverName    string
+	serverReady   bool // server has reached ACTIVE state
 	volumes       []VolumeOp
 	spinner       spinner.Model
 	running       bool // operations still in progress
@@ -75,6 +81,7 @@ type Model struct {
 	rollingBack   bool
 	width         int
 	height        int
+	pendingAttach []int // volume indices waiting for server to be ready
 }
 
 // New creates a clone progress model.
@@ -191,11 +198,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.polling = false
 			return m, nil
 		}
-		cmd := m.pollVolumes()
-		if cmd == nil {
-			m.polling = false
+		var cmds []tea.Cmd
+		if cmd := m.pollVolumes(); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
-		return m, cmd
+		// Also check server readiness if we have pending attaches
+		if !m.serverReady && len(m.pendingAttach) > 0 {
+			cmds = append(cmds, m.checkServerReady())
+		}
+		if len(cmds) == 0 {
+			m.polling = false
+			return m, nil
+		}
+		return m, tea.Batch(cmds...)
 
 	case volumeStatusMsg:
 		if msg.err != nil {
@@ -204,14 +219,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m.startRollback()
 		}
 		if msg.status == "available" {
-			m.volumes[msg.idx].Status = "attaching"
-			cmds := []tea.Cmd{m.attachVolume(msg.idx)}
-			// Ensure polling continues for remaining creating volumes
-			if m.hasCreatingVolumes() && !m.polling {
-				m.polling = true
-				cmds = append(cmds, m.schedulePoll())
-			}
-			return m, tea.Batch(cmds...)
+			m.volumes[msg.idx].Status = "available"
+			return m.tryAttach(msg.idx)
 		}
 		if msg.status == "error" {
 			m.volumes[msg.idx].Status = "error"
@@ -224,6 +233,31 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, m.schedulePoll()
 		}
 		return m, nil
+
+	case serverReadyMsg:
+		if msg.err != nil {
+			// Non-fatal — retry on next poll
+			return m, m.schedulePoll()
+		}
+		if msg.ready {
+			m.serverReady = true
+			// Attach all volumes that were waiting
+			var cmds []tea.Cmd
+			for _, idx := range m.pendingAttach {
+				m.volumes[idx].Status = "attaching"
+				cmds = append(cmds, m.attachVolume(idx))
+			}
+			m.pendingAttach = nil
+			if m.hasCreatingVolumes() && !m.polling {
+				m.polling = true
+				cmds = append(cmds, m.schedulePoll())
+			}
+			return m, tea.Batch(cmds...)
+		}
+		// Not ready yet — poll again
+		return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+			return pollTickMsg{}
+		})
 
 	case volumeAttachedMsg:
 		if msg.err != nil {
@@ -277,9 +311,9 @@ func (m Model) View() string {
 			style = lipgloss.NewStyle().Foreground(shared.ColorWarning)
 			statusText = "creating..."
 		case "available":
-			icon = "▲"
+			icon = m.spinner.View()
 			style = lipgloss.NewStyle().Foreground(shared.ColorWarning)
-			statusText = "ready"
+			statusText = "waiting for server..."
 		case "attaching":
 			icon = m.spinner.View()
 			style = lipgloss.NewStyle().Foreground(shared.ColorCyan)
@@ -380,6 +414,37 @@ func (m Model) hasCreatingVolumes() bool {
 		}
 	}
 	return false
+}
+
+func (m Model) tryAttach(idx int) (Model, tea.Cmd) {
+	if m.serverReady {
+		m.volumes[idx].Status = "attaching"
+		cmds := []tea.Cmd{m.attachVolume(idx)}
+		if m.hasCreatingVolumes() && !m.polling {
+			m.polling = true
+			cmds = append(cmds, m.schedulePoll())
+		}
+		return m, tea.Batch(cmds...)
+	}
+	// Server not ready yet — queue this volume and check server status
+	m.pendingAttach = append(m.pendingAttach, idx)
+	if len(m.pendingAttach) == 1 {
+		// First pending — start checking server
+		return m, m.checkServerReady()
+	}
+	return m, nil
+}
+
+func (m Model) checkServerReady() tea.Cmd {
+	client := m.computeClient
+	id := m.serverID
+	return func() tea.Msg {
+		srv, err := compute.GetServer(context.Background(), client, id)
+		if err != nil {
+			return serverReadyMsg{err: err}
+		}
+		return serverReadyMsg{ready: srv.Status == "ACTIVE"}
+	}
 }
 
 func (m Model) attachVolume(idx int) tea.Cmd {
