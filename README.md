@@ -26,22 +26,25 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 
 ## Features
 
-- **Server management** — list, create, delete, reboot, stop/start, pause, suspend, shelve, lock/unlock, resize with bulk operations
+- **Server management** — list, create, delete, rename, rebuild, reboot, stop/start, pause, suspend, shelve, lock/unlock, rescue/unrescue, resize, snapshot, with bulk operations
 - **Volume management** — list, detail, create, delete, attach (server picker), detach
 - **Floating IPs** — allocate, associate, disassociate, release
 - **Security groups** — create/delete groups, create/delete rules, expandable rule view
 - **Networks** — create/delete networks, create/delete subnets, read-only port listing
 - **Routers** — create/delete routers, add/remove interfaces (subnet picker), detail with routes
 - **Key pairs** — create (RSA 2048/4096, ED25519), import with ~/.ssh/ file browser, detail view, save private key to file
+- **Images** — list, detail, delete, deactivate/reactivate with status-aware coloring
 - **Load balancers** (Octavia) — list, detail tree (listeners/pools/members), cascade delete
 - **Project switching** — switch between accessible Keystone projects without restarting
 - **Quota overlay** — compute, network, and storage quotas with color-coded progress bars
+- **Confirmation dialogs** — all server state-change actions require explicit confirmation
 - **Dynamic tabs** — tabs appear based on available services (no Cinder? no Volumes tab)
 - **Auto-refresh** — all views refresh in the background at a configurable interval
 - **Console log** and **action history** per server
 - **Column sorting** on all list views
 - **Client-side filtering** with `/`
 - **Bulk select** with `space` for multi-server operations
+- **Self-update** — `--update` flag to update to latest release
 - **Solarized Dark** color scheme with status-aware coloring
 
 ## Installation
@@ -113,7 +116,9 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--pick-cloud` | `false` | Always show cloud picker, even with one cloud |
+| `--cloud NAME` | | Connect directly to named cloud, skip picker |
 | `--refresh N` | `5` | Auto-refresh interval in seconds |
+| `--idle-timeout N` | `0` | Pause polling after N minutes of no input (0 = disabled) |
 | `--no-check-update` | `false` | Skip the automatic update check on startup |
 | `--update` | `false` | Self-update to the latest release |
 | `--version` | | Print version and exit |
@@ -151,8 +156,12 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+Z` | Suspend / resume |
 | `Ctrl+E` | Shelve / unshelve |
 | `Ctrl+L` | Lock / unlock |
+| `Ctrl+W` | Rescue / unrescue |
 | `Ctrl+F` | Resize |
 | `Ctrl+A` | Assign floating IP |
+| `r` | Rename |
+| `Ctrl+G` | Rebuild with new image |
+| `Ctrl+S` | Create snapshot |
 | `L` | Console log |
 | `a` | Action history |
 
@@ -168,9 +177,13 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+Z` | Suspend / resume |
 | `Ctrl+E` | Shelve / unshelve |
 | `Ctrl+L` | Lock / unlock |
+| `Ctrl+W` | Rescue / unrescue |
 | `Ctrl+F` | Resize |
 | `Ctrl+Y` / `Ctrl+X` | Confirm / revert resize |
 | `Ctrl+A` | Assign floating IP |
+| `r` | Rename |
+| `Ctrl+G` | Rebuild with new image |
+| `Ctrl+S` | Create snapshot |
 | `L` | Console log |
 | `a` | Action history |
 | `Esc` | Back to list |
@@ -234,6 +247,13 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Enter` | View detail tree |
 | `Ctrl+D` | Delete (cascade) |
 
+### Images
+
+| Key | Action |
+|-----|--------|
+| `Enter` | View detail |
+| `Ctrl+D` | Delete image |
+
 ### Create form
 
 | Key | Action |
@@ -254,15 +274,17 @@ Built with:
 
 ```
 src/internal/
-  app/            # Root model, routing, actions, rendering (7 files)
+  app/            # Root model, routing, actions, rendering (8 files)
   cloud/          # Auth, service detection, project listing
   compute/        # Nova: servers, flavors, keypairs, actions
+  image/          # Glance: images
   network/        # Neutron: networks, subnets, ports, routers, floating IPs, security groups
   volume/         # Cinder: volumes, volume types
   loadbalancer/   # Octavia: LBs, listeners, pools, members
   quota/          # Quota fetching (compute, network, storage)
+  selfupdate/     # GitHub release self-update
   shared/         # Keys, styles, messages
-  ui/             # All view components (25 packages)
+  ui/             # All view components (38 packages)
 ```
 
 ## License

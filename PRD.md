@@ -14,9 +14,9 @@
 |-------|--------|-------|
 | Phase 1: MVP | ✓ Complete | Cloud connection, server CRUD, modals, help |
 | Phase 2: Extended Compute | ✓ Complete | All actions, console log, resize, bulk ops, action history |
-| Phase 3: Additional Resources | ✓ Complete | Tabbed navigation, volumes, floating IPs, security groups, key pairs |
+| Phase 3: Additional Resources | ✓ Complete | Tabbed navigation, volumes, floating IPs, security groups, key pairs, networks (CRUD), routers (CRUD) |
 | Phase 4: Refactor, Octavia, Projects, Quotas | ✓ Complete | App refactor, dynamic tabs, Octavia LB tab, project switching, quota overlay |
-| Phase 5: Quality of Life | Not started | SSH, clipboard, config file, Designate (DNS) |
+| Phase 5: Quality of Life | Partial | Server rename, rebuild, snapshot, rescue/unrescue, image management, confirmation dialogs for all actions — done. SSH, clipboard, config file, DNS — not started |
 | Phase 6: Operational | Not started | Admin views, hypervisor view, service catalog browser |
 
 ## Concerns and Considerations
@@ -109,6 +109,7 @@ src/
     app/
       app.go                        # Root model, New(), Init(), Update() routing, type defs
       actions_server.go             # Server CRUD/lifecycle actions, bulk operations
+      actions_image.go              # Image CRUD actions
       actions_resource.go           # Volume, FIP, security group, keypair, LB actions
       routing.go                    # View routing, modal updates, view change handling
       render.go                     # View(), viewContent(), viewName()
@@ -131,10 +132,12 @@ src/
       images.go                     # Image listing
     network/
       networks.go                   # Network listing, external networks, port lookup
+      routers.go                    # Router CRUD, interfaces, static routes
       floatingips.go                # Floating IP CRUD (allocate, associate, disassociate, release)
       secgroups.go                  # Security group listing, rule create/delete
     volume/
       volumes.go                    # Volume CRUD (list, get, create, delete, attach, detach, volume types)
+    selfupdate/                     # GitHub release self-update
     loadbalancer/
       lb.go                         # Octavia LB, listener, pool, member CRUD
     quota/
@@ -171,8 +174,20 @@ src/
         lblist.go                   # Load balancer table with status colors, sorting
       lbdetail/
         lbdetail.go                 # LB detail with listener/pool/member tree
+      serverrename/                 # Server rename inline input
+      serverrebuild/                # Server rebuild with image picker
+      serversnapshot/               # Server snapshot creation
       networklist/
         networklist.go              # Network browser with expandable subnets
+      networkcreate/                # Network create form
+      subnetcreate/                 # Subnet create form
+      routerlist/                   # Router list with sorting
+      routerdetail/                 # Router detail with interfaces
+      routercreate/                 # Router create form
+      subnetpicker/                 # Subnet picker modal
+      sgcreate/                     # Security group create form
+      imagelist/                    # Image list with sorting
+      imagedetail/                  # Image detail properties view
       volumecreate/
         volumecreate.go             # Volume create form with type/AZ pickers
       serverpicker/
@@ -286,7 +301,7 @@ src/
 - Submit via button or Ctrl+S hotkey
 
 #### Confirmation Modals
-- Required for all destructive actions (delete, reboot, pause, suspend, shelve)
+- Required for all server state-change actions (delete, reboot, stop/start, pause, suspend, shelve, lock/unlock, rescue/unrescue)
 - Supports both single-server and bulk operations
 - Focusable [y] Confirm / [n] Cancel buttons
 - Navigate buttons with arrow keys, Tab, or use hotkeys directly
@@ -394,6 +409,8 @@ src/
 - **Rule Navigation**: Down arrow enters rule list within expanded group, Up arrow exits back to group level
 - **Create Rule** (`Ctrl+N` in rules): Modal with cycle pickers for direction/ethertype/protocol, port range, remote IP prefix
 - **Delete Rule** (`Ctrl+D` in rules): When cursor is on a rule, confirmation modal then deletes
+- **Create Security Group** (`Ctrl+N` at group level): Form with name and description
+- **Delete Security Group** (`Ctrl+D` at group level): Confirmation modal
 - Selected rule highlighted with `▸` prefix and background color
 
 #### Key Pair Management
@@ -403,10 +420,23 @@ src/
 - **Save Private Key** (`s` in private key view): Save generated private key to file (default `~/.ssh/<name>`, 0600 permissions), public key saved alongside as `.pub`
 - **Delete** (`Ctrl+D`): Confirmation modal, works from list or detail
 
-#### Network Browser
+#### Network Management
 - **Networks Tab**: Network list with Name, Status, Subnets count, Shared columns
 - **Expandable Subnets**: Enter expands/collapses network to show subnet details (name, CIDR, gateway, IP version, DHCP status)
-- Auto-refresh, read-only browsing
+- **Create Network** (`Ctrl+N`): Form with name, admin state, shared option
+- **Delete Network** (`Ctrl+D`): Confirmation modal
+- **Create Subnet** (`Ctrl+N` when expanded): Form with name, CIDR, gateway, IP version, DHCP
+- **Delete Subnet** (`Ctrl+D` when in subnets): Confirmation modal
+- **Port Listing**: Read-only port listing per network
+- Auto-refresh, sorting
+
+#### Router Management
+- **Router List**: Columns (Name, Status, External Gateway, Routes), auto-refresh, sorting
+- **Router Detail** (`Enter`): Properties view with interfaces section and static routes
+- **Create Router** (`Ctrl+N`): Form with name, external network selection, admin state
+- **Delete Router** (`Ctrl+D`): Confirmation modal
+- **Add Interface** (`Ctrl+A` from detail): Subnet picker modal
+- **Remove Interface** (`Ctrl+T` from detail): Confirmation modal
 
 #### Column Sorting
 - `s` cycles sort to next visible column (ascending), `S` toggles sort direction
@@ -464,13 +494,52 @@ src/
 - Scroll support, close with `Q` or `Esc`
 - Block Storage section omitted if Cinder unavailable
 
+### Phase 5: Quality of Life (Partial)
+
+#### Server Rename (`r`)
+- Inline rename from server list or detail view
+- Text input pre-filled with current name
+- Uses `servers.Update()` API
+
+#### Server Rebuild (`Ctrl+G`)
+- Rebuild server with new image, keeping same ID/IPs
+- Image picker modal with type-to-filter
+- Confirmation before rebuild (destructive operation)
+
+#### Server Snapshot (`Ctrl+S`)
+- Create image snapshot from running server
+- Name input pre-filled with server name
+- Progress shown in status bar
+- Handles 409 conflict (snapshot already in progress) with friendly error
+
+#### Rescue/Unrescue (`Ctrl+W`)
+- Toggle rescue mode for broken servers
+- Confirmation modal
+- Rescue mode returns admin password displayed in status bar
+- Supports bulk rescue operations
+
+#### Image Management
+- **Image List Tab**: Columns (Name, Status, Size, Visibility, Created), auto-refresh, sorting
+- **Image Detail** (`Enter`): Full properties view
+- **Delete Image** (`Ctrl+D`): Confirmation modal, works from list or detail
+- **Deactivate/Reactivate**: Toggle image availability
+
+#### Self-Update
+- `--update` flag downloads latest release from GitHub
+- `--no-check-update` skips automatic version check on startup
+- Downloads binary for current OS/architecture with SHA256 checksum verification
+
 ### CLI Flags
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `-version` | bool | false | Print version and exit |
-| `-pick-cloud` | bool | false | Always show cloud picker, even with one cloud |
-| `-refresh` | int | 5 | Server list/detail auto-refresh interval in seconds |
+| `--version` | bool | false | Print version and exit |
+| `--pick-cloud` | bool | false | Always show cloud picker, even with one cloud |
+| `--cloud NAME` | string | "" | Connect directly to named cloud, skip picker |
+| `--refresh N` | int | 5 | Auto-refresh interval in seconds |
+| `--idle-timeout N` | int | 0 | Pause polling after N minutes of no input (0 = disabled) |
+| `--no-check-update` | bool | false | Skip automatic update check on startup |
+| `--update` | bool | false | Self-update to the latest version |
 
 ### Keybindings
 
@@ -499,8 +568,14 @@ src/
 | `Ctrl+O` | Soft reboot (or selected) |
 | `p` | Pause/unpause (or selected) |
 | `Ctrl+Z` | Suspend/resume (or selected) |
+| `o` | Stop/start (or selected) |
 | `Ctrl+E` | Shelve/unshelve (or selected) |
+| `Ctrl+L` | Lock/unlock (or selected) |
+| `Ctrl+W` | Rescue/unrescue (or selected) |
 | `Ctrl+F` | Resize (modal) |
+| `r` | Rename server |
+| `Ctrl+G` | Rebuild with new image |
+| `Ctrl+S` | Create snapshot |
 | `Ctrl+A` | Assign floating IP (FIP picker modal) |
 | `l` | Console log |
 | `a` | Action history |
@@ -517,7 +592,11 @@ src/
 | `p` | Pause/unpause |
 | `Ctrl+Z` | Suspend/resume |
 | `Ctrl+E` | Shelve/unshelve |
+| `Ctrl+W` | Rescue/unrescue |
 | `Ctrl+F` | Resize (modal) |
+| `r` | Rename server |
+| `Ctrl+G` | Rebuild with new image |
+| `Ctrl+S` | Create snapshot |
 | `Ctrl+A` | Assign floating IP (FIP picker modal) |
 | `Ctrl+Y` | Confirm resize (when VERIFY_RESIZE) |
 | `Ctrl+X` | Revert resize (when VERIFY_RESIZE) |
@@ -564,8 +643,8 @@ src/
 |-----|--------|
 | `↑/k` `↓/j` | Navigate groups / rules |
 | `Enter` | Expand / collapse group |
-| `Ctrl+N` | Add rule (when in rules) |
-| `Ctrl+D` | Delete selected rule (when in rules) |
+| `Ctrl+N` | Create group (or add rule when in rules) |
+| `Ctrl+D` | Delete group (or rule when in rules) |
 | `Esc` | Back to group level (from rules) |
 
 #### Key Pairs
@@ -581,6 +660,19 @@ src/
 |-----|--------|
 | `↑/k` `↓/j` | Navigate |
 | `Enter` | Expand / collapse subnets |
+| `Ctrl+N` | Create network (or subnet when expanded) |
+| `Ctrl+D` | Delete network (or subnet in subnets) |
+
+#### Routers
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Navigate |
+| `Enter` | View detail (interfaces) |
+| `Ctrl+N` | Create router |
+| `Ctrl+D` | Delete router |
+| `Ctrl+A` | Add interface (from detail) |
+| `Ctrl+T` | Remove interface (from detail) |
+| `Esc` | Back to list (from detail) |
 
 #### Load Balancers
 | Key | Action |
@@ -589,6 +681,13 @@ src/
 | `Enter` | View detail (listener/pool/member tree) |
 | `Ctrl+D` | Delete load balancer (cascade) |
 | `Esc` | Back to list (from detail) |
+
+#### Images
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Navigate |
+| `Enter` | View detail |
+| `Ctrl+D` | Delete image |
 
 #### Console Log / Action History
 | Key | Action |
@@ -632,13 +731,14 @@ src/
 
 Actions available in Nova but not yet implemented, prioritized by usefulness:
 
-#### High-value (Phase 5 candidates)
-- **Rename server** — Update server name from detail view (`servers.Update`). Quick inline edit, no modal needed.
-- **Rebuild** — Rebuild with new image, keeping same ID/IPs. Modal with image picker + confirmation (destructive). Uses `servers.Rebuild`.
-- **Create snapshot** — Create image from running server (`servers.CreateImage`). Show progress in status bar.
+#### High-value (all complete)
+- ~~**Rename server**~~: ✓ Complete — `r` key, inline rename
+- ~~**Rebuild**~~: ✓ Complete — `Ctrl+G`, image picker modal
+- ~~**Create snapshot**~~: ✓ Complete — `Ctrl+S`, creates image from server
+- ~~**Rescue/Unrescue**~~: ✓ Complete — `Ctrl+W`, toggle rescue mode
 
 #### Medium-value (specific scenarios)
-- **Rescue/Unrescue** — Boot into rescue mode for broken servers. Rare but valuable for recovery.
+- **Console access (noVNC)** — Retrieve and open VNC console URL. Text console log exists but graphical console does not.
 - **Get password** — Retrieve auto-generated password for Windows VMs (`servers.GetPassword`).
 
 #### Admin-only (Phase 6)
@@ -648,7 +748,7 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 - **Reset State** — Force server into a specific state. Recovery from stuck transitions.
 - **Metadata browser** — Full CRUD on server metadata key-value pairs.
 
-### Phase 5: Quality of Life
+### Phase 5: Quality of Life (remaining)
 - Configuration file (`~/.config/lazystack/config.yaml`) for defaults
 - Custom column selection and ordering
 - Saved filters
@@ -657,7 +757,7 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 - Copy-to-clipboard for IDs, IPs
 - Log/audit trail of actions taken
 - Designate (DNS) tab
-- Server rename, rebuild, snapshot (see Server Action Gaps above)
+- Console access (noVNC URL retrieval and browser launch)
 
 ### Phase 6: Operational
 - Hypervisor view (admin)
