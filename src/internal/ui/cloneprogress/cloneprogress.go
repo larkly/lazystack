@@ -313,7 +313,7 @@ func (m Model) View() string {
 		case "available":
 			icon = m.spinner.View()
 			style = lipgloss.NewStyle().Foreground(shared.ColorWarning)
-			statusText = "waiting for server..."
+			statusText = "ready, waiting..."
 		case "attaching":
 			icon = m.spinner.View()
 			style = lipgloss.NewStyle().Foreground(shared.ColorCyan)
@@ -330,7 +330,7 @@ func (m Model) View() string {
 			}
 		}
 
-		name := lipgloss.NewStyle().Foreground(shared.ColorFg).Width(30).Render(op.CloneName)
+		name := lipgloss.NewStyle().Foreground(shared.ColorFg).Width(25).Render(op.CloneName)
 		b.WriteString(fmt.Sprintf("  %s %s %s\n", icon, name, style.Render(statusText)))
 	}
 
