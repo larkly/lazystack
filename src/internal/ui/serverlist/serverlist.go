@@ -499,7 +499,7 @@ func (m Model) renderRow(render func(Column) string) string {
 
 func (m Model) renderServerRow(s compute.Server, cursor bool) string {
 	// Build combined status: "ACTIVE/RUNNING"
-	statusVal := s.Status + "/" + s.PowerState
+	statusVal := shared.StatusIcon(s.Status) + s.Status + "/" + s.PowerState
 
 	// Selection and lock indicators on name
 	nameVal := s.Name
