@@ -17,11 +17,13 @@ type ServerRef struct {
 
 // ConfirmAction is the result of a confirmation dialog.
 type ConfirmAction struct {
-	Action   string
-	ServerID string
-	Name     string
-	Servers  []ServerRef // for bulk actions
-	Confirm  bool
+	Action        string
+	ServerID      string
+	Name          string
+	Servers       []ServerRef // for bulk actions
+	Confirm       bool
+	DeleteVolumes bool     // delete attached volumes too
+	VolumeIDs     []string // volume IDs to delete
 }
 
 // ConfirmModel is a confirmation dialog.
@@ -35,6 +37,10 @@ type ConfirmModel struct {
 	Width    int
 	Height   int
 	focused  int // 0 = confirm, 1 = cancel
+
+	// Volume deletion checkbox
+	VolumeIDs     []string // attached volume IDs
+	deleteVolumes bool     // checkbox state
 }
 
 // NewConfirm creates a confirmation dialog for a single server.
@@ -60,11 +66,13 @@ func NewBulkConfirm(action string, servers []ServerRef) ConfirmModel {
 func (m ConfirmModel) confirmMsg() tea.Cmd {
 	return func() tea.Msg {
 		return ConfirmAction{
-			Action:   m.Action,
-			ServerID: m.ServerID,
-			Name:     m.Name,
-			Servers:  m.Servers,
-			Confirm:  true,
+			Action:        m.Action,
+			ServerID:      m.ServerID,
+			Name:          m.Name,
+			Servers:       m.Servers,
+			Confirm:       true,
+			DeleteVolumes: m.deleteVolumes,
+			VolumeIDs:     m.VolumeIDs,
 		}
 	}
 }
@@ -99,6 +107,10 @@ func (m ConfirmModel) Update(msg tea.Msg) (ConfirmModel, tea.Cmd) {
 			key.Matches(msg, shared.Keys.Up),
 			key.Matches(msg, shared.Keys.Down):
 			m.focused = 1 - m.focused
+		case key.Matches(msg, shared.Keys.Select):
+			if len(m.VolumeIDs) > 0 {
+				m.deleteVolumes = !m.deleteVolumes
+			}
 		case key.Matches(msg, shared.Keys.Enter):
 			if m.focused == 0 {
 				return m, m.confirmMsg()
@@ -136,7 +148,17 @@ func (m ConfirmModel) View() string {
 	}
 	buttons := confirmStyle.Render("[y] Confirm") + "  " + cancelStyle.Render("[n] Cancel")
 
-	content := title + "\n\n" + body + "\n\n" + buttons
+	// Volume deletion checkbox
+	volCheckbox := ""
+	if len(m.VolumeIDs) > 0 {
+		check := "[ ]"
+		if m.deleteVolumes {
+			check = "[x]"
+		}
+		volCheckbox = fmt.Sprintf("\n%s delete %d attached volume(s)  (space to toggle)", check, len(m.VolumeIDs))
+	}
+
+	content := title + "\n\n" + body + volCheckbox + "\n\n" + buttons
 	box := shared.StyleModal.Width(50).Render(content)
 
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, box)

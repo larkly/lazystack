@@ -129,20 +129,18 @@ func (m Model) openDeleteConfirm() (Model, tea.Cmd) {
 		m.activeModal = modalConfirm
 		return m, nil
 	}
-	var id, name string
+	var srv *compute.Server
 	switch m.view {
 	case viewServerList:
-		if s := m.serverList.SelectedServer(); s != nil {
-			id, name = s.ID, s.Name
-		}
+		srv = m.serverList.SelectedServer()
 	case viewServerDetail:
-		id = m.serverDetail.ServerID()
-		name = m.serverDetail.ServerName()
+		srv = m.serverDetail.Server()
 	}
-	if id == "" {
+	if srv == nil {
 		return m, nil
 	}
-	m.confirm = modal.NewConfirm("delete", id, name)
+	m.confirm = modal.NewConfirm("delete", srv.ID, srv.Name)
+	m.confirm.VolumeIDs = srv.VolAttach
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil
@@ -537,10 +535,21 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 
 	switch action.Action {
 	case "delete":
+		bsClient := m.client.BlockStorage
+		computeC := m.client.Compute
+		deleteVols := action.DeleteVolumes
+		volIDs := action.VolumeIDs
 		return m, func() tea.Msg {
 			err := compute.DeleteServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				return shared.ServerActionErrMsg{Action: "Delete", Name: action.Name, Err: err}
+			}
+			if deleteVols && bsClient != nil {
+				for _, vid := range volIDs {
+					// Detach first (may already be detached after server delete)
+					_ = volume.DetachVolume(context.Background(), computeC, action.ServerID, vid)
+					volume.DeleteVolume(context.Background(), bsClient, vid)
+				}
 			}
 			return shared.ServerActionMsg{Action: "Delete", Name: action.Name}
 		}
