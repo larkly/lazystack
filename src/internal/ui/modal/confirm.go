@@ -159,7 +159,11 @@ func (m ConfirmModel) View() string {
 	}
 
 	content := title + "\n\n" + body + volCheckbox + "\n\n" + buttons
-	box := shared.StyleModal.Width(50).Render(content)
+	modalWidth := 50
+	if len(m.VolumeIDs) > 0 {
+		modalWidth = 70
+	}
+	box := shared.StyleModal.Width(modalWidth).Render(content)
 
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, box)
 }
