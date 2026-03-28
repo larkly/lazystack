@@ -166,7 +166,7 @@ func (m Model) View() string {
 	}
 
 	// Name column gets remaining width after fixed columns
-	fixedW := 12 + 20 + 8 + 3 + 2 // status + gateway + routes + gaps + prefix
+	fixedW := 14 + 20 + 8 + 3 + 2 // status + gateway + routes + gaps + prefix
 	nameW := m.width - fixedW
 	if nameW < 20 {
 		nameW = 20
@@ -177,7 +177,7 @@ func (m Model) View() string {
 		width int
 	}{
 		{"Name", nameW},
-		{"Status", 12},
+		{"Status", 14},
 		{"External Gateway", 20},
 		{"Routes", 8},
 	}
@@ -236,7 +236,7 @@ func (m Model) View() string {
 		}
 
 		nameStyle := lipgloss.NewStyle().Width(nameW)
-		stStyle := statusStyle.Width(12)
+		stStyle := statusStyle.Width(14)
 		gwStyle := lipgloss.NewStyle().Width(20)
 		rtStyle := lipgloss.NewStyle().Width(8)
 
@@ -249,7 +249,7 @@ func (m Model) View() string {
 
 		parts := []string{
 			nameStyle.Render(truncate(name, nameW)),
-			stStyle.Render(truncate(r.Status, 12)),
+			stStyle.Render(shared.StatusIcon(r.Status) + truncate(r.Status, 14)),
 			gwStyle.Render(truncate(gateway, 20)),
 			rtStyle.Render(truncate(routes, 8)),
 		}
