@@ -140,6 +140,7 @@ type Model struct {
 	sortAsc         bool
 	sortHighlight   bool
 	sortClearAt     time.Time
+	highlight       map[string]bool // volume IDs to highlight (from cross-resource navigation)
 }
 
 // New creates a volume list model.
@@ -180,6 +181,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.volumes = msg.volumes
 		m.err = ""
 		m.sortVolumes()
+		m.applyHighlight()
 		return m, m.fetchMissingServerNames()
 
 	case volumesErrMsg:
@@ -588,6 +590,29 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	m.columns = computeWidths(m.columns, w)
+}
+
+// SetHighlight marks volume IDs for cursor positioning (cross-resource navigation).
+func (m *Model) SetHighlight(ids []string) {
+	m.highlight = make(map[string]bool, len(ids))
+	for _, id := range ids {
+		m.highlight[id] = true
+	}
+	m.applyHighlight()
+}
+
+func (m *Model) applyHighlight() {
+	if len(m.highlight) == 0 {
+		return
+	}
+	for i, v := range m.volumes {
+		if m.highlight[v.ID] {
+			m.cursor = i
+			m.ensureVisible()
+			m.highlight = nil
+			return
+		}
+	}
 }
 
 // Hints returns key hints.

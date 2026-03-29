@@ -35,6 +35,7 @@ type Model struct {
 	err             string
 	scrollOff       int
 	refreshInterval time.Duration
+	highlightNames  map[string]bool // group names to scroll to (cross-resource navigation)
 }
 
 // New creates a security group view model.
@@ -71,6 +72,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.inRules = false
 		}
 		m.err = ""
+		m.applyHighlightNames()
 		return m, nil
 
 	case sgErrMsg:
@@ -339,6 +341,44 @@ func (m *Model) ForceRefresh() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// ScrollToNames positions the cursor on the first matching group name and expands it.
+func (m *Model) ScrollToNames(names []string) {
+	m.highlightNames = make(map[string]bool, len(names))
+	for _, n := range names {
+		m.highlightNames[n] = true
+	}
+	m.applyHighlightNames()
+}
+
+func (m *Model) applyHighlightNames() {
+	if len(m.highlightNames) == 0 {
+		return
+	}
+	for i, sg := range m.groups {
+		if m.highlightNames[sg.Name] {
+			m.cursor = i
+			m.inRules = false
+			m.expanded[sg.ID] = true
+			m.ensureVisible()
+			m.highlightNames = nil
+			return
+		}
+	}
+}
+
+func (m *Model) ensureVisible() {
+	th := m.height - 4
+	if th < 1 {
+		th = 1
+	}
+	if m.cursor < m.scrollOff {
+		m.scrollOff = m.cursor
+	}
+	if m.cursor >= m.scrollOff+th {
+		m.scrollOff = m.cursor - th + 1
+	}
 }
 
 // Hints returns key hints.

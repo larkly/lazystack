@@ -40,6 +40,7 @@ type Model struct {
 	spinner         spinner.Model
 	err             string
 	refreshInterval time.Duration
+	highlightNames  map[string]bool // network names to scroll to (cross-resource navigation)
 }
 
 // New creates a network list model.
@@ -79,6 +80,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.cursor = len(m.networks) - 1
 			m.inSubnets = false
 		}
+		m.applyHighlightNames()
 		return m, nil
 	case networksErrMsg:
 		m.loading = false
@@ -405,6 +407,31 @@ func (m Model) SelectedSubnetName() string {
 		return sub.Name
 	}
 	return id[:8] + "..."
+}
+
+// ScrollToNames positions the cursor on the first matching network name and expands it.
+func (m *Model) ScrollToNames(names []string) {
+	m.highlightNames = make(map[string]bool, len(names))
+	for _, n := range names {
+		m.highlightNames[n] = true
+	}
+	m.applyHighlightNames()
+}
+
+func (m *Model) applyHighlightNames() {
+	if len(m.highlightNames) == 0 {
+		return
+	}
+	for i, net := range m.networks {
+		if m.highlightNames[net.Name] {
+			m.cursor = i
+			m.inSubnets = false
+			m.expanded[net.ID] = true
+			m.ensureVisible()
+			m.highlightNames = nil
+			return
+		}
+	}
 }
 
 // Hints returns key hints.

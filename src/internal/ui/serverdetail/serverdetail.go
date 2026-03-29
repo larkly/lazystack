@@ -136,6 +136,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.scroll < 0 {
 				m.scroll = 0
 			}
+		case key.Matches(msg, shared.Keys.JumpVolumes):
+			if m.server != nil && len(m.server.VolAttach) > 0 {
+				ids := m.server.VolAttach
+				return m, func() tea.Msg {
+					return shared.NavigateToResourceMsg{Tab: "volumes", Highlight: ids}
+				}
+			}
+		case key.Matches(msg, shared.Keys.JumpSecGroups):
+			if m.server != nil && len(m.server.SecGroups) > 0 {
+				names := m.server.SecGroups
+				return m, func() tea.Msg {
+					return shared.NavigateToResourceMsg{Tab: "secgroups", Highlight: names}
+				}
+			}
+		case key.Matches(msg, shared.Keys.JumpNetworks):
+			if m.server != nil && len(m.server.Networks) > 0 {
+				names := make([]string, 0, len(m.server.Networks))
+				for name := range m.server.Networks {
+					names = append(names, name)
+				}
+				return m, func() tea.Msg {
+					return shared.NavigateToResourceMsg{Tab: "networks", Highlight: names}
+				}
+			}
 		case key.Matches(msg, shared.Keys.Delete):
 			// Handled by root model
 		case key.Matches(msg, shared.Keys.Reboot):
@@ -202,8 +226,8 @@ func (m Model) View() string {
 		{"Tenant ID", s.TenantID},
 		{"Availability Zone", s.AZ},
 		{"Created", s.Created.Format("2006-01-02 15:04:05")},
-		{"Security Groups", strings.Join(s.SecGroups, ", ")},
-		{"Volumes", strings.Join(s.VolAttach, ", ")},
+		{"Security Groups " + lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("[g]"), strings.Join(s.SecGroups, ", ")},
+		{"Volumes " + lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("[v]"), strings.Join(s.VolAttach, ", ")},
 	}
 
 	lines := make([]string, 0, len(props)+len(s.Networks))
@@ -222,7 +246,8 @@ func (m Model) View() string {
 	// Networks section
 	if len(s.Networks) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, fmt.Sprintf("  %s", shared.StyleLabel.Render("Networks")))
+		lines = append(lines, fmt.Sprintf("  %s %s", shared.StyleLabel.Render("Networks"),
+			lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("[N]")))
 		netNames := make([]string, 0, len(s.Networks))
 		for name := range s.Networks {
 			netNames = append(netNames, name)
@@ -352,5 +377,5 @@ func (m Model) Hints() string {
 	if m.server != nil && m.server.Status == "VERIFY_RESIZE" {
 		return "^y confirm resize • ^x revert resize • ↑↓ scroll • ^d delete • esc back • ? help"
 	}
-	return "↑↓ scroll • ^d delete • ^a assign FIP • ^o reboot • R refresh • esc back • ? help"
+	return "↑↓ scroll • v/g/N jump to resources • ^d delete • ^a assign FIP • ^o reboot • esc back • ? help"
 }
