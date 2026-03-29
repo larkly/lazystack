@@ -53,8 +53,8 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 		m.keypairList, cmd = m.keypairList.Update(msg)
 		m.statusBar.Hint = m.keypairList.Hints()
 	case viewNetworkList:
-		m.networkList, cmd = m.networkList.Update(msg)
-		m.statusBar.Hint = m.networkList.Hints()
+		m.networkView, cmd = m.networkView.Update(msg)
+		m.statusBar.Hint = m.networkView.Hints()
 	case viewRouterList:
 		m.routerList, cmd = m.routerList.Update(msg)
 		m.statusBar.Hint = m.routerList.Hints()
@@ -106,7 +106,7 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 			m.keypairList, cmd = m.keypairList.Update(msg)
 			cmds = append(cmds, cmd)
 		case "networks":
-			m.networkList, cmd = m.networkList.Update(msg)
+			m.networkView, cmd = m.networkView.Update(msg)
 			cmds = append(cmds, cmd)
 		case "routers":
 			m.routerList, cmd = m.routerList.Update(msg)
@@ -219,7 +219,7 @@ func (m Model) handleResourceNavigation(msg shared.NavigateToResourceMsg) (Model
 	case "secgroups":
 		m.secGroupView.ScrollToNames(msg.Highlight)
 	case "networks":
-		m.networkList.ScrollToNames(msg.Highlight)
+		m.networkView.ScrollToNames(msg.Highlight)
 	}
 
 	return m, cmd
@@ -357,7 +357,7 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 	case viewKeypairList:
 		return m, m.keypairList.ForceRefresh()
 	case viewNetworkList:
-		return m, m.networkList.ForceRefresh()
+		return m, m.networkView.ForceRefresh()
 	case viewRouterList:
 		return m, m.routerList.ForceRefresh()
 	case viewRouterDetail:

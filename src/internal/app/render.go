@@ -36,7 +36,7 @@ func (m Model) viewName() string {
 	case viewKeypairList:
 		return "keypairlist"
 	case viewNetworkList:
-		return "networklist"
+		return "networkview"
 	case viewKeypairCreate:
 		return "keypaircreate"
 	case viewKeypairDetail:
@@ -170,7 +170,7 @@ func (m Model) viewContent() string {
 	case viewKeypairList:
 		content = m.keypairList.View()
 	case viewNetworkList:
-		content = m.networkList.View()
+		content = m.networkView.View()
 	case viewKeypairCreate:
 		content = m.keypairCreate.View()
 	case viewKeypairDetail:

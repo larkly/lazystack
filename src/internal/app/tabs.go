@@ -9,7 +9,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/imagelist"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/lblist"
-	"github.com/larkly/lazystack/internal/ui/networklist"
+	"github.com/larkly/lazystack/internal/ui/networkview"
 	"github.com/larkly/lazystack/internal/ui/routerlist"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
@@ -97,14 +97,15 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 
 	case "networks":
 		m.view = viewNetworkList
-		m.statusBar.CurrentView = "networklist"
+		m.statusBar.CurrentView = "networkview"
 		if !m.tabInited[idx] {
-			m.networkList = networklist.New(m.client.Network, m.refreshInterval)
-			m.networkList.SetSize(m.width, m.height)
+			m.networkView = networkview.New(m.client.Network, m.refreshInterval)
+			m.networkView.SetComputeClient(m.client.Compute)
+			m.networkView.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
 		}
-		m.statusBar.Hint = m.networkList.Hints()
-		return m, m.networkList.Init()
+		m.statusBar.Hint = m.networkView.Hints()
+		return m, m.networkView.Init()
 
 	case "loadbalancers":
 		m.view = viewLBList
