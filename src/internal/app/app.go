@@ -537,6 +537,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.view == viewServerList || m.view == viewServerDetail {
+			// Allow read-only actions and lock/unlock regardless of lock state
+			if key.Matches(msg, shared.Keys.Lock) {
+				return m.openToggleConfirm("lock/unlock")
+			}
+			if key.Matches(msg, shared.Keys.CopySSH) {
+				return m.copySSHCommand()
+			}
+			if key.Matches(msg, shared.Keys.ConsoleURL) {
+				return m.openConsoleURL()
+			}
+			if key.Matches(msg, shared.Keys.Console) {
+				return m.openConsoleLog()
+			}
+			if key.Matches(msg, shared.Keys.Actions) {
+				return m.openActionLog()
+			}
+
+			// Block all mutating actions on locked servers
+			if m.isSelectedServerLocked() && key.Matches(msg,
+				shared.Keys.Delete, shared.Keys.Reboot, shared.Keys.HardReboot,
+				shared.Keys.Pause, shared.Keys.Suspend, shared.Keys.Shelve,
+				shared.Keys.StopStart, shared.Keys.Rescue, shared.Keys.SSH,
+				shared.Keys.Resize, shared.Keys.Rename, shared.Keys.Rebuild,
+				shared.Keys.Snapshot, shared.Keys.ConfirmResize, shared.Keys.RevertResize,
+				shared.Keys.Attach, shared.Keys.Clone,
+			) {
+				m.statusBar.StickyHint = "Server is locked. Unlock it first with Ctrl+L."
+				return m, nil
+			}
+
 			if key.Matches(msg, shared.Keys.Delete) {
 				return m.openDeleteConfirm()
 			}
@@ -558,26 +588,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.StopStart) {
 				return m.openToggleConfirm("stop/start")
 			}
-			if key.Matches(msg, shared.Keys.Lock) {
-				return m.openToggleConfirm("lock/unlock")
-			}
 			if key.Matches(msg, shared.Keys.Rescue) {
 				return m.openToggleConfirm("rescue/unrescue")
 			}
 			if key.Matches(msg, shared.Keys.SSH) {
 				return m.openSSH()
-			}
-			if key.Matches(msg, shared.Keys.CopySSH) {
-				return m.copySSHCommand()
-			}
-			if key.Matches(msg, shared.Keys.ConsoleURL) {
-				return m.openConsoleURL()
-			}
-			if key.Matches(msg, shared.Keys.Console) {
-				return m.openConsoleLog()
-			}
-			if key.Matches(msg, shared.Keys.Actions) {
-				return m.openActionLog()
 			}
 			if key.Matches(msg, shared.Keys.Resize) {
 				return m.openResize()
