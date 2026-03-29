@@ -107,6 +107,11 @@ func (m Model) LBName() string {
 	return m.lbID
 }
 
+// LB returns the current load balancer, or nil if not loaded.
+func (m Model) LB() *loadbalancer.LoadBalancer {
+	return m.lb
+}
+
 // FocusedPane returns the currently focused pane.
 func (m Model) FocusedPane() FocusPane {
 	return m.focus
@@ -179,6 +184,34 @@ func (m Model) SelectedMemberName() string {
 // SelectedPoolForMember returns the pool ID that owns the currently displayed members.
 func (m Model) SelectedPoolForMember() string {
 	return m.selectedPoolID()
+}
+
+// SelectedListener returns the full Listener struct for the cursor, or nil.
+func (m Model) SelectedListener() *loadbalancer.Listener {
+	if m.listenerCursor >= 0 && m.listenerCursor < len(m.listeners) {
+		l := m.listeners[m.listenerCursor]
+		return &l
+	}
+	return nil
+}
+
+// SelectedPool returns the full Pool struct for the cursor, or nil.
+func (m Model) SelectedPool() *loadbalancer.Pool {
+	if m.poolCursor >= 0 && m.poolCursor < len(m.pools) {
+		p := m.pools[m.poolCursor]
+		return &p
+	}
+	return nil
+}
+
+// SelectedMember returns the full Member struct for the cursor, or nil.
+func (m Model) SelectedMember() *loadbalancer.Member {
+	members := m.selectedPoolMembers()
+	if m.memberCursor >= 0 && m.memberCursor < len(members) {
+		mem := members[m.memberCursor]
+		return &mem
+	}
+	return nil
 }
 
 // Update handles messages.
@@ -1000,15 +1033,18 @@ func (m Model) renderActionBar() string {
 
 	switch m.focus {
 	case FocusInfo:
+		buttons = append(buttons, btn{"enter", "Edit LB"})
 		buttons = append(buttons, btn{"^d", "Delete LB"})
 	case FocusListeners:
 		buttons = append(buttons, btn{"^n", "Add Listener"})
 		if m.SelectedListenerID() != "" {
+			buttons = append(buttons, btn{"enter", "Edit"})
 			buttons = append(buttons, btn{"^d", "Delete Listener"})
 		}
 	case FocusPools:
 		buttons = append(buttons, btn{"^n", "Add Pool"})
 		if m.SelectedPoolID() != "" {
+			buttons = append(buttons, btn{"enter", "Edit"})
 			buttons = append(buttons, btn{"^d", "Delete Pool"})
 		}
 	case FocusMembers:
@@ -1016,6 +1052,7 @@ func (m Model) renderActionBar() string {
 			buttons = append(buttons, btn{"^n", "Add Member"})
 		}
 		if m.SelectedMemberID() != "" {
+			buttons = append(buttons, btn{"enter", "Edit"})
 			buttons = append(buttons, btn{"^d", "Delete Member"})
 		}
 	}

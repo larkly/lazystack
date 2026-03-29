@@ -207,6 +207,8 @@ var allSections = []section{
 		binds: []string{
 			"↑/k ↓/j      navigate",
 			"enter         view detail",
+			"ctrl+n        create load balancer",
+			"ctrl+d        delete load balancer",
 			"s/S           sort / reverse sort",
 			"/             filter",
 		},
@@ -216,6 +218,7 @@ var allSections = []section{
 		binds: []string{
 			"↑/k ↓/j      navigate in pane",
 			"tab/shift+tab cycle panes",
+			"enter         edit (context-sensitive)",
 			"ctrl+n        add listener/pool/member",
 			"ctrl+d        delete (context-sensitive)",
 			"esc           back to list",

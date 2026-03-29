@@ -40,6 +40,10 @@ type Model struct {
 	selectedProtocol int
 	portInput        textinput.Model
 
+	// Edit mode
+	editMode   bool
+	listenerID string
+
 	focusField int
 	submitting bool
 	spinner    spinner.Model
@@ -77,6 +81,36 @@ func New(client *gophercloud.ServiceClient, lbID, lbName string) Model {
 	}
 }
 
+// NewEdit creates an edit form for an existing listener (name only).
+func NewEdit(client *gophercloud.ServiceClient, listenerID, currentName, lbName string) Model {
+	ni := textinput.New()
+	ni.Prompt = ""
+	ni.Placeholder = "listener name"
+	ni.CharLimit = 64
+	ni.SetWidth(30)
+	ni.SetValue(currentName)
+	ni.Focus()
+
+	pi := textinput.New()
+	pi.Prompt = ""
+	pi.CharLimit = 5
+	pi.SetWidth(10)
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+
+	return Model{
+		Active:     true,
+		client:     client,
+		lbName:     lbName,
+		editMode:   true,
+		listenerID: listenerID,
+		nameInput:  ni,
+		portInput:  pi,
+		spinner:    s,
+	}
+}
+
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
 	return nil
@@ -88,8 +122,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case listenerCreatedMsg:
 		m.submitting = false
 		m.Active = false
+		action := "Created listener on"
+		if m.editMode {
+			action = "Updated listener on"
+		}
 		return m, func() tea.Msg {
-			return shared.ResourceActionMsg{Action: "Created listener on", Name: m.lbName}
+			return shared.ResourceActionMsg{Action: action, Name: m.lbName}
 		}
 	case listenerCreateErrMsg:
 		m.submitting = false
@@ -116,7 +154,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) isTextInput() bool {
-	return m.focusField == fieldName || m.focusField == fieldPort
+	return m.focusField == fieldName || (!m.editMode && m.focusField == fieldPort)
+}
+
+func (m Model) effectiveNumFields() int {
+	if m.editMode {
+		return 3 // name, submit, cancel
+	}
+	return numFields
+}
+
+func (m *Model) advanceFocus(dir int) {
+	for {
+		m.focusField = (m.focusField + dir + numFields) % numFields
+		// In edit mode, skip protocol and port
+		if m.editMode && (m.focusField == fieldProtocol || m.focusField == fieldPort) {
+			continue
+		}
+		break
+	}
+	m.updateFocus()
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -126,16 +183,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.Active = false
 			return m, nil
 		case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
-			m.focusField = (m.focusField + 1) % numFields
-			m.updateFocus()
+			m.advanceFocus(1)
 			return m, nil
 		case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
-			m.focusField = (m.focusField - 1 + numFields) % numFields
-			m.updateFocus()
+			m.advanceFocus(-1)
 			return m, nil
 		case key.Matches(msg, shared.Keys.Enter):
-			m.focusField++
-			m.updateFocus()
+			m.advanceFocus(1)
 			return m, nil
 		case msg.String() == "ctrl+s":
 			return m.submit()
@@ -156,12 +210,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.Active = false
 		return m, nil
 	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
-		m.focusField = (m.focusField + 1) % numFields
-		m.updateFocus()
+		m.advanceFocus(1)
 		return m, nil
 	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
-		m.focusField = (m.focusField - 1 + numFields) % numFields
-		m.updateFocus()
+		m.advanceFocus(-1)
 		return m, nil
 	case key.Matches(msg, shared.Keys.Right):
 		if m.focusField == fieldProtocol {
@@ -212,6 +264,22 @@ func (m *Model) updateFocus() {
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
+	name := strings.TrimSpace(m.nameInput.Value())
+
+	if m.editMode {
+		m.submitting = true
+		m.err = ""
+		client := m.client
+		id := m.listenerID
+		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			err := loadbalancer.UpdateListener(context.Background(), client, id, &name)
+			if err != nil {
+				return listenerCreateErrMsg{err: err}
+			}
+			return listenerCreatedMsg{}
+		})
+	}
+
 	port, err := strconv.Atoi(strings.TrimSpace(m.portInput.Value()))
 	if err != nil || port < 1 || port > 65535 {
 		m.err = "Port must be a number between 1 and 65535"
@@ -222,7 +290,6 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.err = ""
 	client := m.client
 	lbID := m.lbID
-	name := strings.TrimSpace(m.nameInput.Value())
 	protocol := protocolOpts[m.selectedProtocol]
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
@@ -247,7 +314,11 @@ func (m Model) Hints() string {
 
 // View renders the form.
 func (m Model) View() string {
-	title := shared.StyleModalTitle.Render("Add Listener to " + m.lbName)
+	titleText := "Add Listener to " + m.lbName
+	if m.editMode {
+		titleText = "Edit Listener"
+	}
+	title := shared.StyleModalTitle.Render(titleText)
 
 	labelStyle := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Bold(true).Width(12)
 	focusStyle := lipgloss.NewStyle().Foreground(shared.ColorPrimary)
@@ -261,27 +332,29 @@ func (m Model) View() string {
 	}
 	rows = append(rows, label+m.nameInput.View())
 
-	// Protocol
-	label = labelStyle.Render("Protocol")
-	if m.focusField == fieldProtocol {
-		label = focusStyle.Bold(true).Width(12).Render("Protocol")
-	}
-	var protoDisplay []string
-	for i, p := range protocolOpts {
-		if i == m.selectedProtocol {
-			protoDisplay = append(protoDisplay, lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true).Render("["+p+"]"))
-		} else {
-			protoDisplay = append(protoDisplay, lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(" "+p+" "))
+	if !m.editMode {
+		// Protocol
+		label = labelStyle.Render("Protocol")
+		if m.focusField == fieldProtocol {
+			label = focusStyle.Bold(true).Width(12).Render("Protocol")
 		}
-	}
-	rows = append(rows, label+strings.Join(protoDisplay, " "))
+		var protoDisplay []string
+		for i, p := range protocolOpts {
+			if i == m.selectedProtocol {
+				protoDisplay = append(protoDisplay, lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true).Render("["+p+"]"))
+			} else {
+				protoDisplay = append(protoDisplay, lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(" "+p+" "))
+			}
+		}
+		rows = append(rows, label+strings.Join(protoDisplay, " "))
 
-	// Port
-	label = labelStyle.Render("Port")
-	if m.focusField == fieldPort {
-		label = focusStyle.Bold(true).Width(12).Render("Port")
+		// Port
+		label = labelStyle.Render("Port")
+		if m.focusField == fieldPort {
+			label = focusStyle.Bold(true).Width(12).Render("Port")
+		}
+		rows = append(rows, label+m.portInput.View())
 	}
-	rows = append(rows, label+m.portInput.View())
 
 	// Error
 	if m.err != "" {

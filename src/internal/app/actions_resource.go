@@ -10,6 +10,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/networkcreate"
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
+	"github.com/larkly/lazystack/internal/ui/lbcreate"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
 	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
@@ -408,7 +409,39 @@ func (m Model) openLBDeleteConfirm() (Model, tea.Cmd) {
 	return m, nil
 }
 
+// --- Load Balancer create/edit ---
+
+func (m Model) openLBCreate() (Model, tea.Cmd) {
+	m.lbCreate = lbcreate.New(m.client.LoadBalancer, m.client.Network)
+	m.lbCreate.SetSize(m.width, m.height)
+	return m, m.lbCreate.Init()
+}
+
+func (m Model) openLBEdit() (Model, tea.Cmd) {
+	if m.lbDetail.LBID() == "" {
+		return m, nil
+	}
+	name := m.lbDetail.LBName()
+	desc := ""
+	if m.lbDetail.LB() != nil {
+		desc = m.lbDetail.LB().Description
+	}
+	m.lbCreate = lbcreate.NewEdit(m.client.LoadBalancer, m.lbDetail.LBID(), name, desc)
+	m.lbCreate.SetSize(m.width, m.height)
+	return m, m.lbCreate.Init()
+}
+
 // --- Load Balancer Listener actions ---
+
+func (m Model) openLBListenerEdit() (Model, tea.Cmd) {
+	l := m.lbDetail.SelectedListener()
+	if l == nil {
+		return m, nil
+	}
+	m.lbListenerCreate = lblistenercreate.NewEdit(m.client.LoadBalancer, l.ID, l.Name, m.lbDetail.LBName())
+	m.lbListenerCreate.SetSize(m.width, m.height)
+	return m, m.lbListenerCreate.Init()
+}
 
 func (m Model) openLBListenerCreate() (Model, tea.Cmd) {
 	m.lbListenerCreate = lblistenercreate.New(m.client.LoadBalancer, m.lbDetail.LBID(), m.lbDetail.LBName())
@@ -432,6 +465,16 @@ func (m Model) openLBListenerDeleteConfirm() (Model, tea.Cmd) {
 
 // --- Load Balancer Pool actions ---
 
+func (m Model) openLBPoolEdit() (Model, tea.Cmd) {
+	p := m.lbDetail.SelectedPool()
+	if p == nil {
+		return m, nil
+	}
+	m.lbPoolCreate = lbpoolcreate.NewEdit(m.client.LoadBalancer, p.ID, p.Name, p.LBMethod, m.lbDetail.LBName())
+	m.lbPoolCreate.SetSize(m.width, m.height)
+	return m, m.lbPoolCreate.Init()
+}
+
 func (m Model) openLBPoolCreate() (Model, tea.Cmd) {
 	m.lbPoolCreate = lbpoolcreate.New(m.client.LoadBalancer, m.lbDetail.LBID(), m.lbDetail.LBName())
 	m.lbPoolCreate.SetSize(m.width, m.height)
@@ -453,6 +496,18 @@ func (m Model) openLBPoolDeleteConfirm() (Model, tea.Cmd) {
 }
 
 // --- Load Balancer Member actions ---
+
+func (m Model) openLBMemberEdit() (Model, tea.Cmd) {
+	mem := m.lbDetail.SelectedMember()
+	poolID := m.lbDetail.SelectedPoolForMember()
+	poolName := m.lbDetail.SelectedPoolName()
+	if mem == nil || poolID == "" {
+		return m, nil
+	}
+	m.lbMemberCreate = lbmembercreate.NewEdit(m.client.LoadBalancer, poolID, mem.ID, mem.Name, mem.Weight, poolName)
+	m.lbMemberCreate.SetSize(m.width, m.height)
+	return m, m.lbMemberCreate.Init()
+}
 
 func (m Model) openLBMemberCreate() (Model, tea.Cmd) {
 	poolID := m.lbDetail.SelectedPoolID()

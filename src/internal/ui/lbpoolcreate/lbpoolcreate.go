@@ -58,12 +58,56 @@ type Model struct {
 	monTimeoutInput  textinput.Model
 	monRetriesInput  textinput.Model
 
+	// Edit mode
+	editMode bool
+	poolID   string
+
 	focusField int
 	submitting bool
 	spinner    spinner.Model
 	err        string
 	width      int
 	height     int
+}
+
+// NewEdit creates an edit form for an existing pool (name + LB method only).
+func NewEdit(client *gophercloud.ServiceClient, poolID, currentName, currentLBMethod, lbName string) Model {
+	ni := textinput.New()
+	ni.Prompt = ""
+	ni.Placeholder = "pool name"
+	ni.CharLimit = 64
+	ni.SetWidth(30)
+	ni.SetValue(currentName)
+	ni.Focus()
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+
+	m := Model{
+		Active:    true,
+		client:    client,
+		lbName:    lbName,
+		editMode:  true,
+		poolID:    poolID,
+		nameInput: ni,
+		spinner:   s,
+	}
+
+	// Pre-fill LB method
+	for i, method := range lbMethodOpts {
+		if method == currentLBMethod {
+			m.selectedLBMethod = i
+			break
+		}
+	}
+
+	// Create empty text inputs to avoid nil panics
+	for _, ti := range []*textinput.Model{&m.monURLInput, &m.monCodesInput, &m.monDelayInput, &m.monTimeoutInput, &m.monRetriesInput} {
+		*ti = textinput.New()
+		ti.Prompt = ""
+	}
+
+	return m
 }
 
 // New creates a pool create form.
@@ -143,8 +187,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case poolCreatedMsg:
 		m.submitting = false
 		m.Active = false
+		action := "Created pool on"
+		if m.editMode {
+			action = "Updated pool on"
+		}
 		return m, func() tea.Msg {
-			return shared.ResourceActionMsg{Action: "Created pool on", Name: m.lbName}
+			return shared.ResourceActionMsg{Action: action, Name: m.lbName}
 		}
 	case poolCreateErrMsg:
 		m.submitting = false
@@ -257,12 +305,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m *Model) advanceFocus(dir int) {
 	for {
 		m.focusField = (m.focusField + dir + numFields) % numFields
+		// In edit mode, only allow name, LB method, submit, cancel
+		if m.editMode && m.focusField != fieldName && m.focusField != fieldLBMethod &&
+			m.focusField != fieldSubmit && m.focusField != fieldCancel {
+			continue
+		}
 		// Skip monitor fields when monitor is NONE
-		if !m.hasMonitor() && m.focusField >= fieldMonURL && m.focusField <= fieldMonRetries {
+		if !m.editMode && !m.hasMonitor() && m.focusField >= fieldMonURL && m.focusField <= fieldMonRetries {
 			continue
 		}
 		// Skip HTTP-only fields for non-HTTP monitors
-		if !m.hasHTTPMonitor() && (m.focusField == fieldMonURL || m.focusField == fieldMonCodes) {
+		if !m.editMode && !m.hasHTTPMonitor() && (m.focusField == fieldMonURL || m.focusField == fieldMonCodes) {
 			continue
 		}
 		break
@@ -314,8 +367,23 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) submit() (Model, tea.Cmd) {
 	name := strings.TrimSpace(m.nameInput.Value())
-	protocol := protocolOpts[m.selectedProtocol]
 	lbMethod := lbMethodOpts[m.selectedLBMethod]
+
+	if m.editMode {
+		m.submitting = true
+		m.err = ""
+		client := m.client
+		id := m.poolID
+		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			err := loadbalancer.UpdatePool(context.Background(), client, id, &name, lbMethod)
+			if err != nil {
+				return poolCreateErrMsg{err: err}
+			}
+			return poolCreatedMsg{}
+		})
+	}
+
+	protocol := protocolOpts[m.selectedProtocol]
 
 	var monOpts *monitors.CreateOpts
 	if m.hasMonitor() {
@@ -395,7 +463,11 @@ func renderPicker(opts []string, selected int, focused bool) string {
 
 // View renders the form.
 func (m Model) View() string {
-	title := shared.StyleModalTitle.Render("Add Pool to " + m.lbName)
+	titleText := "Add Pool to " + m.lbName
+	if m.editMode {
+		titleText = "Edit Pool"
+	}
+	title := shared.StyleModalTitle.Render(titleText)
 
 	labelStyle := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Bold(true).Width(14)
 	focusStyle := lipgloss.NewStyle().Foreground(shared.ColorPrimary).Bold(true).Width(14)
@@ -411,22 +483,26 @@ func (m Model) View() string {
 	var rows []string
 
 	rows = append(rows, label("Name", fieldName)+m.nameInput.View())
-	rows = append(rows, label("Protocol", fieldProtocol)+renderPicker(protocolOpts, m.selectedProtocol, m.focusField == fieldProtocol))
+	if !m.editMode {
+		rows = append(rows, label("Protocol", fieldProtocol)+renderPicker(protocolOpts, m.selectedProtocol, m.focusField == fieldProtocol))
+	}
 	rows = append(rows, label("LB Method", fieldLBMethod)+renderPicker(lbMethodOpts, m.selectedLBMethod, m.focusField == fieldLBMethod))
 
-	// Health monitor section
-	rows = append(rows, "")
-	rows = append(rows, sectionStyle.Render("\u2665 Health Monitor"))
-	rows = append(rows, label("Monitor Type", fieldMonType)+renderPicker(monTypeOpts, m.selectedMonType, m.focusField == fieldMonType))
+	if !m.editMode {
+		// Health monitor section
+		rows = append(rows, "")
+		rows = append(rows, sectionStyle.Render("\u2665 Health Monitor"))
+		rows = append(rows, label("Monitor Type", fieldMonType)+renderPicker(monTypeOpts, m.selectedMonType, m.focusField == fieldMonType))
 
-	if m.hasMonitor() {
-		if m.hasHTTPMonitor() {
-			rows = append(rows, label("URL Path", fieldMonURL)+m.monURLInput.View())
-			rows = append(rows, label("Expect Codes", fieldMonCodes)+m.monCodesInput.View())
+		if m.hasMonitor() {
+			if m.hasHTTPMonitor() {
+				rows = append(rows, label("URL Path", fieldMonURL)+m.monURLInput.View())
+				rows = append(rows, label("Expect Codes", fieldMonCodes)+m.monCodesInput.View())
+			}
+			rows = append(rows, label("Delay (s)", fieldMonDelay)+m.monDelayInput.View())
+			rows = append(rows, label("Timeout (s)", fieldMonTimeout)+m.monTimeoutInput.View())
+			rows = append(rows, label("Max Retries", fieldMonRetries)+m.monRetriesInput.View())
 		}
-		rows = append(rows, label("Delay (s)", fieldMonDelay)+m.monDelayInput.View())
-		rows = append(rows, label("Timeout (s)", fieldMonTimeout)+m.monTimeoutInput.View())
-		rows = append(rows, label("Max Retries", fieldMonRetries)+m.monRetriesInput.View())
 	}
 
 	if m.err != "" {

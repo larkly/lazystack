@@ -23,6 +23,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
+	"github.com/larkly/lazystack/internal/ui/lbcreate"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
 	"github.com/larkly/lazystack/internal/ui/lblist"
@@ -151,6 +152,7 @@ type Model struct {
 	networkView        networkview.Model
 	lbList             lblist.Model
 	lbDetail           lbdetail.Model
+	lbCreate           lbcreate.Model
 	lbListenerCreate   lblistenercreate.Model
 	lbPoolCreate       lbpoolcreate.Model
 	lbMemberCreate     lbmembercreate.Model
@@ -470,6 +472,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// LB create/edit modal intercepts all keys when active
+		if m.lbCreate.Active {
+			var cmd tea.Cmd
+			m.lbCreate, cmd = m.lbCreate.Update(msg)
+			return m, cmd
+		}
+
 		// LB listener create modal intercepts all keys when active
 		if m.lbListenerCreate.Active {
 			var cmd tea.Cmd
@@ -771,13 +780,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Load balancer list: Enter to open detail, ctrl+d to delete
+		// Load balancer list: Enter to open detail, ctrl+d to delete, ctrl+n create
 		if m.view == viewLBList {
 			if key.Matches(msg, shared.Keys.Enter) {
 				return m.openLBDetail()
 			}
 			if key.Matches(msg, shared.Keys.Delete) {
 				return m.openLBDeleteConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Create) {
+				return m.openLBCreate()
 			}
 		}
 
@@ -813,6 +825,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case lbdetail.FocusMembers:
 					if m.lbDetail.SelectedPoolID() != "" {
 						return m.openLBMemberCreate()
+					}
+				}
+			case key.Matches(msg, shared.Keys.Enter):
+				switch pane {
+				case lbdetail.FocusInfo:
+					return m.openLBEdit()
+				case lbdetail.FocusListeners:
+					if m.lbDetail.SelectedListenerID() != "" {
+						return m.openLBListenerEdit()
+					}
+				case lbdetail.FocusPools:
+					if m.lbDetail.SelectedPoolID() != "" {
+						return m.openLBPoolEdit()
+					}
+				case lbdetail.FocusMembers:
+					if m.lbDetail.SelectedMemberID() != "" {
+						return m.openLBMemberEdit()
 					}
 				}
 			}
@@ -1265,6 +1294,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sgRuleCreate.Active {
 			var cmd tea.Cmd
 			m.sgRuleCreate, cmd = m.sgRuleCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.lbCreate.Active {
+			var cmd tea.Cmd
+			m.lbCreate, cmd = m.lbCreate.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.lbListenerCreate.Active {

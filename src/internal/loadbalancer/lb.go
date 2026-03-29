@@ -115,6 +115,42 @@ func GetLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id 
 	}, nil
 }
 
+// CreateLoadBalancer creates a new load balancer on the given subnet.
+func CreateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, name, description, vipSubnetID string) (*LoadBalancer, error) {
+	opts := loadbalancers.CreateOpts{
+		Name:        name,
+		Description: description,
+		VipSubnetID: vipSubnetID,
+	}
+	lb, err := loadbalancers.Create(ctx, client, opts).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating load balancer: %w", err)
+	}
+	return &LoadBalancer{
+		ID:                 lb.ID,
+		Name:               lb.Name,
+		Description:        lb.Description,
+		VipAddress:         lb.VipAddress,
+		VipSubnetID:        lb.VipSubnetID,
+		ProvisioningStatus: lb.ProvisioningStatus,
+		OperatingStatus:    lb.OperatingStatus,
+		Provider:           lb.Provider,
+	}, nil
+}
+
+// UpdateLoadBalancer updates a load balancer's name and/or description.
+func UpdateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string) error {
+	opts := loadbalancers.UpdateOpts{
+		Name:        name,
+		Description: description,
+	}
+	_, err := loadbalancers.Update(ctx, client, id, opts).Extract()
+	if err != nil {
+		return fmt.Errorf("updating load balancer %s: %w", id, err)
+	}
+	return nil
+}
+
 // DeleteLoadBalancer deletes a load balancer with cascade.
 func DeleteLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
 	r := loadbalancers.Delete(ctx, client, id, loadbalancers.DeleteOpts{Cascade: true})
@@ -227,6 +263,18 @@ func DeleteListener(ctx context.Context, client *gophercloud.ServiceClient, id s
 	return nil
 }
 
+// UpdateListener updates a listener's name.
+func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id string, name *string) error {
+	opts := listeners.UpdateOpts{
+		Name: name,
+	}
+	_, err := listeners.Update(ctx, client, id, opts).Extract()
+	if err != nil {
+		return fmt.Errorf("updating listener %s: %w", id, err)
+	}
+	return nil
+}
+
 // CreatePool creates a pool on a load balancer, optionally with a health monitor.
 func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol, lbMethod string, mon *monitors.CreateOpts) (*Pool, error) {
 	opts := pools.CreateOpts{
@@ -260,6 +308,21 @@ func DeletePool(ctx context.Context, client *gophercloud.ServiceClient, id strin
 	return nil
 }
 
+// UpdatePool updates a pool's name and/or LB method.
+func UpdatePool(ctx context.Context, client *gophercloud.ServiceClient, id string, name *string, lbMethod string) error {
+	opts := pools.UpdateOpts{
+		Name: name,
+	}
+	if lbMethod != "" {
+		opts.LBMethod = pools.LBMethod(lbMethod)
+	}
+	_, err := pools.Update(ctx, client, id, opts).Extract()
+	if err != nil {
+		return fmt.Errorf("updating pool %s: %w", id, err)
+	}
+	return nil
+}
+
 // CreateMember adds a member to a pool.
 func CreateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, name, address string, port, weight int) (*Member, error) {
 	opts := pools.CreateMemberOpts{
@@ -287,6 +350,19 @@ func DeleteMember(ctx context.Context, client *gophercloud.ServiceClient, poolID
 	r := pools.DeleteMember(ctx, client, poolID, memberID)
 	if r.Err != nil {
 		return fmt.Errorf("deleting member %s: %w", memberID, r.Err)
+	}
+	return nil
+}
+
+// UpdateMember updates a member's name and/or weight.
+func UpdateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string, name *string, weight *int) error {
+	opts := pools.UpdateMemberOpts{
+		Name:   name,
+		Weight: weight,
+	}
+	_, err := pools.UpdateMember(ctx, client, poolID, memberID, opts).Extract()
+	if err != nil {
+		return fmt.Errorf("updating member %s: %w", memberID, err)
 	}
 	return nil
 }
