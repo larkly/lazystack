@@ -17,17 +17,39 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 )
 
-type routersLoadedMsg struct{ routers []network.Router }
+type routerExtra struct {
+	InternalNetworkName string
+	InternalIPv4        string
+	InternalIPv6        string
+}
+
+type routersLoadedMsg struct {
+	routers      []network.Router
+	networkNames map[string]string
+	routerExtras map[string]routerExtra
+}
 type routersErrMsg struct{ err error }
 type tickMsg struct{}
 type sortClearMsg struct{}
 
-var routerSortColumns = []string{"name", "status", "gateway"}
+// Sub-column indices matching the header layout.
+var routerSortColumns = []string{"name", "status", "int_net", "int_v4", "int_v6", "ext_net", "ext_v4", "ext_v6"}
+
+// Column widths.
+const (
+	colStatus  = 14
+	colNetwork = 14
+	colIPv4    = 16
+	colIPv6    = 24
+	colRoutes  = 8
+)
 
 // Model is the router list view.
 type Model struct {
 	client          *gophercloud.ServiceClient
 	routers         []network.Router
+	networkNames    map[string]string
+	routerExtras    map[string]routerExtra
 	cursor          int
 	scrollOff       int
 	width           int
@@ -70,6 +92,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.routers = msg.routers
+		m.networkNames = msg.networkNames
+		m.routerExtras = msg.routerExtras
 		m.err = ""
 		m.sortRouters()
 		if cursorID != "" {
@@ -204,45 +228,80 @@ func (m Model) View() string {
 		return b.String()
 	}
 
+	// Group widths: network + gap + ipv4 + gap + ipv6
+	groupW := colNetwork + 1 + colIPv4 + 1 + colIPv6
+
 	// Name column gets remaining width after fixed columns
-	fixedW := 14 + 20 + 8 + 3 + 2 // status + gateway + routes + gaps + prefix
+	// prefix(2) + name + gap + status + sep + internal_group + sep + gateway_group + gap + routes
+	fixedW := 2 + colStatus + 3 + groupW + 3 + groupW + 1 + colRoutes
 	nameW := m.width - fixedW
-	if nameW < 20 {
-		nameW = 20
+	if nameW < 12 {
+		nameW = 12
 	}
 
-	headerTitles := []struct {
+	sep := lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(" ┃ ")
+	gap := " "
+
+	// --- Row 1: group headers ---
+	blankName := strings.Repeat(" ", nameW)
+	blankStatus := strings.Repeat(" ", colStatus)
+	groupStyle := shared.StyleHeader
+	internalLabel := groupStyle.Render(fmt.Sprintf("%-*s", groupW, "Internal"))
+	gatewayLabel := groupStyle.Render(fmt.Sprintf("%-*s", groupW, "Gateway"))
+	blankRoutes := strings.Repeat(" ", colRoutes)
+	b.WriteString("  " + blankName + gap + blankStatus + sep + internalLabel + sep + gatewayLabel + gap + blankRoutes + "\n")
+
+	// --- Row 2: sub-column headers ---
+	// Sub-columns: 0=name, 1=status, 2=int_net, 3=int_v4, 4=int_v6, 5=ext_net, 6=ext_v4, 7=ext_v6
+	type subCol struct {
 		title string
 		width int
-	}{
-		{"Name", nameW},
-		{"Status", 14},
-		{"External Gateway", 20},
-		{"Routes", 8},
 	}
-	var headerParts []string
-	for i, h := range headerTitles {
-		title := h.title
+	subCols := []subCol{
+		{"Name", nameW},
+		{"Status", colStatus},
+		{"Network", colNetwork},
+		{"IPv4", colIPv4},
+		{"IPv6", colIPv6},
+		{"Network", colNetwork},
+		{"IPv4", colIPv4},
+		{"IPv6", colIPv6},
+	}
+
+	renderSubHeader := func(idx int, sc subCol) string {
+		title := sc.title
 		indicator := ""
-		if i == m.sortCol {
+		if idx == m.sortCol {
 			if m.sortAsc {
 				indicator = " ▲"
 			} else {
 				indicator = " ▼"
 			}
 		}
-		if i == m.sortCol && m.sortHighlight {
-			headerParts = append(headerParts, lipgloss.NewStyle().
-				Foreground(shared.ColorHighlight).
-				Bold(true).
-				Render(fmt.Sprintf("%-*s", h.width, title+indicator)))
-		} else {
-			headerParts = append(headerParts, shared.StyleHeader.Render(fmt.Sprintf("%-*s", h.width, title+indicator)))
+		text := fmt.Sprintf("%-*s", sc.width, title+indicator)
+		if idx == m.sortCol && m.sortHighlight {
+			return lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true).Render(text)
 		}
+		return shared.StyleHeader.Render(text)
 	}
-	b.WriteString("  " + strings.Join(headerParts, " ") + "\n")
+
+	nameHdr := renderSubHeader(0, subCols[0])
+	statusHdr := renderSubHeader(1, subCols[1])
+	intNetHdr := renderSubHeader(2, subCols[2])
+	intV4Hdr := renderSubHeader(3, subCols[3])
+	intV6Hdr := renderSubHeader(4, subCols[4])
+	extNetHdr := renderSubHeader(5, subCols[5])
+	extV4Hdr := renderSubHeader(6, subCols[6])
+	extV6Hdr := renderSubHeader(7, subCols[7])
+	routesHdr := shared.StyleHeader.Render(fmt.Sprintf("%-*s", colRoutes, "Routes"))
+
+	b.WriteString("  " + nameHdr + gap + statusHdr + sep +
+		intNetHdr + gap + intV4Hdr + gap + intV6Hdr + sep +
+		extNetHdr + gap + extV4Hdr + gap + extV6Hdr + gap + routesHdr + "\n")
+
 	b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(strings.Repeat("─", m.width)) + "\n")
 
+	// --- Data rows ---
 	th := m.tableHeight()
 	end := m.scrollOff + th
 	if end > len(m.routers) {
@@ -258,14 +317,37 @@ func (m Model) View() string {
 			name = r.ID[:8] + "..."
 		}
 
-		gateway := r.ExternalGatewayIP
-		if gateway == "" {
-			gateway = "none"
+		extra := m.routerExtras[r.ID]
+
+		intNet := extra.InternalNetworkName
+		if intNet == "" {
+			intNet = "-"
+		}
+		intV4 := extra.InternalIPv4
+		if intV4 == "" {
+			intV4 = "-"
+		}
+		intV6 := extra.InternalIPv6
+		if intV6 == "" {
+			intV6 = "-"
+		}
+
+		extNet := m.networkNames[r.ExternalGatewayNetworkID]
+		if extNet == "" {
+			extNet = "-"
+		}
+		extV4 := r.ExternalGatewayIPv4
+		if extV4 == "" {
+			extV4 = "-"
+		}
+		extV6 := r.ExternalGatewayIPv6
+		if extV6 == "" {
+			extV6 = "-"
 		}
 
 		routes := fmt.Sprintf("%d", len(r.Routes))
 
-		statusStyle := routerStatusStyle(r.Status)
+		stStyle := routerStatusStyle(r.Status)
 
 		var rowBg color.Color
 		hasBg := false
@@ -274,40 +356,52 @@ func (m Model) View() string {
 			hasBg = true
 		}
 
-		nameStyle := lipgloss.NewStyle().Width(nameW)
-		stStyle := statusStyle.Width(14)
-		gwStyle := lipgloss.NewStyle().Width(20)
-		rtStyle := lipgloss.NewStyle().Width(8)
+		mkStyle := func(w int) lipgloss.Style {
+			s := lipgloss.NewStyle().Width(w)
+			if isCursor {
+				s = s.Bold(true).Background(rowBg)
+			}
+			return s
+		}
 
+		nameS := mkStyle(nameW)
+		stS := stStyle.Width(colStatus)
 		if isCursor {
-			nameStyle = nameStyle.Bold(true).Background(rowBg)
-			stStyle = stStyle.Bold(true).Background(rowBg)
-			gwStyle = gwStyle.Bold(true).Background(rowBg)
-			rtStyle = rtStyle.Bold(true).Background(rowBg)
+			stS = stS.Bold(true).Background(rowBg)
 		}
+		intNetS := mkStyle(colNetwork)
+		intV4S := mkStyle(colIPv4)
+		intV6S := mkStyle(colIPv6)
+		extNetS := mkStyle(colNetwork)
+		extV4S := mkStyle(colIPv4)
+		extV6S := mkStyle(colIPv6)
+		rtS := mkStyle(colRoutes)
 
-		parts := []string{
-			nameStyle.Render(truncate(name, nameW)),
-			stStyle.Render(shared.StatusIcon(r.Status) + truncate(r.Status, 12)),
-			gwStyle.Render(truncate(gateway, 20)),
-			rtStyle.Render(truncate(routes, 8)),
-		}
-
-		prefix := "  "
-		prefixStyle := lipgloss.NewStyle()
-		gapStyle := lipgloss.NewStyle()
+		gapS := lipgloss.NewStyle()
+		prefixS := lipgloss.NewStyle()
 		if hasBg {
-			prefixStyle = prefixStyle.Background(rowBg)
-			gapStyle = gapStyle.Background(rowBg)
+			gapS = gapS.Background(rowBg)
+			prefixS = prefixS.Background(rowBg)
 		}
+		g := gapS.Render(" ")
 
-		gap := gapStyle.Render(" ")
-		row := prefixStyle.Render(prefix) + strings.Join(parts, gap)
+		row := prefixS.Render("  ") +
+			nameS.Render(truncate(name, nameW)) + g +
+			stS.Render(shared.StatusIcon(r.Status)+truncate(r.Status, 12)) +
+			sep +
+			intNetS.Render(truncate(intNet, colNetwork)) + g +
+			intV4S.Render(truncate(intV4, colIPv4)) + g +
+			intV6S.Render(truncate(intV6, colIPv6)) +
+			sep +
+			extNetS.Render(truncate(extNet, colNetwork)) + g +
+			extV4S.Render(truncate(extV4, colIPv4)) + g +
+			extV6S.Render(truncate(extV6, colIPv6)) + g +
+			rtS.Render(truncate(routes, colRoutes))
 
 		if hasBg {
 			rowW := lipgloss.Width(row)
 			if rowW < m.width {
-				row += gapStyle.Render(strings.Repeat(" ", m.width-rowW))
+				row += gapS.Render(strings.Repeat(" ", m.width-rowW))
 			}
 		}
 
@@ -350,14 +444,25 @@ func (m *Model) sortRouters() {
 	asc := m.sortAsc
 	sort.SliceStable(m.routers, func(i, j int) bool {
 		a, b := m.routers[i], m.routers[j]
+		ea, eb := m.routerExtras[a.ID], m.routerExtras[b.ID]
 		var less bool
 		switch colKey {
 		case "name":
 			less = strings.ToLower(a.Name) < strings.ToLower(b.Name)
 		case "status":
 			less = a.Status < b.Status
-		case "gateway":
-			less = a.ExternalGatewayIP < b.ExternalGatewayIP
+		case "int_net":
+			less = ea.InternalNetworkName < eb.InternalNetworkName
+		case "int_v4":
+			less = ea.InternalIPv4 < eb.InternalIPv4
+		case "int_v6":
+			less = ea.InternalIPv6 < eb.InternalIPv6
+		case "ext_net":
+			less = m.networkNames[a.ExternalGatewayNetworkID] < m.networkNames[b.ExternalGatewayNetworkID]
+		case "ext_v4":
+			less = a.ExternalGatewayIPv4 < b.ExternalGatewayIPv4
+		case "ext_v6":
+			less = a.ExternalGatewayIPv6 < b.ExternalGatewayIPv6
 		default:
 			less = false
 		}
@@ -379,7 +484,7 @@ func (m *Model) ensureVisible() {
 }
 
 func (m Model) tableHeight() int {
-	h := m.height - 5
+	h := m.height - 6 // extra line for two-row header
 	if h < 1 {
 		h = 1
 	}
@@ -403,11 +508,62 @@ func (m Model) fetchRouters() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		routers, err := network.ListRouters(context.Background(), client)
+		ctx := context.Background()
+
+		rlist, err := network.ListRouters(ctx, client)
 		if err != nil {
 			return routersErrMsg{err: err}
 		}
-		return routersLoadedMsg{routers: routers}
+
+		nets, err := network.ListNetworks(ctx, client)
+		if err != nil {
+			return routersErrMsg{err: err}
+		}
+		networkNames := make(map[string]string, len(nets))
+		for _, n := range nets {
+			networkNames[n.ID] = n.Name
+		}
+
+		subs, err := network.ListSubnets(ctx, client)
+		if err != nil {
+			return routersErrMsg{err: err}
+		}
+		subnetToNetwork := make(map[string]string, len(subs))
+		for _, s := range subs {
+			subnetToNetwork[s.ID] = s.NetworkID
+		}
+
+		extras := make(map[string]routerExtra, len(rlist))
+		for _, r := range rlist {
+			ifaces, err := network.ListRouterInterfaces(ctx, client, r.ID)
+			if err != nil {
+				continue
+			}
+			var ex routerExtra
+			for _, iface := range ifaces {
+				if ex.InternalNetworkName == "" {
+					if netID := subnetToNetwork[iface.SubnetID]; netID != "" {
+						ex.InternalNetworkName = networkNames[netID]
+					}
+				}
+				if strings.Contains(iface.IPAddress, ":") {
+					if ex.InternalIPv6 == "" {
+						ex.InternalIPv6 = iface.IPAddress
+					}
+				} else {
+					if ex.InternalIPv4 == "" {
+						ex.InternalIPv4 = iface.IPAddress
+					}
+				}
+			}
+			extras[r.ID] = ex
+		}
+
+		return routersLoadedMsg{
+			routers:      rlist,
+			networkNames: networkNames,
+			routerExtras: extras,
+		}
 	}
 }
 

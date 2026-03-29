@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/layer3/routers"
@@ -18,7 +19,8 @@ type Router struct {
 	Status                   string
 	AdminStateUp             bool
 	ExternalGatewayNetworkID string
-	ExternalGatewayIP        string // first fixed IP if present
+	ExternalGatewayIPv4      string
+	ExternalGatewayIPv6      string
 	Routes                   []Route
 }
 
@@ -53,8 +55,8 @@ func ListRouters(ctx context.Context, client *gophercloud.ServiceClient) ([]Rout
 			}
 			if r.GatewayInfo.NetworkID != "" {
 				router.ExternalGatewayNetworkID = r.GatewayInfo.NetworkID
-				if len(r.GatewayInfo.ExternalFixedIPs) > 0 {
-					router.ExternalGatewayIP = r.GatewayInfo.ExternalFixedIPs[0].IPAddress
+				for _, fip := range r.GatewayInfo.ExternalFixedIPs {
+					classifyGatewayIP(&router, fip.IPAddress)
 				}
 			}
 			for _, route := range r.Routes {
@@ -88,8 +90,8 @@ func GetRouter(ctx context.Context, client *gophercloud.ServiceClient, id string
 	}
 	if r.GatewayInfo.NetworkID != "" {
 		router.ExternalGatewayNetworkID = r.GatewayInfo.NetworkID
-		if len(r.GatewayInfo.ExternalFixedIPs) > 0 {
-			router.ExternalGatewayIP = r.GatewayInfo.ExternalFixedIPs[0].IPAddress
+		for _, fip := range r.GatewayInfo.ExternalFixedIPs {
+			classifyGatewayIP(router, fip.IPAddress)
 		}
 	}
 	for _, route := range r.Routes {
@@ -185,4 +187,16 @@ func ListRouterInterfaces(ctx context.Context, client *gophercloud.ServiceClient
 		return nil, fmt.Errorf("listing router interfaces for %s: %w", routerID, err)
 	}
 	return result, nil
+}
+
+func classifyGatewayIP(r *Router, ip string) {
+	if strings.Contains(ip, ":") {
+		if r.ExternalGatewayIPv6 == "" {
+			r.ExternalGatewayIPv6 = ip
+		}
+	} else {
+		if r.ExternalGatewayIPv4 == "" {
+			r.ExternalGatewayIPv4 = ip
+		}
+	}
 }
