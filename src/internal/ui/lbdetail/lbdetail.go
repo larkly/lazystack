@@ -87,7 +87,7 @@ func New(client *gophercloud.ServiceClient, lbID string, refreshInterval time.Du
 
 // Init fetches the load balancer details.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchDetail(), m.tickCmd())
+	return tea.Batch(m.spinner.Tick, m.fetchDetail())
 }
 
 // LBID returns the current load balancer ID.
@@ -118,15 +118,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.monitors = msg.monitors
 		m.err = ""
 		m.clampCursors()
-		return m, nil
+		return m, m.tickCmd()
 
 	case lbDetailErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case detailTickMsg:
-		return m, tea.Batch(m.fetchDetail(), m.tickCmd())
+		return m, m.fetchDetail()
 
 	case spinner.TickMsg:
 		if m.loading {

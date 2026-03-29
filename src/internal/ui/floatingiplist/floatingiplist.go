@@ -56,7 +56,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchFIPs(), m.tickCmd())
+	return tea.Batch(m.spinner.Tick, m.fetchFIPs())
 }
 
 // SelectedFIP returns the floating IP under the cursor.
@@ -91,15 +91,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.fips) {
 			m.cursor = max(0, len(m.fips)-1)
 		}
-		return m, nil
+		return m, m.tickCmd()
 
 	case fipsErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case tickMsg:
-		return m, tea.Batch(m.fetchFIPs(), m.tickCmd())
+		return m, m.fetchFIPs()
 
 	case spinner.TickMsg:
 		if m.loading {

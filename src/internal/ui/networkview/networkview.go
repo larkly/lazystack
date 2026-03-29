@@ -104,7 +104,7 @@ func (m *Model) SetComputeClient(client *gophercloud.ServiceClient) {
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchNetworks(), m.tickCmd())
+	return tea.Batch(m.spinner.Tick, m.fetchNetworks())
 }
 
 func (m Model) selectedNetwork() *network.Network {
@@ -217,14 +217,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if n := m.selectedNetwork(); n != nil && n.ID != m.lastDetailNetID {
 			m.lastDetailNetID = n.ID
 			m.resetDetailState()
-			return m, m.fetchDetail(n.ID)
+			return m, tea.Batch(m.fetchDetail(n.ID), m.tickCmd())
 		}
-		return m, nil
+		return m, m.tickCmd()
 
 	case networksErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case detailLoadedMsg:
 		if n := m.selectedNetwork(); n != nil && n.ID == msg.netID {
@@ -245,7 +245,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		cmds := []tea.Cmd{m.fetchNetworks(), m.tickCmd()}
+		cmds := []tea.Cmd{m.fetchNetworks()}
 		if n := m.selectedNetwork(); n != nil {
 			cmds = append(cmds, m.fetchDetail(n.ID))
 		}

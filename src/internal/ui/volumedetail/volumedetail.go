@@ -60,7 +60,7 @@ func New(client, computeClient *gophercloud.ServiceClient, volumeID string, refr
 
 // Init fetches the volume details.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchVolume(), m.tickCmd())
+	return tea.Batch(m.spinner.Tick, m.fetchVolume())
 }
 
 // SelectedVolumeID returns the current volume ID.
@@ -87,15 +87,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.volume = msg.vol
 		m.serverName = msg.serverName
 		m.err = ""
-		return m, nil
+		return m, m.tickCmd()
 
 	case volumeDetailErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case detailTickMsg:
-		return m, tea.Batch(m.fetchVolume(), m.tickCmd())
+		return m, m.fetchVolume()
 
 	case spinner.TickMsg:
 		if m.loading {
