@@ -228,12 +228,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.Active = false
 		return m, nil
 	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
-		m.focusField = (m.focusField + 1) % numFields
-		m.updateFocus()
+		m.advanceFocus(1)
 		return m, nil
 	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
-		m.focusField = (m.focusField - 1 + numFields) % numFields
-		m.updateFocus()
+		m.advanceFocus(-1)
 		return m, nil
 	case key.Matches(msg, shared.Keys.Right):
 		if m.focusField == fieldSubmit {

@@ -393,17 +393,32 @@ func (m Model) submit() (Model, tea.Cmd) {
 	if m.hasMonitor() {
 		monType := monTypeOpts[m.selectedMonType]
 
-		delay, err := strconv.Atoi(strings.TrimSpace(m.monDelayInput.Value()))
+		delayStr := strings.TrimSpace(m.monDelayInput.Value())
+		if delayStr == "" {
+			delayStr = "5"
+		}
+		delay, err := strconv.Atoi(delayStr)
 		if err != nil || delay < 1 {
-			delay = 5
+			m.err = "Delay must be a positive number (seconds)"
+			return m, nil
 		}
-		timeout, err := strconv.Atoi(strings.TrimSpace(m.monTimeoutInput.Value()))
+		timeoutStr := strings.TrimSpace(m.monTimeoutInput.Value())
+		if timeoutStr == "" {
+			timeoutStr = "3"
+		}
+		timeout, err := strconv.Atoi(timeoutStr)
 		if err != nil || timeout < 1 {
-			timeout = 3
+			m.err = "Timeout must be a positive number (seconds)"
+			return m, nil
 		}
-		retries, err := strconv.Atoi(strings.TrimSpace(m.monRetriesInput.Value()))
+		retriesStr := strings.TrimSpace(m.monRetriesInput.Value())
+		if retriesStr == "" {
+			retriesStr = "3"
+		}
+		retries, err := strconv.Atoi(retriesStr)
 		if err != nil || retries < 1 || retries > 10 {
-			retries = 3
+			m.err = "Max retries must be a number between 1 and 10"
+			return m, nil
 		}
 
 		monOpts = &monitors.CreateOpts{
