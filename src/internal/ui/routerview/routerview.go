@@ -94,6 +94,7 @@ func New(networkClient *gophercloud.ServiceClient, refreshInterval time.Duration
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[routerview] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchRouters(), m.fetchNames())
 }
 
@@ -181,6 +182,7 @@ func (m *Model) clampDetailCursors() {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case routersLoadedMsg:
+		shared.Debugf("[routerview] routersLoadedMsg: %d routers", len(msg.routers))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.routers) {
 			cursorID = m.routers[m.cursor].ID
@@ -201,23 +203,28 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.applyHighlightNames()
 		if r := m.selectedRouter(); r != nil && r.ID != m.lastDetailID {
+			shared.Debugf("[routerview] routersLoaded: new selection %s, fetching detail + starting tick", r.ID[:8])
 			m.lastDetailID = r.ID
 			m.resetDetailState()
 			return m, tea.Batch(m.fetchDetail(r.ID), m.tickCmd())
 		}
+		shared.Debugf("[routerview] routersLoaded: starting tick")
 		return m, m.tickCmd()
 
 	case routersErrMsg:
+		shared.Debugf("[routerview] routersErrMsg: %s", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, m.tickCmd()
 
 	case namesLoadedMsg:
+		shared.Debugf("[routerview] namesLoadedMsg: %d networks, %d subnets", len(msg.networkNames), len(msg.subnetToNet))
 		m.networkNames = msg.networkNames
 		m.subnetToNet = msg.subnetToNet
 		return m, nil
 
 	case detailLoadedMsg:
+		shared.Debugf("[routerview] detailLoadedMsg: router=%s ifaces=%d", msg.routerID[:8], len(msg.interfaces))
 		if r := m.selectedRouter(); r != nil && r.ID == msg.routerID {
 			m.detailLoading = false
 			m.detailErr = ""
@@ -227,6 +234,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case detailErrMsg:
+		shared.Debugf("[routerview] detailErrMsg: router=%s err=%s", msg.routerID[:8], msg.err)
 		if r := m.selectedRouter(); r != nil && r.ID == msg.routerID {
 			m.detailLoading = false
 			m.detailErr = msg.err.Error()
@@ -234,8 +242,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		// Only refresh the router list on tick. Interfaces/routes rarely
-		// change and are fetched on selection change or manual refresh.
+		shared.Debugf("[routerview] tickMsg: fetching routers")
 		return m, m.fetchRouters()
 
 	case spinner.TickMsg:
@@ -1032,6 +1039,7 @@ func (m Model) renderActionBar() string {
 
 // ForceRefresh triggers a manual reload.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[routerview] ForceRefresh()")
 	m.loading = true
 	cmds := []tea.Cmd{m.spinner.Tick, m.fetchRouters(), m.fetchNames()}
 	if r := m.selectedRouter(); r != nil {
@@ -1093,13 +1101,16 @@ func (m Model) Hints() string {
 func (m Model) fetchRouters() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
+		shared.Debugf("[routerview] fetchRouters: start ListRouters")
 		routers, err := network.ListRouters(context.Background(), client)
 		if err != nil {
+			shared.Debugf("[routerview] fetchRouters: error: %s", err)
 			return routersErrMsg{err: err}
 		}
 		sort.Slice(routers, func(i, j int) bool {
 			return strings.ToLower(routers[i].Name) < strings.ToLower(routers[j].Name)
 		})
+		shared.Debugf("[routerview] fetchRouters: done, %d routers", len(routers))
 		return routersLoadedMsg{routers: routers}
 	}
 }
@@ -1108,33 +1119,45 @@ func (m Model) fetchNames() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
 		ctx := context.Background()
+		shared.Debugf("[routerview] fetchNames: start ListNetworks")
 		nets, err := network.ListNetworks(ctx, client)
 		if err != nil {
-			return namesLoadedMsg{} // non-fatal, use stale cache
+			shared.Debugf("[routerview] fetchNames: ListNetworks error: %s", err)
+			return namesLoadedMsg{}
 		}
 		networkNames := make(map[string]string, len(nets))
 		for _, n := range nets {
 			networkNames[n.ID] = n.Name
 		}
+		shared.Debugf("[routerview] fetchNames: start ListSubnets")
 		subs, err := network.ListSubnets(ctx, client)
 		if err != nil {
+			shared.Debugf("[routerview] fetchNames: ListSubnets error: %s", err)
 			return namesLoadedMsg{networkNames: networkNames}
 		}
 		subnetToNet := make(map[string]string, len(subs))
 		for _, s := range subs {
 			subnetToNet[s.ID] = s.NetworkID
 		}
+		shared.Debugf("[routerview] fetchNames: done, %d nets %d subs", len(networkNames), len(subnetToNet))
 		return namesLoadedMsg{networkNames: networkNames, subnetToNet: subnetToNet}
 	}
 }
 
 func (m Model) fetchDetail(routerID string) tea.Cmd {
 	client := m.networkClient
+	short := routerID
+	if len(short) > 8 {
+		short = short[:8]
+	}
 	return func() tea.Msg {
+		shared.Debugf("[routerview] fetchDetail: start ListRouterInterfaces router=%s", short)
 		ifaces, err := network.ListRouterInterfaces(context.Background(), client, routerID)
 		if err != nil {
+			shared.Debugf("[routerview] fetchDetail: error: %s", err)
 			return detailErrMsg{routerID: routerID, err: err}
 		}
+		shared.Debugf("[routerview] fetchDetail: done, %d interfaces", len(ifaces))
 		return detailLoadedMsg{routerID: routerID, interfaces: ifaces}
 	}
 }

@@ -132,12 +132,14 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 		m.view = viewRouterView
 		m.statusBar.CurrentView = "routerview"
 		if !m.tabInited[idx] {
+			shared.Debugf("[tabs] routers: first activation, calling Init()")
 			m.routerView = routerview.New(m.client.Network, m.refreshInterval)
 			m.routerView.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
 			m.statusBar.Hint = m.routerView.Hints()
 			return m, m.routerView.Init()
 		}
+		shared.Debugf("[tabs] routers: re-activation, calling ForceRefresh()")
 		m.statusBar.Hint = m.routerView.Hints()
 		return m, m.routerView.ForceRefresh()
 

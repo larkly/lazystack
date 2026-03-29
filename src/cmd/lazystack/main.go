@@ -13,6 +13,7 @@ import (
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/config"
 	"github.com/larkly/lazystack/internal/selfupdate"
+	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbletea/v2"
 )
 
@@ -27,7 +28,14 @@ func main() {
 	refreshSec := flag.Int("refresh", 5, "server list auto-refresh interval in seconds")
 	idleTimeoutMin := flag.Int("idle-timeout", 0, "pause polling after N minutes of no input (0 = disabled)")
 	plainMode := flag.Bool("plain", false, "disable Unicode status icons")
+	debugMode := flag.Bool("debug", false, "write debug log to ~/.cache/lazystack/debug.log")
 	flag.Parse()
+
+	if *debugMode {
+		if err := shared.EnableDebug(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not enable debug logging: %v\n", err)
+		}
+	}
 
 	if *showVersion {
 		fmt.Println("lazystack " + version)
