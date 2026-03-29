@@ -23,9 +23,10 @@ const (
 	focusInfo focusPane = iota
 	focusRules
 	focusServers
+	focusPorts
 )
 
-const focusPaneCount = 3
+const focusPaneCount = 4
 const narrowThreshold = 80
 
 type sgDetailLoadedMsg struct {
@@ -33,7 +34,10 @@ type sgDetailLoadedMsg struct {
 	groupNames map[string]string
 }
 type sgDetailErrMsg struct{ err error }
-type serversLoadedMsg struct{ servers []serverRef }
+type serversLoadedMsg struct {
+	servers []serverRef
+	ports   []network.Port
+}
 type serversErrMsg struct{ err error }
 type detailTickMsg struct{}
 
@@ -68,6 +72,11 @@ type Model struct {
 	serversScroll  int
 	serversLoading bool
 	serversErr     string
+
+	// Ports pane
+	ports       []network.Port
+	portsCursor int
+	portsScroll int
 }
 
 // New creates a security group detail model.
@@ -172,8 +181,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.serversLoading = false
 		m.serversErr = ""
 		m.servers = msg.servers
+		m.ports = msg.ports
 		if m.serverCursor >= len(m.servers) {
 			m.serverCursor = max(0, len(m.servers)-1)
+		}
+		if m.portsCursor >= len(m.ports) {
+			m.portsCursor = max(0, len(m.ports)-1)
 		}
 		return m, nil
 
@@ -254,6 +267,12 @@ func (m *Model) scrollUp(n int) {
 			m.serverCursor = 0
 		}
 		m.ensureServerCursorVisible()
+	case focusPorts:
+		m.portsCursor -= n
+		if m.portsCursor < 0 {
+			m.portsCursor = 0
+		}
+		m.ensurePortCursorVisible()
 	}
 }
 
@@ -282,6 +301,16 @@ func (m *Model) scrollDown(n int) {
 			m.serverCursor = maxIdx
 		}
 		m.ensureServerCursorVisible()
+	case focusPorts:
+		m.portsCursor += n
+		maxIdx := len(m.ports) - 1
+		if maxIdx < 0 {
+			maxIdx = 0
+		}
+		if m.portsCursor > maxIdx {
+			m.portsCursor = maxIdx
+		}
+		m.ensurePortCursorVisible()
 	}
 }
 
@@ -305,13 +334,24 @@ func (m *Model) ensureServerCursorVisible() {
 	}
 }
 
+func (m *Model) ensurePortCursorVisible() {
+	visibleLines := m.portsVisibleLines()
+	if m.portsCursor < m.portsScroll {
+		m.portsScroll = m.portsCursor
+	}
+	if m.portsCursor >= m.portsScroll+visibleLines {
+		m.portsScroll = m.portsCursor - visibleLines + 1
+	}
+}
+
 func (m Model) rulesVisibleLines() int {
 	totalH := m.panelHeight()
 	topH := totalH * 55 / 100
 	if topH < 6 {
 		topH = 6
 	}
-	lines := topH - 4
+	// Subtract 4 for border, 1 for header row
+	lines := topH - 5
 	if lines < 1 {
 		lines = 1
 	}
@@ -333,6 +373,10 @@ func (m Model) serversVisibleLines() int {
 		lines = 1
 	}
 	return lines
+}
+
+func (m Model) portsVisibleLines() int {
+	return m.serversVisibleLines()
 }
 
 func (m Model) panelHeight() int {
@@ -407,24 +451,35 @@ func (m Model) renderWide() string {
 		Height(topH).
 		Render(rulesContent)
 
-	// Bottom row: servers (full width)
-	serversContent := padContent(m.panelTitle(focusServers), m.renderServersContent(m.width-4, bottomH-4))
+	// Bottom row: servers (50%) | ports (50%), 1 gap
+	bottomLeftW := m.width / 2
+	bottomRightW := m.width - bottomLeftW - 1
+
+	serversContent := padContent(m.panelTitle(focusServers), m.renderServersContent(bottomLeftW-4, bottomH-4))
 	serversPanel := m.panelBorder(focusServers).
-		Width(m.width).
+		Width(bottomLeftW).
 		Height(bottomH).
 		Render(serversContent)
 
+	portsContent := padContent(m.panelTitle(focusPorts), m.renderPortsContent(bottomRightW-4, bottomH-4))
+	portsPanel := m.panelBorder(focusPorts).
+		Width(bottomRightW).
+		Height(bottomH).
+		Render(portsContent)
+
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", rulesPanel)
-	return topRow + "\n" + serversPanel + "\n"
+	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, serversPanel, " ", portsPanel)
+	return topRow + "\n" + bottomRow + "\n"
 }
 
 func (m Model) renderNarrow() string {
 	totalH := m.panelHeight()
 	w := m.width - 2
 
-	infoH := totalH * 30 / 100
-	rulesH := totalH * 40 / 100
-	serversH := totalH - infoH - rulesH
+	infoH := totalH * 25 / 100
+	rulesH := totalH * 35 / 100
+	serversH := totalH * 20 / 100
+	portsH := totalH - infoH - rulesH - serversH
 
 	if infoH < 4 {
 		infoH = 4
@@ -434,6 +489,9 @@ func (m Model) renderNarrow() string {
 	}
 	if serversH < 3 {
 		serversH = 3
+	}
+	if portsH < 3 {
+		portsH = 3
 	}
 
 	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4))
@@ -445,7 +503,10 @@ func (m Model) renderNarrow() string {
 	serversContent := padContent(m.panelTitle(focusServers), m.renderServersContent(w-4, serversH-4))
 	serversPanel := m.panelBorder(focusServers).Width(w).Height(serversH).Render(serversContent)
 
-	return lipgloss.JoinVertical(lipgloss.Left, infoPanel, rulesPanel, serversPanel) + "\n"
+	portsContent := padContent(m.panelTitle(focusPorts), m.renderPortsContent(w-4, portsH-4))
+	portsPanel := m.panelBorder(focusPorts).Width(w).Height(portsH).Render(portsContent)
+
+	return lipgloss.JoinVertical(lipgloss.Left, infoPanel, rulesPanel, serversPanel, portsPanel) + "\n"
 }
 
 // padContent adds the title, a blank line, and 1-char indent to each line of content.
@@ -479,6 +540,12 @@ func (m Model) panelTitle(pane focusPane) string {
 		return t
 	case focusServers:
 		t := titleStyle.Render("Servers")
+		if m.serversLoading {
+			t += " " + m.spinner.View()
+		}
+		return t
+	case focusPorts:
+		t := titleStyle.Render("Ports")
 		if m.serversLoading {
 			t += " " + m.spinner.View()
 		}
@@ -593,17 +660,38 @@ func (m Model) renderRulesContent(maxWidth, maxHeight int) string {
 		return shared.StyleHelp.Render("No rules \u2014 Ctrl+N to add")
 	}
 
-	visibleLines := maxHeight
+	// Column widths: prefix(2) + dir(8) + proto(5) + ports(7) + ether(5) + spacing(4) = 31 fixed
+	// Remote gets the rest
+	const (
+		dirW   = 8
+		protoW = 5
+		portsW = 7
+		etherW = 4
+	)
+	remoteW := maxWidth - 2 - dirW - protoW - portsW - etherW - 4 // 4 for inter-column spaces
+	if remoteW < 6 {
+		remoteW = 6
+	}
+
+	headerStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted).Bold(true)
+	header := fmt.Sprintf("  %-*s %-*s %-*s %-*s %s",
+		dirW, "Dir", protoW, "Proto", portsW, "Ports", remoteW, "Remote", "Eth")
+	headerLine := headerStyle.Render(header)
+
+	// Visible lines for rules (subtract 1 for header)
+	visibleLines := maxHeight - 1
 	if visibleLines < 1 {
 		visibleLines = 1
 	}
 
-	dirStyle := lipgloss.NewStyle().Width(8).Foreground(shared.ColorSecondary)
+	dirStyle := lipgloss.NewStyle().Foreground(shared.ColorSecondary)
 	etherStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
 	mutedLine := lipgloss.NewStyle().Foreground(shared.ColorMuted)
 	selectedBg := lipgloss.NewStyle().Background(lipgloss.Color("#073642")).Bold(true)
 
 	var lines []string
+	lines = append(lines, headerLine)
+
 	for i, r := range rules {
 		if i < m.rulesScroll {
 			continue
@@ -640,16 +728,21 @@ func (m Model) renderRulesContent(maxWidth, maxHeight int) string {
 		if remote == "" {
 			remote = "any"
 		}
+		if len(remote) > remoteW {
+			remote = remote[:remoteW-1] + "\u2026"
+		}
 
 		prefix := "  "
 		if selected {
 			prefix = "\u25b8 "
 		}
 
-		line := fmt.Sprintf("%s%s %-6s %-10s %-20s %s",
+		line := fmt.Sprintf("%s%-*s %-*s %-*s %-*s %s",
 			prefix,
-			dirStyle.Render(r.Direction),
-			proto, ports, remote,
+			dirW, dirStyle.Render(r.Direction),
+			protoW, proto,
+			portsW, ports,
+			remoteW, remote,
 			etherStyle.Render(r.EtherType))
 
 		if selected {
@@ -680,6 +773,12 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 
 	selectedBg := lipgloss.NewStyle().Background(lipgloss.Color("#073642")).Bold(true)
 
+	// Dynamic name width: leave room for prefix(2) + space(1) + status icon+text(~10)
+	nameW := maxWidth - 13
+	if nameW < 10 {
+		nameW = 10
+	}
+
 	var lines []string
 	for i, srv := range m.servers {
 		if i < m.serversScroll {
@@ -695,17 +794,94 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 			prefix = "\u25b8 "
 		}
 
-		status := shared.StatusIcon(srv.Status) + srv.Status
-		line := fmt.Sprintf("%s%-30s %s", prefix, srv.Name, status)
-		if lipgloss.Width(line) > maxWidth {
-			line = line[:maxWidth]
+		name := srv.Name
+		if len(name) > nameW {
+			name = name[:nameW-1] + "\u2026"
 		}
+
+		status := shared.StatusIcon(srv.Status) + srv.Status
+		line := fmt.Sprintf("%s%-*s %s", prefix, nameW, name, status)
 
 		if selected {
 			line = selectedBg.Render(line)
 		}
 
 		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
+	if m.serversErr != "" {
+		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.serversErr)
+	}
+
+	if len(m.ports) == 0 && !m.serversLoading {
+		return shared.StyleHelp.Render("No ports found")
+	}
+
+	visibleLines := maxHeight
+	if visibleLines < 1 {
+		visibleLines = 1
+	}
+
+	selectedBg := lipgloss.NewStyle().Background(lipgloss.Color("#073642")).Bold(true)
+	macStyle := lipgloss.NewStyle().Foreground(shared.ColorFg).Bold(true)
+	ipStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+
+	// Each port takes 2 lines: MAC+status, then IPs
+	var lines []string
+	lineIdx := 0
+	for i, p := range m.ports {
+		if lineIdx+1 < m.portsScroll {
+			lineIdx += 2
+			continue
+		}
+		if lineIdx-m.portsScroll >= visibleLines {
+			break
+		}
+
+		selected := m.focus == focusPorts && i == m.portsCursor
+		prefix := "  "
+		if selected {
+			prefix = "\u25b8 "
+		}
+
+		// Line 1: MAC + status
+		mac := p.MACAddress
+		if len(mac) > maxWidth-14 {
+			mac = mac[:maxWidth-15] + "\u2026"
+		}
+		line1 := fmt.Sprintf("%s%s %s", prefix, macStyle.Render(mac), p.Status)
+
+		// Line 2: IPs (indented)
+		var ips []string
+		for _, ip := range p.FixedIPs {
+			ips = append(ips, ip.IPAddress)
+		}
+		ipStr := strings.Join(ips, ", ")
+		if len(ipStr) > maxWidth-6 {
+			ipStr = ipStr[:maxWidth-7] + "\u2026"
+		}
+		line2 := "    " + ipStyle.Render(ipStr)
+		if len(ips) == 0 {
+			line2 = "    " + ipStyle.Render("no IPs")
+		}
+
+		if selected {
+			line1 = selectedBg.Render(line1)
+		}
+
+		if lineIdx >= m.portsScroll {
+			lines = append(lines, line1)
+		}
+		lineIdx++
+		if lineIdx >= m.portsScroll && lineIdx-m.portsScroll < visibleLines {
+			lines = append(lines, line2)
+		}
+		lineIdx++
+		_ = i
 	}
 
 	return strings.Join(lines, "\n")
@@ -812,21 +988,21 @@ func (m Model) fetchServers() tea.Cmd {
 	sgID := m.sgID
 	return func() tea.Msg {
 		// Get all ports using this security group
-		ports, err := network.ListPortsBySecurityGroup(context.Background(), networkClient, sgID)
+		fetchedPorts, err := network.ListPortsBySecurityGroup(context.Background(), networkClient, sgID)
 		if err != nil {
 			return serversErrMsg{err: err}
 		}
 
 		// Collect unique server device IDs
 		deviceIDs := make(map[string]bool)
-		for _, p := range ports {
+		for _, p := range fetchedPorts {
 			if strings.HasPrefix(p.DeviceOwner, "compute:") && p.DeviceID != "" {
 				deviceIDs[p.DeviceID] = true
 			}
 		}
 
 		if len(deviceIDs) == 0 {
-			return serversLoadedMsg{servers: nil}
+			return serversLoadedMsg{servers: nil, ports: fetchedPorts}
 		}
 
 		// Fetch all servers and filter to matching ones
@@ -856,7 +1032,7 @@ func (m Model) fetchServers() tea.Cmd {
 			return refs[i].Name < refs[j].Name
 		})
 
-		return serversLoadedMsg{servers: refs}
+		return serversLoadedMsg{servers: refs, ports: fetchedPorts}
 	}
 }
 
