@@ -223,12 +223,16 @@ func (m Model) View() string {
 		if netName == "" {
 			netName = r.ExternalGatewayNetworkID
 		}
-		gwValue := netName
-		if r.ExternalGatewayIP != "" {
-			gwValue += "  " + r.ExternalGatewayIP
-		}
 		lines = append(lines, fmt.Sprintf("  %s %s", gwLabel,
-			lipgloss.NewStyle().Foreground(shared.ColorFg).Render(gwValue)))
+			lipgloss.NewStyle().Foreground(shared.ColorFg).Render(netName)))
+		if r.ExternalGatewayIPv4 != "" {
+			lines = append(lines, fmt.Sprintf("  %s %s", labelStyle.Render("  IPv4"),
+				lipgloss.NewStyle().Foreground(shared.ColorFg).Render(r.ExternalGatewayIPv4)))
+		}
+		if r.ExternalGatewayIPv6 != "" {
+			lines = append(lines, fmt.Sprintf("  %s %s", labelStyle.Render("  IPv6"),
+				lipgloss.NewStyle().Foreground(shared.ColorFg).Render(r.ExternalGatewayIPv6)))
+		}
 	} else {
 		lines = append(lines, fmt.Sprintf("  %s %s", gwLabel,
 			lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("none")))
