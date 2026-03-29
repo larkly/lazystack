@@ -93,11 +93,6 @@ type UpdateAvailableMsg struct {
 	ChecksumsURL string
 }
 
-// UpdateResultMsg is sent after selfupdate.Apply completes.
-type UpdateResultMsg struct {
-	Err error
-}
-
 type delayedDetailRefreshMsg struct {
 	id string
 }
@@ -178,14 +173,12 @@ type Model struct {
 	restart        bool
 	version        string
 	checkUpdate    bool
-	updating       bool
 	idleTimeout    time.Duration
 	lastActivity   time.Time
 	idlePaused     bool
 	latestVersion       string
 	downloadURL         string
 	checksumsURL        string
-	noUpdateBuild       bool
 	updateCheckInterval time.Duration
 }
 
@@ -201,10 +194,9 @@ type Options struct {
 	RefreshInterval time.Duration
 	IdleTimeout     time.Duration
 	Version         string
-	CheckUpdate     bool
-	NoUpdateBuild   bool
-	Plain           bool
-	Config          *config.Config
+	CheckUpdate bool
+	Plain       bool
+	Config      *config.Config
 }
 
 // New creates the root model.
@@ -239,7 +231,6 @@ func New(opts Options) Model {
 			idleTimeout:         opts.IdleTimeout,
 			version:             opts.Version,
 			checkUpdate:         opts.CheckUpdate,
-			noUpdateBuild:       opts.NoUpdateBuild,
 			updateCheckInterval: time.Duration(opts.Config.General.UpdateCheckInterval) * time.Hour,
 			tabs:                tabs,
 			tabInited:           make([]bool, len(tabs)),
@@ -260,7 +251,6 @@ func New(opts Options) Model {
 		idleTimeout:         opts.IdleTimeout,
 		version:             opts.Version,
 		checkUpdate:         opts.CheckUpdate,
-		noUpdateBuild:       opts.NoUpdateBuild,
 		updateCheckInterval: time.Duration(opts.Config.General.UpdateCheckInterval) * time.Hour,
 		tabs:                tabs,
 		tabInited:           make([]bool, len(tabs)),
@@ -359,9 +349,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.activeModal != modalNone {
-			if m.updating {
-				return m, nil // swallow keys while update is downloading
-			}
 			return m.updateModal(msg)
 		}
 
@@ -935,28 +922,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latestVersion = msg.Latest
 		m.downloadURL = msg.DownloadURL
 		m.checksumsURL = msg.ChecksumsURL
-		if m.noUpdateBuild {
-			return m, nil
-		}
-		m.confirm = modal.ConfirmModel{
-			Action: "update",
-			Title:  "Update Available",
-			Body:   fmt.Sprintf("New version available: %s (current: %s). Upgrade now?", msg.Latest, m.version),
-		}
-		m.confirm.SetSize(m.width, m.height)
-		m.activeModal = modalConfirm
+		m.statusBar.Hint = fmt.Sprintf("Upgrade available: %s", msg.Latest)
 		return m, nil
-
-	case UpdateResultMsg:
-		m.updating = false
-		if msg.Err != nil {
-			m.errModal = modal.NewError("Update failed", msg.Err)
-			m.errModal.SetSize(m.width, m.height)
-			m.activeModal = modalError
-			return m, nil
-		}
-		m.restart = true
-		return m, tea.Quit
 
 	case shared.ConfigChangedMsg:
 		m.refreshInterval = time.Duration(m.configView.Cfg().General.RefreshInterval) * time.Second
@@ -973,26 +940,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDetailNavigation(msg)
 
 	case modal.ConfirmAction:
-		if msg.Action == "update" && m.noUpdateBuild {
-			m.activeModal = modalNone
-			return m, nil
-		}
-		if msg.Confirm && msg.Action == "update" {
-			m.updating = true
-			m.confirm.Title = "Updating"
-			m.confirm.Body = fmt.Sprintf("Downloading %s, please wait...", m.latestVersion)
-			dlURL := m.downloadURL
-			csURL := m.checksumsURL
-			return m, func() tea.Msg {
-				return UpdateResultMsg{Err: selfupdate.Apply(dlURL, csURL)}
-			}
-		}
 		m.activeModal = modalNone
 		if msg.Confirm {
 			return m.executeAction(msg)
-		}
-		if msg.Action == "update" {
-			m.statusBar.Hint = fmt.Sprintf("Upgrade available: %s — use --update", m.latestVersion)
 		}
 		return m, nil
 
