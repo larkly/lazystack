@@ -463,7 +463,7 @@ func (m *Model) ensurePortCursorVisible() {
 // --- Height calculations ---
 
 func (m Model) totalPanelHeight() int {
-	h := m.height - 4 // title + action bar + padding
+	h := m.height - 8 // title + blank + action bar + spacer + tab bar + status bar + newline separators
 	if h < 10 {
 		h = 10
 	}
@@ -555,7 +555,7 @@ func (m Model) View() string {
 		b.WriteString(m.renderWide())
 	}
 
-	b.WriteString(m.renderActionBar() + "\n")
+	b.WriteString("\n" + m.renderActionBar() + "\n")
 
 	return b.String()
 }
@@ -600,7 +600,7 @@ func (m Model) renderWide() string {
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", rulesPanel)
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, serversPanel, " ", portsPanel)
 
-	return selPanel + "\n" + topRow + "\n" + bottomRow + "\n"
+	return selPanel + "\n" + topRow + "\n" + bottomRow
 }
 
 func (m Model) renderNarrow() string {
@@ -633,7 +633,7 @@ func (m Model) renderNarrow() string {
 	serversPanel := m.panelBorder(focusServers).Width(w).Height(serversH).Render(padContent(m.panelTitle(focusServers), m.renderServersContent(w-4, serversH-4)))
 	portsPanel := m.panelBorder(focusPorts).Width(w).Height(portsH).Render(padContent(m.panelTitle(focusPorts), m.renderPortsContent(w-4, portsH-4)))
 
-	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, rulesPanel, serversPanel, portsPanel) + "\n"
+	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, rulesPanel, serversPanel, portsPanel)
 }
 
 // --- Panel helpers ---
@@ -1235,11 +1235,15 @@ func (m *Model) applyHighlightNames() {
 func (m Model) Hints() string {
 	switch m.focus {
 	case FocusRules:
-		return "tab focus \u2022 \u2191\u2193 navigate \u2022 ^n add rule \u2022 ^d delete \u2022 enter edit \u2022 ? help"
+		return "↑↓ navigate • ^n add rule • ^d delete • enter edit • tab focus • R refresh • ? help"
 	case focusServers:
-		return "tab focus \u2022 \u2191\u2193 navigate \u2022 enter open server \u2022 ? help"
+		return "↑↓ navigate • enter open server • tab focus • R refresh • ? help"
+	case focusPorts:
+		return "↑↓ navigate • tab focus • R refresh • ? help"
+	case focusInfo:
+		return "tab focus • ^n new • r rename • c clone • R refresh • ? help"
 	default:
-		return "tab focus \u2022 \u2191\u2193 navigate \u2022 ^n new \u2022 ^d delete \u2022 r rename \u2022 c clone \u2022 ? help"
+		return "↑↓ navigate • ^n new • ^d delete • r rename • c clone • tab focus • R refresh • ? help"
 	}
 }
 
