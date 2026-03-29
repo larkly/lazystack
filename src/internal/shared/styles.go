@@ -13,7 +13,7 @@ var (
 	ColorSuccess   = lipgloss.Color("#2AA198")
 	ColorWarning   = lipgloss.Color("#B58900")
 	ColorError     = lipgloss.Color("#DC322F")
-	ColorMuted     = lipgloss.Color("#586E75")
+	ColorMuted     = lipgloss.Color("#657B83")
 	ColorBg        = lipgloss.Color("#002B36")
 	ColorFg        = lipgloss.Color("#839496")
 	ColorHighlight = lipgloss.Color("#FDF6E3")
@@ -23,7 +23,7 @@ var (
 	StatusColors = map[string]color.Color{
 		"ACTIVE":            ColorSuccess,
 		"BUILD":             ColorWarning,
-		"SHUTOFF":           lipgloss.Color("#586E75"),
+		"SHUTOFF":           ColorMuted,
 		"ERROR":             ColorError,
 		"REBOOT":            ColorCyan,
 		"HARD_REBOOT":       ColorCyan,
@@ -41,7 +41,7 @@ var (
 	PowerColors = map[string]color.Color{
 		"RUNNING":  ColorSuccess,
 		"PAUSED":   ColorMuted,
-		"SHUTDOWN": lipgloss.Color("#586E75"),
+		"SHUTDOWN": ColorMuted,
 		"CRASHED":  ColorError,
 		"SUSPENDED": ColorMuted,
 		"NOSTATE":  ColorWarning,
