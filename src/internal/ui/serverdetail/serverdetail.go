@@ -713,6 +713,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 		{"FloatIP", strings.Join(s.FloatingIP, ", ")},
 		{"Age", formatAge(s.Created)},
 		{"Locked", locked},
+		{"SSHUser", s.Metadata["lazystack_ssh_user"]},
 		{"ID", s.ID},
 	}
 
