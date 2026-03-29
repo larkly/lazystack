@@ -159,7 +159,11 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) updateConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, shared.Keys.Confirm):
-		return m.doRebuild(m.filtered[m.cursor])
+		if m.cursor >= 0 && m.cursor < len(m.filtered) {
+			return m.doRebuild(m.filtered[m.cursor])
+		}
+		m.confirming = false
+		return m, nil
 	case key.Matches(msg, shared.Keys.Deny), key.Matches(msg, shared.Keys.Back):
 		m.confirming = false
 		m.confirmImage = ""

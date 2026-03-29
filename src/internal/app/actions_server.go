@@ -545,9 +545,12 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		volIDs := action.VolumeIDs
 		return m, func() tea.Msg {
 			// Detach volumes before deleting the server
+			var volErrs []string
 			if deleteVols && bsClient != nil {
 				for _, vid := range volIDs {
-					_ = volume.DetachVolume(context.Background(), computeC, action.ServerID, vid)
+					if err := volume.DetachVolume(context.Background(), computeC, action.ServerID, vid); err != nil {
+						volErrs = append(volErrs, fmt.Sprintf("detach %s: %v", vid, err))
+					}
 				}
 				// Wait for volumes to detach (up to 30s)
 				for range 10 {
@@ -573,10 +576,16 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 
 			if deleteVols && bsClient != nil {
 				for _, vid := range volIDs {
-					volume.DeleteVolume(context.Background(), bsClient, vid)
+					if err := volume.DeleteVolume(context.Background(), bsClient, vid); err != nil {
+						volErrs = append(volErrs, fmt.Sprintf("delete %s: %v", vid, err))
+					}
 				}
 			}
-			return shared.ServerActionMsg{Action: "Delete", Name: action.Name}
+			msg := shared.ServerActionMsg{Action: "Delete", Name: action.Name}
+			if len(volErrs) > 0 {
+				msg.Action = fmt.Sprintf("Delete (warning: %d volume error(s))", len(volErrs))
+			}
+			return msg
 		}
 	case "soft reboot":
 		return m, func() tea.Msg {
@@ -859,6 +868,7 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 	act := action.Action
 	return func() tea.Msg {
 		var errs []string
+		var passwords []string
 		for _, s := range targets {
 			var err error
 			switch act {
@@ -887,7 +897,11 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 			case "unlock":
 				err = compute.UnlockServer(context.Background(), client, s.ID)
 			case "rescue":
-				_, err = compute.RescueServer(context.Background(), client, s.ID)
+				var adminPass string
+				adminPass, err = compute.RescueServer(context.Background(), client, s.ID)
+				if err == nil && adminPass != "" {
+					passwords = append(passwords, fmt.Sprintf("%s: %s", s.Name, adminPass))
+				}
 			case "unrescue":
 				err = compute.UnrescueServer(context.Background(), client, s.ID)
 			}
@@ -902,10 +916,14 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
 			}
 		}
-		return shared.ServerActionMsg{
+		msg := shared.ServerActionMsg{
 			Action: act,
 			Name:   fmt.Sprintf("%d servers", len(targets)),
 		}
+		if len(passwords) > 0 {
+			msg.Action = fmt.Sprintf("Rescue (passwords: %s)", strings.Join(passwords, ", "))
+		}
+		return msg
 	}
 }
 

@@ -167,7 +167,7 @@ func (m Model) View() string {
 		{"ID", img.ID},
 		{"Status", img.Status},
 		{"Visibility", img.Visibility},
-		{"Size", formatSize(img.Size)},
+		{"Size", shared.FormatSize(img.Size)},
 		{"Disk Format", img.DiskFormat},
 		{"Container Format", img.ContainerFormat},
 		{"Min Disk", fmt.Sprintf("%d GB", img.MinDisk)},
@@ -231,29 +231,13 @@ func statusStyle(status string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(fg)
 }
 
-func formatSize(bytes int64) string {
-	if bytes == 0 {
-		return "-"
-	}
-	const (
-		kb = 1024
-		mb = 1024 * kb
-		gb = 1024 * mb
-	)
-	switch {
-	case bytes >= gb:
-		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(gb))
-	case bytes >= mb:
-		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
-	case bytes >= kb:
-		return fmt.Sprintf("%.0f KB", float64(bytes)/float64(kb))
-	default:
-		return fmt.Sprintf("%d B", bytes)
-	}
-}
-
 func (m Model) fetchImage() tea.Cmd {
 	client := m.client
+	if client == nil {
+		return func() tea.Msg {
+			return imageDetailErrMsg{err: fmt.Errorf("image service not available")}
+		}
+	}
 	id := m.imageID
 	return func() tea.Msg {
 		img, err := image.GetImage(context.Background(), client, id)

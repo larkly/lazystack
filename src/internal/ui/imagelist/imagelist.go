@@ -439,7 +439,7 @@ func (m Model) View() string {
 		values := map[string]string{
 			"name":       name,
 			"status":     shared.StatusIcon(img.Status) + img.Status,
-			"size":       formatSize(img.Size),
+			"size":       shared.FormatSize(img.Size),
 			"min_disk":   fmt.Sprintf("%dGB", img.MinDisk),
 			"min_ram":    fmt.Sprintf("%dMB", img.MinRAM),
 			"visibility": img.Visibility,
@@ -533,27 +533,6 @@ func imageStatusStyle(status string) lipgloss.Style {
 		fg = shared.ColorMuted
 	}
 	return lipgloss.NewStyle().Foreground(fg)
-}
-
-func formatSize(bytes int64) string {
-	if bytes == 0 {
-		return "-"
-	}
-	const (
-		kb = 1024
-		mb = 1024 * kb
-		gb = 1024 * mb
-	)
-	switch {
-	case bytes >= gb:
-		return fmt.Sprintf("%.1fGB", float64(bytes)/float64(gb))
-	case bytes >= mb:
-		return fmt.Sprintf("%.1fMB", float64(bytes)/float64(mb))
-	case bytes >= kb:
-		return fmt.Sprintf("%.0fKB", float64(bytes)/float64(kb))
-	default:
-		return fmt.Sprintf("%dB", bytes)
-	}
 }
 
 func (m Model) fetchImages() tea.Cmd {

@@ -161,6 +161,76 @@ func TestEnter_FocusedCancel(t *testing.T) {
 	}
 }
 
+func TestDeleteVolumes_SpaceToggle(t *testing.T) {
+	m := NewConfirm("delete", "srv-1", "web-1")
+	m.VolumeIDs = []string{"vol-1", "vol-2"}
+
+	if m.deleteVolumes {
+		t.Error("deleteVolumes should start false")
+	}
+
+	// Space toggles on
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	if !m.deleteVolumes {
+		t.Error("deleteVolumes should be true after space")
+	}
+
+	// Space toggles off
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	if m.deleteVolumes {
+		t.Error("deleteVolumes should be false after second space")
+	}
+}
+
+func TestDeleteVolumes_NoVolumes_SpaceIgnored(t *testing.T) {
+	m := NewConfirm("delete", "srv-1", "web-1")
+	// No VolumeIDs set
+
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	if m.deleteVolumes {
+		t.Error("deleteVolumes should remain false when no VolumeIDs")
+	}
+}
+
+func TestDeleteVolumes_ConfirmIncludesVolumeIDs(t *testing.T) {
+	m := NewConfirm("delete", "srv-1", "web-1")
+	m.VolumeIDs = []string{"vol-1", "vol-2"}
+
+	// Toggle on
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+
+	// Confirm
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Text: "y"}))
+	if cmd == nil {
+		t.Fatal("expected cmd from confirm")
+	}
+	action, ok := cmd().(ConfirmAction)
+	if !ok {
+		t.Fatalf("expected ConfirmAction, got %T", cmd())
+	}
+	if !action.DeleteVolumes {
+		t.Error("expected DeleteVolumes = true")
+	}
+	if len(action.VolumeIDs) != 2 {
+		t.Errorf("VolumeIDs len = %d, want 2", len(action.VolumeIDs))
+	}
+}
+
+func TestDeleteVolumes_ConfirmWithoutToggle(t *testing.T) {
+	m := NewConfirm("delete", "srv-1", "web-1")
+	m.VolumeIDs = []string{"vol-1"}
+
+	// Confirm without toggling space
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Text: "y"}))
+	if cmd == nil {
+		t.Fatal("expected cmd from confirm")
+	}
+	action := cmd().(ConfirmAction)
+	if action.DeleteVolumes {
+		t.Error("expected DeleteVolumes = false when not toggled")
+	}
+}
+
 func TestConfirm_WindowSize(t *testing.T) {
 	m := NewConfirm("delete", "srv-1", "web-1")
 

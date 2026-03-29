@@ -17,6 +17,8 @@ import (
 	bsvolumes "github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
 )
 
+const pollInterval = 3 * time.Second
+
 // VolumeOp tracks the state of a single volume clone+attach operation.
 type VolumeOp struct {
 	SourceVolID string
@@ -255,7 +257,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 		// Not ready yet — poll again
-		return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg {
 			return pollTickMsg{}
 		})
 
@@ -370,7 +372,7 @@ func (m Model) createVolume(idx int, op VolumeOp) tea.Cmd {
 }
 
 func (m Model) schedulePoll() tea.Cmd {
-	return tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+	return tea.Tick(pollInterval, func(time.Time) tea.Msg {
 		return pollTickMsg{}
 	})
 }
