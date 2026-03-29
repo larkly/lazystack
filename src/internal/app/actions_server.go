@@ -29,6 +29,26 @@ import (
 	"charm.land/bubbletea/v2"
 )
 
+func (m Model) isSelectedServerLocked() bool {
+	if m.view == viewServerList && m.serverList.SelectionCount() > 0 {
+		for _, s := range m.serverList.SelectedServers() {
+			if s.Locked {
+				return true
+			}
+		}
+		return false
+	}
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			return s.Locked
+		}
+	case viewServerDetail:
+		return m.serverDetail.ServerLocked()
+	}
+	return false
+}
+
 func (m Model) openClone() (Model, tea.Cmd) {
 	var srv *compute.Server
 	switch m.view {
