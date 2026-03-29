@@ -55,7 +55,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchKeypairs(), m.tickCmd())
+	return tea.Batch(m.spinner.Tick, m.fetchKeypairs())
 }
 
 // Update handles messages.
@@ -81,15 +81,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.pairs) {
 			m.cursor = max(0, len(m.pairs)-1)
 		}
-		return m, nil
+		return m, m.tickCmd()
 
 	case keypairsErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case tickMsg:
-		return m, tea.Batch(m.fetchKeypairs(), m.tickCmd())
+		return m, m.fetchKeypairs()
 
 	case spinner.TickMsg:
 		if m.loading {

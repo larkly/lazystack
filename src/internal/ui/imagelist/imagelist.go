@@ -154,7 +154,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchImages(), m.tickCmd())
+	return tea.Batch(m.spinner.Tick, m.fetchImages())
 }
 
 // SelectedImage returns the image under the cursor.
@@ -189,15 +189,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.images) {
 			m.cursor = max(0, len(m.images)-1)
 		}
-		return m, nil
+		return m, m.tickCmd()
 
 	case imagesErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case tickMsg:
-		return m, tea.Batch(m.fetchImages(), m.tickCmd())
+		return m, m.fetchImages()
 
 	case spinner.TickMsg:
 		if m.loading {

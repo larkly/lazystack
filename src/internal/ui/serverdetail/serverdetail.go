@@ -138,7 +138,6 @@ func (m Model) Init() tea.Cmd {
 		m.fetchServer(),
 		m.fetchConsole(),
 		m.fetchActions(),
-		m.tickCmd(),
 	}
 	if m.networkClient != nil {
 		cmds = append(cmds, m.fetchInterfaces())
@@ -217,15 +216,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 			if needFetch {
-				return m, m.fetchVolumeInfo(msg.server.VolAttach)
+				return m, tea.Batch(m.fetchVolumeInfo(msg.server.VolAttach), m.tickCmd())
 			}
 		}
-		return m, nil
+		return m, m.tickCmd()
 
 	case serverDetailErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case consoleLoadedMsg:
 		m.consoleLoading = false
@@ -271,7 +270,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case detailTickMsg:
-		cmds := []tea.Cmd{m.fetchServer(), m.fetchConsole(), m.fetchActions(), m.tickCmd()}
+		cmds := []tea.Cmd{m.fetchServer(), m.fetchConsole(), m.fetchActions()}
 		if m.networkClient != nil {
 			cmds = append(cmds, m.fetchInterfaces())
 		}

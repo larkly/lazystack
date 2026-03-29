@@ -55,7 +55,7 @@ func New(client *gophercloud.ServiceClient, imageID string, refreshInterval time
 
 // Init fetches the image details.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchImage(), m.tickCmd())
+	return tea.Batch(m.spinner.Tick, m.fetchImage())
 }
 
 // ImageID returns the current image ID.
@@ -86,15 +86,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.image = msg.image
 		m.err = ""
-		return m, nil
+		return m, m.tickCmd()
 
 	case imageDetailErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case detailTickMsg:
-		return m, tea.Batch(m.fetchImage(), m.tickCmd())
+		return m, m.fetchImage()
 
 	case spinner.TickMsg:
 		if m.loading {

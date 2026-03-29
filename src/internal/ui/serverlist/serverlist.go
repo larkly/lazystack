@@ -86,7 +86,6 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		m.fetchServers(),
-		m.tickCmd(),
 	)
 }
 
@@ -119,7 +118,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.err = ""
 		m.applyFilter()
 		// Fetch any unknown image names
-		return m, m.fetchMissingImageNames()
+		cmd := m.fetchMissingImageNames()
+		if cmd != nil {
+			return m, tea.Batch(cmd, m.tickCmd())
+		}
+		return m, m.tickCmd()
 
 	case imageNamesMsg:
 		for id, name := range msg {
@@ -138,10 +141,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case serversErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case shared.TickMsg:
-		return m, tea.Batch(m.fetchServers(), m.tickCmd())
+		return m, m.fetchServers()
 
 	case shared.RefreshServersMsg:
 		m.loading = true

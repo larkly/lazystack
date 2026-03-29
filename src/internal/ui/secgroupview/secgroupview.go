@@ -107,7 +107,7 @@ func (m *Model) SetComputeClient(client *gophercloud.ServiceClient) {
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchGroups(), m.tickCmd())
+	return tea.Batch(m.spinner.Tick, m.fetchGroups())
 }
 
 func (m Model) selectedSG() *network.SecurityGroup {
@@ -219,14 +219,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if sg := m.selectedSG(); sg != nil && sg.ID != m.lastDetailSGID {
 			m.lastDetailSGID = sg.ID
 			m.resetDetailState()
-			return m, m.fetchDetail(sg.ID)
+			return m, tea.Batch(m.fetchDetail(sg.ID), m.tickCmd())
 		}
-		return m, nil
+		return m, m.tickCmd()
 
 	case sgErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case detailLoadedMsg:
 		// Only apply if this is still the selected SG
@@ -248,7 +248,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		cmds := []tea.Cmd{m.fetchGroups(), m.tickCmd()}
+		cmds := []tea.Cmd{m.fetchGroups()}
 		if sg := m.selectedSG(); sg != nil {
 			cmds = append(cmds, m.fetchDetail(sg.ID))
 		}

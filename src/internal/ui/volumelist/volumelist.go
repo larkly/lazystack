@@ -162,7 +162,7 @@ func New(client, computeClient *gophercloud.ServiceClient, refreshInterval time.
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchVolumes(), m.tickCmd())
+	return tea.Batch(m.spinner.Tick, m.fetchVolumes())
 }
 
 // SelectedVolume returns the volume under the cursor.
@@ -198,12 +198,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.cursor = max(0, len(m.volumes)-1)
 		}
 		m.applyHighlight()
-		return m, m.fetchMissingServerNames()
+		return m, tea.Batch(m.fetchMissingServerNames(), m.tickCmd())
 
 	case volumesErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, nil
+		return m, m.tickCmd()
 
 	case serverNamesMsg:
 		for id, name := range msg {
@@ -212,7 +212,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		return m, tea.Batch(m.fetchVolumes(), m.tickCmd())
+		return m, m.fetchVolumes()
 
 	case spinner.TickMsg:
 		if m.loading {
