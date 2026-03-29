@@ -984,6 +984,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.serverResize.Active = false
 		// Navigate back to server list if on a sub-view, or after delete
 		if m.view == viewConsoleLog || (m.view == viewServerDetail && msg.Action == "Delete") {
+			m.returnToView = 0
 			m.view = viewServerList
 			m.statusBar.CurrentView = "serverlist"
 			return m, func() tea.Msg { return shared.RefreshServersMsg{} }
@@ -1012,6 +1013,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
 		m.statusBar.Error = ""
 		// Navigate back to list view if we were on a detail view
+		m.returnToView = 0
 		if m.view == viewVolumeDetail {
 			m.view = viewVolumeList
 			m.statusBar.CurrentView = "volumelist"
