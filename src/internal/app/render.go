@@ -231,6 +231,6 @@ func (m Model) viewContent() string {
 		contentHeight = 0
 	}
 
-	padded := lipgloss.NewStyle().Height(contentHeight).Render(content)
+	padded := lipgloss.NewStyle().Height(contentHeight).MaxHeight(contentHeight).Render(content)
 	return padded + "\n" + m.statusBar.Render()
 }
