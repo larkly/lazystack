@@ -115,6 +115,9 @@ func (m Model) viewContent() string {
 	if m.sgRuleCreate.Active {
 		return m.sgRuleCreate.View()
 	}
+	if m.lbCreate.Active {
+		return m.lbCreate.View()
+	}
 	if m.lbListenerCreate.Active {
 		return m.lbListenerCreate.View()
 	}
