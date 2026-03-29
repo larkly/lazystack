@@ -115,6 +115,15 @@ func (m Model) viewContent() string {
 	if m.sgRuleCreate.Active {
 		return m.sgRuleCreate.View()
 	}
+	if m.lbListenerCreate.Active {
+		return m.lbListenerCreate.View()
+	}
+	if m.lbPoolCreate.Active {
+		return m.lbPoolCreate.View()
+	}
+	if m.lbMemberCreate.Active {
+		return m.lbMemberCreate.View()
+	}
 	if m.projectPicker.Active {
 		return m.projectPicker.View()
 	}

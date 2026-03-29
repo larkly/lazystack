@@ -854,6 +854,40 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			return shared.ResourceActionMsg{Action: "Deleted LB", Name: name}
 		}
+	case "delete_lb_listener":
+		lbClient := m.client.LoadBalancer
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := loadbalancer.DeleteListener(context.Background(), lbClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete listener", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted listener", Name: name}
+		}
+	case "delete_lb_pool":
+		lbClient := m.client.LoadBalancer
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := loadbalancer.DeletePool(context.Background(), lbClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete pool", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted pool", Name: name}
+		}
+	case "delete_lb_member":
+		lbClient := m.client.LoadBalancer
+		memberID := action.ServerID
+		name := action.Name
+		poolID := m.lbDetail.SelectedPoolForMember()
+		return m, func() tea.Msg {
+			err := loadbalancer.DeleteMember(context.Background(), lbClient, poolID, memberID)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete member", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Deleted member", Name: name}
+		}
 	case "delete_keypair":
 		computeC := m.client.Compute
 		name := action.ServerID // keypair name is stored in ServerID

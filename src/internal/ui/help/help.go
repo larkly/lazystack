@@ -216,7 +216,8 @@ var allSections = []section{
 		binds: []string{
 			"↑/k ↓/j      navigate in pane",
 			"tab/shift+tab cycle panes",
-			"ctrl+d        delete load balancer",
+			"ctrl+n        add listener/pool/member",
+			"ctrl+d        delete (context-sensitive)",
 			"esc           back to list",
 		},
 	},

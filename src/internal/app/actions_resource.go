@@ -11,6 +11,9 @@ import (
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
+	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
+	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
+	"github.com/larkly/lazystack/internal/ui/lbpoolcreate"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/routercreate"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
@@ -401,6 +404,80 @@ func (m Model) openLBDeleteConfirm() (Model, tea.Cmd) {
 	m.confirm.Title = "Delete Load Balancer"
 	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete load balancer %q?\nThis will cascade-delete all listeners, pools and members.", name)
 	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Load Balancer Listener actions ---
+
+func (m Model) openLBListenerCreate() (Model, tea.Cmd) {
+	m.lbListenerCreate = lblistenercreate.New(m.client.LoadBalancer, m.lbDetail.LBID(), m.lbDetail.LBName())
+	m.lbListenerCreate.SetSize(m.width, m.height)
+	return m, m.lbListenerCreate.Init()
+}
+
+func (m Model) openLBListenerDeleteConfirm() (Model, tea.Cmd) {
+	id := m.lbDetail.SelectedListenerID()
+	name := m.lbDetail.SelectedListenerName()
+	if id == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_lb_listener", id, name)
+	m.confirm.Title = "Delete Listener"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete listener %q?", name)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Load Balancer Pool actions ---
+
+func (m Model) openLBPoolCreate() (Model, tea.Cmd) {
+	m.lbPoolCreate = lbpoolcreate.New(m.client.LoadBalancer, m.lbDetail.LBID(), m.lbDetail.LBName())
+	m.lbPoolCreate.SetSize(m.width, m.height)
+	return m, m.lbPoolCreate.Init()
+}
+
+func (m Model) openLBPoolDeleteConfirm() (Model, tea.Cmd) {
+	id := m.lbDetail.SelectedPoolID()
+	name := m.lbDetail.SelectedPoolName()
+	if id == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_lb_pool", id, name)
+	m.confirm.Title = "Delete Pool"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete pool %q?\nAll members and health monitors will also be removed.", name)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Load Balancer Member actions ---
+
+func (m Model) openLBMemberCreate() (Model, tea.Cmd) {
+	poolID := m.lbDetail.SelectedPoolID()
+	poolName := m.lbDetail.SelectedPoolName()
+	if poolID == "" {
+		return m, nil
+	}
+	m.lbMemberCreate = lbmembercreate.New(m.client.LoadBalancer, poolID, poolName)
+	m.lbMemberCreate.SetSize(m.width, m.height)
+	return m, m.lbMemberCreate.Init()
+}
+
+func (m Model) openLBMemberDeleteConfirm() (Model, tea.Cmd) {
+	memberID := m.lbDetail.SelectedMemberID()
+	memberName := m.lbDetail.SelectedMemberName()
+	poolID := m.lbDetail.SelectedPoolForMember()
+	if memberID == "" || poolID == "" {
+		return m, nil
+	}
+	// Store poolID in the confirm action's ServerID field (reused for resource ID)
+	c := modal.NewConfirm("delete_lb_member", memberID, memberName)
+	c.Title = "Delete Member"
+	c.Body = fmt.Sprintf("Are you sure you want to remove member %q from the pool?", memberName)
+	c.SetSize(m.width, m.height)
+	m.confirm = c
 	m.activeModal = modalConfirm
 	return m, nil
 }

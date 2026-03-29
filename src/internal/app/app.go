@@ -24,7 +24,10 @@ import (
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
+	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
 	"github.com/larkly/lazystack/internal/ui/lblist"
+	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
+	"github.com/larkly/lazystack/internal/ui/lbpoolcreate"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/networkcreate"
 	"github.com/larkly/lazystack/internal/ui/routercreate"
@@ -145,9 +148,12 @@ type Model struct {
 	keypairDetail  keypairdetail.Model
 	imageList      imagelist.Model
 	imageDetail    imagedetail.Model
-	networkView   networkview.Model
-	lbList         lblist.Model
-	lbDetail       lbdetail.Model
+	networkView        networkview.Model
+	lbList             lblist.Model
+	lbDetail           lbdetail.Model
+	lbListenerCreate   lblistenercreate.Model
+	lbPoolCreate       lbpoolcreate.Model
+	lbMemberCreate     lbmembercreate.Model
 	cloneProgress  cloneprogress.Model
 	statusBar      statusbar.Model
 	tabs      []TabDef
@@ -464,6 +470,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// LB listener create modal intercepts all keys when active
+		if m.lbListenerCreate.Active {
+			var cmd tea.Cmd
+			m.lbListenerCreate, cmd = m.lbListenerCreate.Update(msg)
+			return m, cmd
+		}
+
+		// LB pool create modal intercepts all keys when active
+		if m.lbPoolCreate.Active {
+			var cmd tea.Cmd
+			m.lbPoolCreate, cmd = m.lbPoolCreate.Update(msg)
+			return m, cmd
+		}
+
+		// LB member create modal intercepts all keys when active
+		if m.lbMemberCreate.Active {
+			var cmd tea.Cmd
+			m.lbMemberCreate, cmd = m.lbMemberCreate.Update(msg)
+			return m, cmd
+		}
+
 		// Project picker modal intercepts all keys when active
 		if m.projectPicker.Active {
 			var cmd tea.Cmd
@@ -754,10 +781,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Load balancer detail: ctrl+d delete
+		// Load balancer detail: context-sensitive CRUD based on focused pane
 		if m.view == viewLBDetail {
-			if key.Matches(msg, shared.Keys.Delete) {
-				return m.openLBDeleteConfirm()
+			pane := m.lbDetail.FocusedPane()
+			switch {
+			case key.Matches(msg, shared.Keys.Delete):
+				switch pane {
+				case lbdetail.FocusListeners:
+					if m.lbDetail.SelectedListenerID() != "" {
+						return m.openLBListenerDeleteConfirm()
+					}
+					return m.openLBDeleteConfirm()
+				case lbdetail.FocusPools:
+					if m.lbDetail.SelectedPoolID() != "" {
+						return m.openLBPoolDeleteConfirm()
+					}
+					return m.openLBDeleteConfirm()
+				case lbdetail.FocusMembers:
+					if m.lbDetail.SelectedMemberID() != "" {
+						return m.openLBMemberDeleteConfirm()
+					}
+				default:
+					return m.openLBDeleteConfirm()
+				}
+			case key.Matches(msg, shared.Keys.Create):
+				switch pane {
+				case lbdetail.FocusListeners:
+					return m.openLBListenerCreate()
+				case lbdetail.FocusPools:
+					return m.openLBPoolCreate()
+				case lbdetail.FocusMembers:
+					if m.lbDetail.SelectedPoolID() != "" {
+						return m.openLBMemberCreate()
+					}
+				}
 			}
 		}
 
@@ -1217,6 +1274,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sgRuleCreate.Active {
 			var cmd tea.Cmd
 			m.sgRuleCreate, cmd = m.sgRuleCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.lbListenerCreate.Active {
+			var cmd tea.Cmd
+			m.lbListenerCreate, cmd = m.lbListenerCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.lbPoolCreate.Active {
+			var cmd tea.Cmd
+			m.lbPoolCreate, cmd = m.lbPoolCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.lbMemberCreate.Active {
+			var cmd tea.Cmd
+			m.lbMemberCreate, cmd = m.lbMemberCreate.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.projectPicker.Active {
