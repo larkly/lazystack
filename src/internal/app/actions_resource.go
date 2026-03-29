@@ -13,7 +13,6 @@ import (
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/routercreate"
-	"github.com/larkly/lazystack/internal/ui/routerdetail"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
@@ -266,19 +265,6 @@ func (m Model) openSubnetDeleteConfirm() (Model, tea.Cmd) {
 
 // --- Router actions ---
 
-func (m Model) openRouterDetail() (Model, tea.Cmd) {
-	r := m.routerList.SelectedRouter()
-	if r == nil {
-		return m, nil
-	}
-	m.routerDetail = routerdetail.New(m.client.Network, r.ID, m.refreshInterval)
-	m.routerDetail.SetSize(m.width, m.height)
-	m.view = viewRouterDetail
-	m.statusBar.CurrentView = "routerdetail"
-	m.statusBar.Hint = m.routerDetail.Hints()
-	return m, m.routerDetail.Init()
-}
-
 func (m Model) openRouterCreate() (Model, tea.Cmd) {
 	m.routerCreate = routercreate.New(m.client.Network)
 	m.routerCreate.SetSize(m.width, m.height)
@@ -286,16 +272,8 @@ func (m Model) openRouterCreate() (Model, tea.Cmd) {
 }
 
 func (m Model) openRouterDeleteConfirm() (Model, tea.Cmd) {
-	var id, name string
-	switch m.view {
-	case viewRouterList:
-		if r := m.routerList.SelectedRouter(); r != nil {
-			id, name = r.ID, r.Name
-		}
-	case viewRouterDetail:
-		id = m.routerDetail.RouterID()
-		name = m.routerDetail.RouterName()
-	}
+	id := m.routerView.SelectedRouterID()
+	name := m.routerView.SelectedRouterName()
 	if id == "" {
 		return m, nil
 	}
@@ -308,11 +286,8 @@ func (m Model) openRouterDeleteConfirm() (Model, tea.Cmd) {
 }
 
 func (m Model) openAddRouterInterface() (Model, tea.Cmd) {
-	if m.view != viewRouterDetail {
-		return m, nil
-	}
-	id := m.routerDetail.RouterID()
-	name := m.routerDetail.RouterName()
+	id := m.routerView.SelectedRouterID()
+	name := m.routerView.SelectedRouterName()
 	if id == "" {
 		return m, nil
 	}
@@ -322,15 +297,12 @@ func (m Model) openAddRouterInterface() (Model, tea.Cmd) {
 }
 
 func (m Model) openRemoveRouterInterfaceConfirm() (Model, tea.Cmd) {
-	if m.view != viewRouterDetail {
-		return m, nil
-	}
-	subnetID := m.routerDetail.SelectedInterfaceSubnetID()
+	subnetID := m.routerView.SelectedInterfaceSubnetID()
 	if subnetID == "" {
 		return m, nil
 	}
-	routerID := m.routerDetail.RouterID()
-	routerName := m.routerDetail.RouterName()
+	routerID := m.routerView.SelectedRouterID()
+	routerName := m.routerView.SelectedRouterName()
 	m.confirm = modal.NewConfirm("remove_router_interface", routerID, routerName)
 	m.confirm.Title = "Remove Interface"
 	m.confirm.Body = fmt.Sprintf("Remove subnet interface from router %q?", routerName)
