@@ -225,8 +225,8 @@ func (m Model) openNetworkCreate() (Model, tea.Cmd) {
 }
 
 func (m Model) openNetworkDeleteConfirm() (Model, tea.Cmd) {
-	netID := m.networkList.SelectedNetworkID()
-	netName := m.networkList.SelectedNetworkName()
+	netID := m.networkView.SelectedNetworkID()
+	netName := m.networkView.SelectedNetworkName()
 	if netID == "" {
 		return m, nil
 	}
@@ -239,8 +239,8 @@ func (m Model) openNetworkDeleteConfirm() (Model, tea.Cmd) {
 }
 
 func (m Model) openSubnetCreate() (Model, tea.Cmd) {
-	netID := m.networkList.SelectedNetworkID()
-	netName := m.networkList.SelectedNetworkName()
+	netID := m.networkView.SelectedNetworkID()
+	netName := m.networkView.SelectedNetworkName()
 	if netID == "" {
 		return m, nil
 	}
@@ -250,12 +250,12 @@ func (m Model) openSubnetCreate() (Model, tea.Cmd) {
 }
 
 func (m Model) openSubnetDeleteConfirm() (Model, tea.Cmd) {
-	subID := m.networkList.SelectedSubnetID()
-	subName := m.networkList.SelectedSubnetName()
+	subID := m.networkView.SelectedSubnetID()
+	subName := m.networkView.SelectedSubnetName()
 	if subID == "" {
 		return m, nil
 	}
-	netName := m.networkList.SelectedNetworkName()
+	netName := m.networkView.SelectedNetworkName()
 	m.confirm = modal.NewConfirm("delete_subnet", subID, subName)
 	m.confirm.Title = "Delete Subnet"
 	m.confirm.Body = fmt.Sprintf("Delete subnet %q from network %q?", subName, netName)
