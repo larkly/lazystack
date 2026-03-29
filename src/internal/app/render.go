@@ -224,6 +224,23 @@ func (m Model) viewContent() string {
 			lines[1] = secondLine + strings.Repeat(" ", pad) + versionStr
 		}
 	}
+	if len(lines) > 2 && m.latestVersion != "" {
+		var indicator string
+		if shared.PlainMode {
+			indicator = lipgloss.NewStyle().Foreground(shared.ColorWarning).
+				Render("(update: " + m.latestVersion + ")")
+		} else {
+			indicator = lipgloss.NewStyle().Foreground(shared.ColorWarning).
+				Render("⚡ " + m.latestVersion + " available")
+		}
+		thirdLine := lines[2]
+		thirdW := lipgloss.Width(thirdLine)
+		indW := lipgloss.Width(indicator)
+		pad := m.width - thirdW - indW
+		if pad > 0 {
+			lines[2] = thirdLine + strings.Repeat(" ", pad) + indicator
+		}
+	}
 	content = strings.Join(lines, "\n")
 
 	contentHeight := m.height - 1

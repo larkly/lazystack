@@ -18,11 +18,12 @@ type Config struct {
 
 // GeneralConfig holds non-visual, non-keybinding settings.
 type GeneralConfig struct {
-	RefreshInterval int  `yaml:"refresh_interval"`
-	IdleTimeout     int  `yaml:"idle_timeout"`
-	PlainMode       bool `yaml:"plain_mode"`
-	CheckForUpdates bool `yaml:"check_for_updates"`
-	AlwaysPickCloud bool `yaml:"always_pick_cloud"`
+	RefreshInterval     int  `yaml:"refresh_interval"`
+	IdleTimeout         int  `yaml:"idle_timeout"`
+	PlainMode           bool `yaml:"plain_mode"`
+	CheckForUpdates     bool `yaml:"check_for_updates"`
+	AlwaysPickCloud     bool `yaml:"always_pick_cloud"`
+	UpdateCheckInterval int  `yaml:"update_check_interval"`
 }
 
 // ColorConfig holds hex color strings for the UI palette.
@@ -66,8 +67,9 @@ func Defaults() Config {
 			RefreshInterval: 5,
 			IdleTimeout:     0,
 			PlainMode:       false,
-			CheckForUpdates: true,
-			AlwaysPickCloud: false,
+			CheckForUpdates:     true,
+			AlwaysPickCloud:     false,
+			UpdateCheckInterval: 24,
 		},
 		Colors: ColorConfig{
 			Primary:   "#7D56F4",
@@ -151,11 +153,12 @@ func Load() (Config, error) {
 
 // rawGeneral mirrors GeneralConfig with pointer bools to detect presence in YAML.
 type rawGeneral struct {
-	RefreshInterval int   `yaml:"refresh_interval"`
-	IdleTimeout     int   `yaml:"idle_timeout"`
-	PlainMode       *bool `yaml:"plain_mode"`
-	CheckForUpdates *bool `yaml:"check_for_updates"`
-	AlwaysPickCloud *bool `yaml:"always_pick_cloud"`
+	RefreshInterval     int   `yaml:"refresh_interval"`
+	IdleTimeout         int   `yaml:"idle_timeout"`
+	PlainMode           *bool `yaml:"plain_mode"`
+	CheckForUpdates     *bool `yaml:"check_for_updates"`
+	AlwaysPickCloud     *bool `yaml:"always_pick_cloud"`
+	UpdateCheckInterval *int  `yaml:"update_check_interval"`
 }
 
 type rawConfig struct {
@@ -208,6 +211,11 @@ func LoadFrom(path string) (Config, error) {
 	} else {
 		file.General.AlwaysPickCloud = defaults.General.AlwaysPickCloud
 	}
+	if raw.General.UpdateCheckInterval != nil {
+		file.General.UpdateCheckInterval = *raw.General.UpdateCheckInterval
+	} else {
+		file.General.UpdateCheckInterval = defaults.General.UpdateCheckInterval
+	}
 
 	return mergeWithDefaults(file, defaults), nil
 }
@@ -217,6 +225,9 @@ func LoadFrom(path string) (Config, error) {
 func mergeWithDefaults(file, defaults Config) Config {
 	if file.General.RefreshInterval == 0 {
 		file.General.RefreshInterval = defaults.General.RefreshInterval
+	}
+	if file.General.UpdateCheckInterval == 0 {
+		file.General.UpdateCheckInterval = defaults.General.UpdateCheckInterval
 	}
 
 	if file.Colors.Primary == "" {

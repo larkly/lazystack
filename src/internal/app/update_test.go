@@ -4,14 +4,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/larkly/lazystack/internal/config"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"charm.land/bubbletea/v2"
 )
 
 func newTestModel(version string, checkUpdate bool) Model {
+	cfg := config.Defaults()
 	return New(Options{
 		Version:     version,
 		CheckUpdate: checkUpdate,
+		Config:      &cfg,
 	})
 }
 
@@ -170,6 +173,56 @@ func TestKeySwallowedWhileUpdating(t *testing.T) {
 	// Modal should still be active
 	if m.activeModal != modalConfirm {
 		t.Error("expected modal to remain active while updating")
+	}
+}
+
+func TestUpdateAvailableMsg_NoUpdateBuild_NoModal(t *testing.T) {
+	cfg := config.Defaults()
+	m := New(Options{
+		Version:       "v0.0.1",
+		CheckUpdate:   true,
+		NoUpdateBuild: true,
+		Config:        &cfg,
+	})
+	m.width = 100
+	m.height = 40
+
+	msg := UpdateAvailableMsg{
+		Latest:       "v0.1.1",
+		DownloadURL:  "https://example.com/bin",
+		ChecksumsURL: "https://example.com/SHA256SUMS",
+	}
+
+	result, _ := m.Update(msg)
+	m = result.(Model)
+
+	if m.activeModal != modalNone {
+		t.Error("expected no modal when noUpdateBuild is true")
+	}
+	if m.latestVersion != "v0.1.1" {
+		t.Errorf("latestVersion = %q, want %q", m.latestVersion, "v0.1.1")
+	}
+}
+
+func TestConfirmAction_Update_NoUpdateBuild_Blocked(t *testing.T) {
+	cfg := config.Defaults()
+	m := New(Options{
+		Version:       "v0.0.1",
+		NoUpdateBuild: true,
+		Config:        &cfg,
+	})
+	m.width = 100
+	m.height = 40
+	m.downloadURL = "https://example.com/bin"
+	m.latestVersion = "v0.1.1"
+	m.activeModal = modalConfirm
+
+	msg := modal.ConfirmAction{Action: "update", Confirm: true}
+	result, _ := m.Update(msg)
+	m = result.(Model)
+
+	if m.updating {
+		t.Error("expected updating to be false when noUpdateBuild is true")
 	}
 }
 

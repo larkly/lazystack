@@ -182,9 +182,11 @@ type Model struct {
 	idleTimeout    time.Duration
 	lastActivity   time.Time
 	idlePaused     bool
-	latestVersion  string
-	downloadURL    string
-	checksumsURL   string
+	latestVersion       string
+	downloadURL         string
+	checksumsURL        string
+	noUpdateBuild       bool
+	updateCheckInterval time.Duration
 }
 
 // ShouldRestart returns true if the app quit due to a restart request.
@@ -200,6 +202,7 @@ type Options struct {
 	IdleTimeout     time.Duration
 	Version         string
 	CheckUpdate     bool
+	NoUpdateBuild   bool
 	Plain           bool
 	Config          *config.Config
 }
@@ -223,40 +226,44 @@ func New(opts Options) Model {
 			autoName = clouds[0]
 		}
 		return Model{
-			view:            viewCloudPicker,
-			cloudPicker:     cloudpicker.New(clouds, nil),
-			statusBar:       statusbar.New(opts.Version),
-			help:            help.New(),
-			quotaView:       quotaview.New(),
-			configView:      configview.New(opts.Config),
-			minWidth:        80,
-			minHeight:       20,
-			autoCloud:       autoName,
-			refreshInterval: refresh,
-			idleTimeout:     opts.IdleTimeout,
-			version:         opts.Version,
-			checkUpdate:     opts.CheckUpdate,
-			tabs:            tabs,
-			tabInited:       make([]bool, len(tabs)),
+			view:                viewCloudPicker,
+			cloudPicker:         cloudpicker.New(clouds, nil),
+			statusBar:           statusbar.New(opts.Version),
+			help:                help.New(),
+			quotaView:           quotaview.New(),
+			configView:          configview.New(opts.Config),
+			minWidth:            80,
+			minHeight:           20,
+			autoCloud:           autoName,
+			refreshInterval:     refresh,
+			idleTimeout:         opts.IdleTimeout,
+			version:             opts.Version,
+			checkUpdate:         opts.CheckUpdate,
+			noUpdateBuild:       opts.NoUpdateBuild,
+			updateCheckInterval: time.Duration(opts.Config.General.UpdateCheckInterval) * time.Hour,
+			tabs:                tabs,
+			tabInited:           make([]bool, len(tabs)),
 		}
 	}
 
 	cp := cloudpicker.New(clouds, err)
 	return Model{
-		view:            viewCloudPicker,
-		cloudPicker:     cp,
-		statusBar:       statusbar.New(opts.Version),
-		help:            help.New(),
-		quotaView:       quotaview.New(),
-		configView:      configview.New(opts.Config),
-		minWidth:        80,
-		minHeight:       20,
-		refreshInterval: refresh,
-		idleTimeout:     opts.IdleTimeout,
-		version:         opts.Version,
-		checkUpdate:     opts.CheckUpdate,
-		tabs:            tabs,
-		tabInited:       make([]bool, len(tabs)),
+		view:                viewCloudPicker,
+		cloudPicker:         cp,
+		statusBar:           statusbar.New(opts.Version),
+		help:                help.New(),
+		quotaView:           quotaview.New(),
+		configView:          configview.New(opts.Config),
+		minWidth:            80,
+		minHeight:           20,
+		refreshInterval:     refresh,
+		idleTimeout:         opts.IdleTimeout,
+		version:             opts.Version,
+		checkUpdate:         opts.CheckUpdate,
+		noUpdateBuild:       opts.NoUpdateBuild,
+		updateCheckInterval: time.Duration(opts.Config.General.UpdateCheckInterval) * time.Hour,
+		tabs:                tabs,
+		tabInited:           make([]bool, len(tabs)),
 	}
 }
 
@@ -271,8 +278,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.checkUpdate && m.version != "dev" {
 		ver := m.version
+		ttl := m.updateCheckInterval
 		cmds = append(cmds, func() tea.Msg {
-			latest, dlURL, csURL, err := selfupdate.CheckLatest(ver)
+			latest, dlURL, csURL, err := selfupdate.CheckLatestCached(ver, ttl)
 			if err != nil || latest == "" {
 				return nil
 			}
@@ -927,6 +935,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latestVersion = msg.Latest
 		m.downloadURL = msg.DownloadURL
 		m.checksumsURL = msg.ChecksumsURL
+		if m.noUpdateBuild {
+			return m, nil
+		}
 		m.confirm = modal.ConfirmModel{
 			Action: "update",
 			Title:  "Update Available",
@@ -962,6 +973,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDetailNavigation(msg)
 
 	case modal.ConfirmAction:
+		if msg.Action == "update" && m.noUpdateBuild {
+			m.activeModal = modalNone
+			return m, nil
+		}
 		if msg.Confirm && msg.Action == "update" {
 			m.updating = true
 			m.confirm.Title = "Updating"
