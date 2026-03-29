@@ -40,6 +40,9 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewSecGroupView:
 		m.secGroupView, cmd = m.secGroupView.Update(msg)
 		m.statusBar.Hint = m.secGroupView.Hints()
+	case viewSecGroupDetail:
+		m.sgDetail, cmd = m.sgDetail.Update(msg)
+		m.statusBar.Hint = m.sgDetail.Hints()
 	case viewVolumeCreate:
 		m.volumeCreate, cmd = m.volumeCreate.Update(msg)
 		m.statusBar.Hint = m.volumeCreate.Hints()
@@ -137,6 +140,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 	case viewImageDetail:
 		m.imageDetail, cmd = m.imageDetail.Update(msg)
 		cmds = append(cmds, cmd)
+	case viewSecGroupDetail:
+		m.sgDetail, cmd = m.sgDetail.Update(msg)
+		cmds = append(cmds, cmd)
 	case viewConsoleLog:
 		m.consoleLog, cmd = m.consoleLog.Update(msg)
 		cmds = append(cmds, cmd)
@@ -184,6 +190,14 @@ func (m Model) handleDetailNavigation(msg shared.NavigateToDetailMsg) (Model, te
 		m.statusBar.CurrentView = "volumedetail"
 		m.statusBar.Hint = m.volumeDetail.Hints()
 		return m, m.volumeDetail.Init()
+	case "server":
+		m.serverDetail = serverdetail.New(m.client.Compute, m.client.Network, m.client.BlockStorage, msg.ID, m.refreshInterval)
+		m.serverDetail.SetSize(m.width, m.height)
+		m.returnToView = m.view
+		m.view = viewServerDetail
+		m.statusBar.CurrentView = "serverdetail"
+		m.statusBar.Hint = m.serverDetail.Hints()
+		return m, m.serverDetail.Init()
 	}
 	return m, nil
 }
@@ -220,12 +234,19 @@ func (m Model) handleResourceNavigation(msg shared.NavigateToResourceMsg) (Model
 func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 	switch msg.View {
 	case "serverlist":
-		// If returning from a cross-resource jump, go back to server detail
+		// If returning from a cross-resource jump, go back to the originating detail view
 		if m.returnToView == viewServerDetail && m.serverDetail.ServerID() != "" {
 			m.returnToView = 0
 			m.view = viewServerDetail
 			m.statusBar.CurrentView = "serverdetail"
 			m.statusBar.Hint = m.serverDetail.Hints()
+			return m, nil
+		}
+		if m.returnToView == viewSecGroupDetail && m.sgDetail.SGID() != "" {
+			m.returnToView = 0
+			m.view = viewSecGroupDetail
+			m.statusBar.CurrentView = "sgdetail"
+			m.statusBar.Hint = m.sgDetail.Hints()
 			return m, nil
 		}
 		m.returnToView = 0
@@ -311,6 +332,21 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		m.statusBar.Hint = m.serverCreate.Hints()
 		return m, m.serverCreate.Init()
 
+	case "secgroupview":
+		// If returning from a cross-resource jump, go back to SG detail
+		if m.returnToView == viewSecGroupDetail && m.sgDetail.SGID() != "" {
+			m.returnToView = 0
+			m.view = viewSecGroupDetail
+			m.statusBar.CurrentView = "sgdetail"
+			m.statusBar.Hint = m.sgDetail.Hints()
+			return m, nil
+		}
+		m.returnToView = 0
+		m.view = viewSecGroupView
+		m.statusBar.CurrentView = "secgroupview"
+		m.statusBar.Hint = m.secGroupView.Hints()
+		return m, m.secGroupView.ForceRefresh()
+
 	case "consolelog":
 		return m, nil // handled by openConsoleLog
 
@@ -332,6 +368,8 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.floatingIPList.ForceRefresh()
 	case viewSecGroupView:
 		return m, m.secGroupView.ForceRefresh()
+	case viewSecGroupDetail:
+		return m, m.sgDetail.ForceRefresh()
 	case viewKeypairList:
 		return m, m.keypairList.ForceRefresh()
 	case viewNetworkList:

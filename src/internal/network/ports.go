@@ -61,6 +61,40 @@ func ListPortsByDevice(ctx context.Context, client *gophercloud.ServiceClient, d
 	return result, nil
 }
 
+// ListPortsBySecurityGroup fetches all ports that have a given security group.
+func ListPortsBySecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, sgID string) ([]Port, error) {
+	var result []Port
+	err := ports.List(client, ports.ListOpts{SecurityGroups: []string{sgID}}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+		extracted, err := ports.ExtractPorts(page)
+		if err != nil {
+			return false, err
+		}
+		for _, p := range extracted {
+			port := Port{
+				ID:          p.ID,
+				Name:        p.Name,
+				Status:      p.Status,
+				MACAddress:  p.MACAddress,
+				DeviceOwner: p.DeviceOwner,
+				DeviceID:    p.DeviceID,
+				NetworkID:   p.NetworkID,
+			}
+			for _, ip := range p.FixedIPs {
+				port.FixedIPs = append(port.FixedIPs, FixedIP{
+					SubnetID:  ip.SubnetID,
+					IPAddress: ip.IPAddress,
+				})
+			}
+			result = append(result, port)
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing ports for security group %s: %w", sgID, err)
+	}
+	return result, nil
+}
+
 // ListPorts fetches all ports for a given network.
 func ListPorts(ctx context.Context, client *gophercloud.ServiceClient, networkID string) ([]Port, error) {
 	var result []Port

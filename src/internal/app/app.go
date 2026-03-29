@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/larkly/lazystack/internal/cloud"
@@ -36,6 +37,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/projectpicker"
 	"github.com/larkly/lazystack/internal/ui/quotaview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
+	"github.com/larkly/lazystack/internal/ui/sgdetail"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
@@ -71,6 +73,7 @@ const (
 	viewVolumeDetail
 	viewFloatingIPList
 	viewSecGroupView
+	viewSecGroupDetail
 	viewKeypairList
 	viewLBList
 	viewLBDetail
@@ -146,6 +149,7 @@ type Model struct {
 	volumeCreate  volumecreate.Model
 	floatingIPList floatingiplist.Model
 	secGroupView  secgroupview.Model
+	sgDetail      sgdetail.Model
 	keypairList    keypairlist.Model
 	keypairCreate  keypaircreate.Model
 	keypairDetail  keypairdetail.Model
@@ -659,8 +663,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Security group view: context-sensitive create/delete
+		// Security group view: context-sensitive create/delete + Enter to detail
 		if m.view == viewSecGroupView {
+			if key.Matches(msg, shared.Keys.Enter) && !m.secGroupView.InRules() {
+				return m.openSGDetail()
+			}
 			if key.Matches(msg, shared.Keys.Delete) {
 				if m.secGroupView.InRules() {
 					return m.openSGRuleDeleteConfirm()
@@ -672,6 +679,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.openSGRuleCreate()
 				}
 				return m.openSGCreate()
+			}
+		}
+
+		// Security group detail view
+		if m.view == viewSecGroupDetail {
+			if key.Matches(msg, shared.Keys.Enter) {
+				if serverID := m.sgDetail.SelectedServerID(); serverID != "" {
+					return m.openServerDetailFromSGDetail(serverID)
+				}
+			}
+			if key.Matches(msg, shared.Keys.Delete) {
+				if m.sgDetail.FocusedPane() == sgdetail.FocusRules {
+					if ruleID := m.sgDetail.SelectedRuleID(); ruleID != "" {
+						return m.openSGRuleDeleteConfirmFromDetail()
+					}
+				}
+				if m.sgDetail.SGName() != "default" {
+					return m.openSGDeleteConfirmFromDetail()
+				}
+			}
+			if key.Matches(msg, shared.Keys.Create) {
+				return m.openSGRuleCreateFromDetail()
+			}
+			if key.Matches(msg, shared.Keys.Rename) && m.sgDetail.SGName() != "default" {
+				return m.openSGRename()
+			}
+			if key.Matches(msg, shared.Keys.Clone) {
+				return m.openSGClone()
 			}
 		}
 
@@ -1056,6 +1091,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewImageDetail {
 			m.view = viewImageList
 			m.statusBar.CurrentView = "imagelist"
+		}
+		if m.view == viewSecGroupDetail {
+			if strings.Contains(msg.Action, "Deleted security group") {
+				m.view = viewSecGroupView
+				m.statusBar.CurrentView = "secgroupview"
+				return m, m.secGroupView.ForceRefresh()
+			}
+			// Rule delete, rename, clone: stay on detail and refresh
+			return m, m.sgDetail.ForceRefresh()
 		}
 		return m, nil
 

@@ -15,6 +15,15 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 )
 
+// Mode determines the modal's behavior.
+type Mode int
+
+const (
+	ModeCreate Mode = iota
+	ModeRename
+	ModeClone
+)
+
 const (
 	fieldName   = 0
 	fieldDesc   = 1
@@ -26,7 +35,7 @@ const (
 type sgCreatedMsg struct{}
 type sgCreateErrMsg struct{ err error }
 
-// Model is the security group create modal.
+// Model is the security group create/rename/clone modal.
 type Model struct {
 	Active    bool
 	client    *gophercloud.ServiceClient
@@ -38,6 +47,9 @@ type Model struct {
 	err        string
 	width      int
 	height     int
+	mode       Mode
+	sgID       string // target SG ID (for rename)
+	srcSGID    string // source SG ID (for clone)
 }
 
 // New creates a security group create modal.
@@ -67,6 +79,26 @@ func New(client *gophercloud.ServiceClient) Model {
 	}
 }
 
+// NewRename creates a rename modal pre-filled with the current name and description.
+func NewRename(client *gophercloud.ServiceClient, sgID, currentName, currentDesc string) Model {
+	m := New(client)
+	m.mode = ModeRename
+	m.sgID = sgID
+	m.nameInput.SetValue(currentName)
+	m.descInput.SetValue(currentDesc)
+	return m
+}
+
+// NewClone creates a clone modal pre-filled with "Copy of <name>" and the same description.
+func NewClone(client *gophercloud.ServiceClient, srcSGID, currentName, currentDesc string) Model {
+	m := New(client)
+	m.mode = ModeClone
+	m.srcSGID = srcSGID
+	m.nameInput.SetValue("Copy of " + currentName)
+	m.descInput.SetValue(currentDesc)
+	return m
+}
+
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
 	return nil
@@ -78,8 +110,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case sgCreatedMsg:
 		m.submitting = false
 		m.Active = false
+		action := "Created security group"
+		switch m.mode {
+		case ModeRename:
+			action = "Renamed security group"
+		case ModeClone:
+			action = "Cloned security group"
+		}
 		return m, func() tea.Msg {
-			return shared.ResourceActionMsg{Action: "Created security group", Name: m.nameInput.Value()}
+			return shared.ResourceActionMsg{Action: action, Name: m.nameInput.Value()}
 		}
 	case sgCreateErrMsg:
 		m.submitting = false
@@ -232,18 +271,46 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.err = ""
 	client := m.client
 
-	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		_, err := network.CreateSecurityGroup(context.Background(), client, name, desc)
-		if err != nil {
-			return sgCreateErrMsg{err: err}
-		}
-		return sgCreatedMsg{}
-	})
+	switch m.mode {
+	case ModeRename:
+		sgID := m.sgID
+		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			_, err := network.UpdateSecurityGroup(context.Background(), client, sgID, name, &desc)
+			if err != nil {
+				return sgCreateErrMsg{err: err}
+			}
+			return sgCreatedMsg{}
+		})
+	case ModeClone:
+		srcID := m.srcSGID
+		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			_, err := network.CloneSecurityGroup(context.Background(), client, srcID, name, desc)
+			if err != nil {
+				return sgCreateErrMsg{err: err}
+			}
+			return sgCreatedMsg{}
+		})
+	default:
+		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			_, err := network.CreateSecurityGroup(context.Background(), client, name, desc)
+			if err != nil {
+				return sgCreateErrMsg{err: err}
+			}
+			return sgCreatedMsg{}
+		})
+	}
 }
 
 // View renders the modal.
 func (m Model) View() string {
-	title := shared.StyleModalTitle.Render("Create Security Group")
+	titleText := "Create Security Group"
+	switch m.mode {
+	case ModeRename:
+		titleText = "Rename Security Group"
+	case ModeClone:
+		titleText = "Clone Security Group"
+	}
+	title := shared.StyleModalTitle.Render(titleText)
 
 	var body strings.Builder
 

@@ -17,6 +17,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
+	"github.com/larkly/lazystack/internal/ui/sgdetail"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
@@ -190,6 +191,74 @@ func (m Model) openSGRuleCreate() (Model, tea.Cmd) {
 	m.sgRuleCreate = sgrulecreate.New(m.client.Network, sgID, sgName)
 	m.sgRuleCreate.SetSize(m.width, m.height)
 	return m, m.sgRuleCreate.Init()
+}
+
+func (m Model) openSGDetail() (Model, tea.Cmd) {
+	sgID := m.secGroupView.SelectedGroupID()
+	if sgID == "" {
+		return m, nil
+	}
+	m.sgDetail = sgdetail.New(m.client.Network, m.client.Compute, sgID, m.refreshInterval)
+	m.sgDetail.SetSize(m.width, m.height)
+	m.view = viewSecGroupDetail
+	m.statusBar.CurrentView = "sgdetail"
+	m.statusBar.Hint = m.sgDetail.Hints()
+	return m, m.sgDetail.Init()
+}
+
+func (m Model) openSGDeleteConfirmFromDetail() (Model, tea.Cmd) {
+	sgID := m.sgDetail.SGID()
+	sgName := m.sgDetail.SGName()
+	if sgID == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_sg", sgID, sgName)
+	m.confirm.Title = "Delete Security Group"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete security group %q?\nAll rules in this group will also be deleted.", sgName)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+func (m Model) openSGRuleDeleteConfirmFromDetail() (Model, tea.Cmd) {
+	ruleID := m.sgDetail.SelectedRuleID()
+	if ruleID == "" {
+		return m, nil
+	}
+	groupName := m.sgDetail.SGName()
+	m.confirm = modal.NewConfirm("delete_sg_rule", ruleID, groupName)
+	m.confirm.Title = "Delete Security Group Rule"
+	m.confirm.Body = fmt.Sprintf("Delete rule from security group %q?", groupName)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+func (m Model) openSGRuleCreateFromDetail() (Model, tea.Cmd) {
+	sgID := m.sgDetail.SGID()
+	sgName := m.sgDetail.SGName()
+	if sgID == "" {
+		return m, nil
+	}
+	m.sgRuleCreate = sgrulecreate.New(m.client.Network, sgID, sgName)
+	m.sgRuleCreate.SetSize(m.width, m.height)
+	return m, m.sgRuleCreate.Init()
+}
+
+func (m Model) openSGRename() (Model, tea.Cmd) {
+	m.sgCreate = sgcreate.NewRename(m.client.Network, m.sgDetail.SGID(), m.sgDetail.SGName(), m.sgDetail.SGDescription())
+	m.sgCreate.SetSize(m.width, m.height)
+	return m, m.sgCreate.Init()
+}
+
+func (m Model) openSGClone() (Model, tea.Cmd) {
+	m.sgCreate = sgcreate.NewClone(m.client.Network, m.sgDetail.SGID(), m.sgDetail.SGName(), m.sgDetail.SGDescription())
+	m.sgCreate.SetSize(m.width, m.height)
+	return m, m.sgCreate.Init()
+}
+
+func (m Model) openServerDetailFromSGDetail(serverID string) (Model, tea.Cmd) {
+	return m.handleDetailNavigation(shared.NavigateToDetailMsg{Resource: "server", ID: serverID})
 }
 
 // --- Network actions ---
