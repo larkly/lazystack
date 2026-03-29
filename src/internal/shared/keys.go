@@ -55,6 +55,7 @@ type KeyMap struct {
 	SSH         key.Binding
 	CopySSH     key.Binding
 	ConsoleURL  key.Binding
+	Config       key.Binding
 }
 
 var Keys = KeyMap{
@@ -265,5 +266,9 @@ var Keys = KeyMap{
 	ConsoleURL: key.NewBinding(
 		key.WithKeys("V"),
 		key.WithHelp("V", "console URL (noVNC)"),
+	),
+	Config: key.NewBinding(
+		key.WithKeys("ctrl+k"),
+		key.WithHelp("ctrl+k", "config"),
 	),
 }

@@ -11,8 +11,10 @@ import (
 	"github.com/larkly/lazystack/internal/selfupdate"
 	"github.com/larkly/lazystack/internal/ssh"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/config"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/cloneprogress"
+	"github.com/larkly/lazystack/internal/ui/configview"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
@@ -159,6 +161,7 @@ type Model struct {
 	tabInited []bool
 	help         help.Model
 	quotaView    quotaview.Model
+	configView   configview.Model
 	confirm      modal.ConfirmModel
 	errModal     modal.ErrorModel
 	activeModal  modalType
@@ -198,6 +201,7 @@ type Options struct {
 	Version         string
 	CheckUpdate     bool
 	Plain           bool
+	Config          *config.Config
 }
 
 // New creates the root model.
@@ -224,6 +228,7 @@ func New(opts Options) Model {
 			statusBar:       statusbar.New(opts.Version),
 			help:            help.New(),
 			quotaView:       quotaview.New(),
+			configView:      configview.New(opts.Config),
 			minWidth:        80,
 			minHeight:       20,
 			autoCloud:       autoName,
@@ -243,6 +248,7 @@ func New(opts Options) Model {
 		statusBar:       statusbar.New(opts.Version),
 		help:            help.New(),
 		quotaView:       quotaview.New(),
+		configView:      configview.New(opts.Config),
 		minWidth:        80,
 		minHeight:       20,
 		refreshInterval: refresh,
@@ -306,6 +312,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.subnetPicker.SetSize(m.width, m.height)
 		m.projectPicker.SetSize(m.width, m.height)
 		m.cloneProgress.SetSize(m.width, m.height)
+		m.configView.Width = m.width
+		m.configView.Height = m.height
 		m.statusBar.Width = m.width
 		return m.updateActiveView(msg)
 
@@ -327,6 +335,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.quotaView.Visible {
 			var cmd tea.Cmd
 			m.quotaView, cmd = m.quotaView.Update(msg)
+			return m, cmd
+		}
+
+		if m.configView.Visible {
+			var cmd tea.Cmd
+			m.configView, cmd = m.configView.Update(msg)
 			return m, cmd
 		}
 
@@ -476,6 +490,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				cmd := m.quotaView.Open()
 				return m, cmd
+			case key.Matches(msg, shared.Keys.Config) && m.view != viewCloudPicker:
+				m.configView.Width = m.width
+				m.configView.Height = m.height
+				m.configView.Open()
+				return m, nil
 			}
 
 			// Back-navigation from cross-resource jump
@@ -898,6 +917,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.restart = true
 		return m, tea.Quit
+
+	case shared.ConfigChangedMsg:
+		m.refreshInterval = time.Duration(m.configView.Cfg().General.RefreshInterval) * time.Second
+		m.idleTimeout = time.Duration(m.configView.Cfg().General.IdleTimeout) * time.Minute
+		return m, nil
 
 	case shared.ViewChangeMsg:
 		return m.handleViewChange(msg)

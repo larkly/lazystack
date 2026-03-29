@@ -11,6 +11,7 @@ import (
 
 	"github.com/larkly/lazystack/internal/app"
 	"github.com/larkly/lazystack/internal/cloud"
+	"github.com/larkly/lazystack/internal/config"
 	"github.com/larkly/lazystack/internal/selfupdate"
 	"charm.land/bubbletea/v2"
 )
@@ -52,6 +53,35 @@ func main() {
 		return
 	}
 
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load config: %v\n", cfgErr)
+	}
+
+	// Detect which CLI flags were explicitly set
+	var cliFlags config.CLIFlags
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "refresh":
+			d := time.Duration(*refreshSec) * time.Second
+			cliFlags.RefreshInterval = &d
+		case "idle-timeout":
+			d := time.Duration(*idleTimeoutMin) * time.Minute
+			cliFlags.IdleTimeout = &d
+		case "plain":
+			cliFlags.PlainMode = plainMode
+		case "no-check-update":
+			v := !*noCheckUpdate
+			cliFlags.CheckForUpdates = &v
+		case "pick-cloud":
+			cliFlags.AlwaysPickCloud = alwaysPick
+		}
+	})
+	cliFlags.Cloud = *cloudFlag
+
+	cfg = config.Merge(cfg, cliFlags)
+	config.ApplyAll(cfg)
+
 	if *cloudFlag != "" {
 		clouds, err := cloud.ListCloudNames()
 		if err != nil {
@@ -65,13 +95,14 @@ func main() {
 	}
 
 	m := app.New(app.Options{
-		AlwaysPickCloud: *alwaysPick,
-		Cloud:           *cloudFlag,
-		RefreshInterval: time.Duration(*refreshSec) * time.Second,
-		IdleTimeout:     time.Duration(*idleTimeoutMin) * time.Minute,
+		AlwaysPickCloud: cfg.General.AlwaysPickCloud,
+		Cloud:           cliFlags.Cloud,
+		RefreshInterval: time.Duration(cfg.General.RefreshInterval) * time.Second,
+		IdleTimeout:     time.Duration(cfg.General.IdleTimeout) * time.Minute,
 		Version:         version,
-		CheckUpdate:     !*noCheckUpdate,
-		Plain:           *plainMode,
+		CheckUpdate:     cfg.General.CheckForUpdates,
+		Plain:           cfg.General.PlainMode,
+		Config:          &cfg,
 	})
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()

@@ -76,6 +76,10 @@ func (m Model) viewContent() string {
 		return m.quotaView.Render()
 	}
 
+	if m.configView.Visible {
+		return m.configView.Render()
+	}
+
 	if m.help.Visible {
 		return m.help.Render()
 	}

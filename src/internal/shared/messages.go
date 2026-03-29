@@ -118,3 +118,6 @@ type ConsoleURLErrMsg struct {
 	Err        error
 	ServerName string
 }
+
+// ConfigChangedMsg is sent after the config is modified and saved at runtime.
+type ConfigChangedMsg struct{}

@@ -49,6 +49,7 @@ var allSections = []section{
 			"R             force refresh",
 			"pgup/pgdn    page up/down",
 			"s/S           sort / reverse sort",
+			"ctrl+k       configuration",
 			"ctrl+r       restart app",
 		},
 	},

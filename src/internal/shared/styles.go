@@ -171,3 +171,81 @@ var (
 	StyleValue = lipgloss.NewStyle().
 			Foreground(ColorFg)
 )
+
+// RebuildStyles reassigns all Style* vars from current Color* values.
+// Must be called after mutating Color* vars so styles pick up the new colors.
+func RebuildStyles() {
+	StyleTitle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorPrimary).
+		PaddingLeft(1)
+
+	StyleStatusBar = lipgloss.NewStyle().
+		Background(lipgloss.Color("#073642")).
+		Foreground(ColorFg).
+		PaddingLeft(1).
+		PaddingRight(1)
+
+	StyleStatusBarKey = lipgloss.NewStyle().
+		Background(lipgloss.Color("#073642")).
+		Foreground(ColorPrimary).
+		Bold(true)
+
+	StyleHelp = lipgloss.NewStyle().
+		Foreground(ColorFg)
+
+	StyleModal = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorPrimary).
+		Padding(1, 2)
+
+	StyleModalTitle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorPrimary).
+		MarginBottom(1)
+
+	StyleErrorModal = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorError).
+		Padding(1, 2)
+
+	StyleSelected = lipgloss.NewStyle().
+		Background(lipgloss.Color("#073642")).
+		Foreground(ColorHighlight)
+
+	StyleHeader = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorSecondary)
+
+	StyleLabel = lipgloss.NewStyle().
+		Foreground(ColorSecondary).
+		Bold(true).
+		Width(20)
+
+	StyleValue = lipgloss.NewStyle().
+		Foreground(ColorFg)
+
+	// Rebuild status/power color maps that reference Color* vars.
+	StatusColors["ACTIVE"] = ColorSuccess
+	StatusColors["BUILD"] = ColorWarning
+	StatusColors["SHUTOFF"] = ColorMuted
+	StatusColors["ERROR"] = ColorError
+	StatusColors["REBOOT"] = ColorCyan
+	StatusColors["HARD_REBOOT"] = ColorCyan
+	StatusColors["RESIZE"] = ColorWarning
+	StatusColors["VERIFY_RESIZE"] = ColorWarning
+	StatusColors["MIGRATING"] = ColorWarning
+	StatusColors["PAUSED"] = ColorMuted
+	StatusColors["SUSPENDED"] = ColorMuted
+	StatusColors["DELETED"] = ColorError
+	StatusColors["SOFT_DELETED"] = ColorError
+	StatusColors["SHELVED"] = ColorMuted
+	StatusColors["SHELVED_OFFLOADED"] = ColorMuted
+
+	PowerColors["RUNNING"] = ColorSuccess
+	PowerColors["PAUSED"] = ColorMuted
+	PowerColors["SHUTDOWN"] = ColorMuted
+	PowerColors["CRASHED"] = ColorError
+	PowerColors["SUSPENDED"] = ColorMuted
+	PowerColors["NOSTATE"] = ColorWarning
+}
