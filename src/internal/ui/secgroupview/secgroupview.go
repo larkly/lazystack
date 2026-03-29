@@ -60,14 +60,30 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sgLoadedMsg:
+		var cursorID string
+		if m.cursor >= 0 && m.cursor < len(m.groups) {
+			cursorID = m.groups[m.cursor].ID
+		}
 		m.loading = false
 		m.groups = msg.groups
 		m.groupNames = make(map[string]string)
 		for _, g := range msg.groups {
 			m.groupNames[g.ID] = g.Name
 		}
-		// Clamp cursor if list shrunk (e.g. after delete)
-		if m.cursor >= len(m.groups) && len(m.groups) > 0 {
+		if cursorID != "" {
+			found := false
+			for i, g := range m.groups {
+				if g.ID == cursorID {
+					m.cursor = i
+					found = true
+					break
+				}
+			}
+			if !found && m.cursor >= len(m.groups) && len(m.groups) > 0 {
+				m.cursor = len(m.groups) - 1
+				m.inRules = false
+			}
+		} else if m.cursor >= len(m.groups) && len(m.groups) > 0 {
 			m.cursor = len(m.groups) - 1
 			m.inRules = false
 		}

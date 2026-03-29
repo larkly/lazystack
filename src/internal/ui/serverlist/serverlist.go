@@ -180,21 +180,45 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Sort):
 		visibleCount := m.visibleColCount()
 		if visibleCount > 0 {
+			var cursorID string
+			if m.cursor >= 0 && m.cursor < len(m.filtered) {
+				cursorID = m.filtered[m.cursor].ID
+			}
 			m.sortCol = (m.sortCol + 1) % visibleCount
 			m.sortAsc = true
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortServers()
+			if cursorID != "" {
+				for i, s := range m.filtered {
+					if s.ID == cursorID {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})
 		}
 	case key.Matches(msg, shared.Keys.ReverseSort):
 		if m.visibleColCount() > 0 {
+			var cursorID string
+			if m.cursor >= 0 && m.cursor < len(m.filtered) {
+				cursorID = m.filtered[m.cursor].ID
+			}
 			m.sortAsc = !m.sortAsc
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortServers()
+			if cursorID != "" {
+				for i, s := range m.filtered {
+					if s.ID == cursorID {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})
@@ -280,6 +304,10 @@ func (m Model) updateFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m *Model) applyFilter() {
+	var cursorID string
+	if m.cursor >= 0 && m.cursor < len(m.filtered) {
+		cursorID = m.filtered[m.cursor].ID
+	}
 	query := strings.ToLower(m.filter.Value())
 	if query == "" {
 		m.filtered = m.servers
@@ -297,11 +325,19 @@ func (m *Model) applyFilter() {
 			}
 		}
 	}
+	m.sortServers()
+	if cursorID != "" {
+		for i, s := range m.filtered {
+			if s.ID == cursorID {
+				m.cursor = i
+				break
+			}
+		}
+	}
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
 	m.scrollOff = 0
-	m.sortServers()
 }
 
 func (m Model) visibleColCount() int {

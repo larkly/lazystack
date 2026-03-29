@@ -71,12 +71,29 @@ func (m Model) ForceRefresh() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case networksLoadedMsg:
+		var cursorID string
+		if m.cursor >= 0 && m.cursor < len(m.networks) {
+			cursorID = m.networks[m.cursor].ID
+		}
 		m.loading = false
 		m.networks = msg.networks
 		m.subnets = msg.subnets
 		m.ports = msg.ports
 		m.err = ""
-		if m.cursor >= len(m.networks) && len(m.networks) > 0 {
+		if cursorID != "" {
+			found := false
+			for i, n := range m.networks {
+				if n.ID == cursorID {
+					m.cursor = i
+					found = true
+					break
+				}
+			}
+			if !found && m.cursor >= len(m.networks) && len(m.networks) > 0 {
+				m.cursor = len(m.networks) - 1
+				m.inSubnets = false
+			}
+		} else if m.cursor >= len(m.networks) && len(m.networks) > 0 {
 			m.cursor = len(m.networks) - 1
 			m.inSubnets = false
 		}
