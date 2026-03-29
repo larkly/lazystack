@@ -38,6 +38,7 @@ type Column struct {
 func defaultColumns() []Column {
 	return []Column{
 		{Title: "Name", MinWidth: 10, Flex: 3, Priority: 0, Key: "name"},
+		{Title: "ID", MinWidth: 10, Flex: 0, Priority: 2, Key: "id"},
 		{Title: "Status", MinWidth: 14, Flex: 0, Priority: 0, Key: "status"},
 		{Title: "Size", MinWidth: 6, Flex: 0, Priority: 0, Key: "size"},
 		{Title: "Type", MinWidth: 8, Flex: 1, Priority: 1, Key: "type"},
@@ -327,6 +328,8 @@ func (m *Model) sortVolumes() {
 		switch colKey {
 		case "name":
 			less = strings.ToLower(a.Name) < strings.ToLower(b.Name)
+		case "id":
+			less = a.ID < b.ID
 		case "status":
 			less = a.Status < b.Status
 		case "size":
@@ -430,8 +433,14 @@ func (m Model) View() string {
 			device = v.AttachedDevice
 		}
 
+		shortID := v.ID
+		if len(shortID) > 8 {
+			shortID = shortID[:8]
+		}
+
 		values := map[string]string{
 			"name":     name,
+			"id":       shortID,
 			"status":   shared.StatusIcon(v.Status) + v.Status,
 			"size":     fmt.Sprintf("%dGB", v.Size),
 			"type":     v.VolumeType,
