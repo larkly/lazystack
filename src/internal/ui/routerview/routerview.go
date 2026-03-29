@@ -28,13 +28,15 @@ const (
 const focusPaneCount = 4
 const narrowThreshold = 80
 
-type routersLoadedMsg struct{ routers []network.Router }
-type routersErrMsg struct{ err error }
-type detailLoadedMsg struct {
-	routerID     string
-	interfaces   []network.RouterInterface
+type routersLoadedMsg struct {
+	routers      []network.Router
 	networkNames map[string]string
 	subnetToNet  map[string]string
+}
+type routersErrMsg struct{ err error }
+type detailLoadedMsg struct {
+	routerID   string
+	interfaces []network.RouterInterface
 }
 type detailErrMsg struct {
 	routerID string
@@ -185,6 +187,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.routers = msg.routers
+		m.networkNames = msg.networkNames
+		m.subnetToNet = msg.subnetToNet
 		m.err = ""
 		if cursorID != "" {
 			for i, r := range m.routers {
@@ -215,8 +219,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.detailLoading = false
 			m.detailErr = ""
 			m.interfaces = msg.interfaces
-			m.networkNames = msg.networkNames
-			m.subnetToNet = msg.subnetToNet
 			m.clampDetailCursors()
 		}
 		return m, nil
@@ -699,7 +701,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 		return ""
 	}
 
-	labelW := 12
+	labelW := 14
 	labelStyle := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Bold(true).Width(labelW)
 	valueStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
 
@@ -1090,7 +1092,9 @@ func (m Model) Hints() string {
 func (m Model) fetchRouters() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
-		routers, err := network.ListRouters(context.Background(), client)
+		ctx := context.Background()
+
+		routers, err := network.ListRouters(ctx, client)
 		if err != nil {
 			return routersErrMsg{err: err}
 		}
@@ -1098,23 +1102,10 @@ func (m Model) fetchRouters() tea.Cmd {
 		sort.Slice(routers, func(i, j int) bool {
 			return strings.ToLower(routers[i].Name) < strings.ToLower(routers[j].Name)
 		})
-		return routersLoadedMsg{routers: routers}
-	}
-}
-
-func (m Model) fetchDetail(routerID string) tea.Cmd {
-	client := m.networkClient
-	return func() tea.Msg {
-		ctx := context.Background()
-
-		ifaces, err := network.ListRouterInterfaces(ctx, client, routerID)
-		if err != nil {
-			return detailErrMsg{routerID: routerID, err: err}
-		}
 
 		nets, err := network.ListNetworks(ctx, client)
 		if err != nil {
-			return detailErrMsg{routerID: routerID, err: err}
+			return routersErrMsg{err: err}
 		}
 		networkNames := make(map[string]string, len(nets))
 		for _, n := range nets {
@@ -1123,19 +1114,29 @@ func (m Model) fetchDetail(routerID string) tea.Cmd {
 
 		subs, err := network.ListSubnets(ctx, client)
 		if err != nil {
-			return detailErrMsg{routerID: routerID, err: err}
+			return routersErrMsg{err: err}
 		}
 		subnetToNet := make(map[string]string, len(subs))
 		for _, s := range subs {
 			subnetToNet[s.ID] = s.NetworkID
 		}
 
-		return detailLoadedMsg{
-			routerID:     routerID,
-			interfaces:   ifaces,
+		return routersLoadedMsg{
+			routers:      routers,
 			networkNames: networkNames,
 			subnetToNet:  subnetToNet,
 		}
+	}
+}
+
+func (m Model) fetchDetail(routerID string) tea.Cmd {
+	client := m.networkClient
+	return func() tea.Msg {
+		ifaces, err := network.ListRouterInterfaces(context.Background(), client, routerID)
+		if err != nil {
+			return detailErrMsg{routerID: routerID, err: err}
+		}
+		return detailLoadedMsg{routerID: routerID, interfaces: ifaces}
 	}
 }
 
