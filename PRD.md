@@ -16,7 +16,7 @@
 | Phase 2: Extended Compute | ✓ Complete | All actions, console log, resize, bulk ops, action history |
 | Phase 3: Additional Resources | ✓ Complete | Tabbed navigation, volumes, floating IPs, security groups, key pairs, networks (CRUD), routers (CRUD) |
 | Phase 4: Refactor, Octavia, Projects, Quotas | ✓ Complete | App refactor, dynamic tabs, Octavia LB tab, project switching, quota overlay |
-| Phase 5: Quality of Life | Partial | Server rename, rebuild, snapshot, rescue/unrescue, image management, confirmation dialogs for all actions — done. SSH, clipboard, config file, DNS — not started |
+| Phase 5: Quality of Life | Partial | Server rename, rebuild, snapshot, rescue/unrescue, image management, confirmation dialogs for all actions, SSH integration, console access (noVNC), server cloning, cross-resource navigation — done. Clipboard (general), config file, DNS — not started |
 | Phase 6: Operational | Not started | Admin views, hypervisor view, service catalog browser |
 
 ## Concerns and Considerations
@@ -738,7 +738,7 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 - ~~**Rescue/Unrescue**~~: ✓ Complete — `Ctrl+W`, toggle rescue mode
 
 #### Medium-value (specific scenarios)
-- **Console access (noVNC)** — Retrieve and open VNC console URL. Text console log exists but graphical console does not.
+- ~~**Console access (noVNC)**~~ ✓ Done — Retrieve and open VNC console URL via `V` key. Opens in browser or copies to clipboard.
 - **Get password** — Retrieve auto-generated password for Windows VMs (`servers.GetPassword`).
 
 #### Admin-only (Phase 6)
@@ -753,11 +753,11 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 - Custom column selection and ordering
 - Saved filters
 - Server name templates for create
-- SSH integration (launch SSH session to selected server)
-- Copy-to-clipboard for IDs, IPs
+- ~~SSH integration (launch SSH session to selected server)~~ ✓ Done (#27)
+- Copy-to-clipboard for IDs, IPs (general — SSH command copy done via `y`)
 - Log/audit trail of actions taken
 - Designate (DNS) tab
-- Console access (noVNC URL retrieval and browser launch)
+- ~~Console access (noVNC URL retrieval and browser launch)~~ ✓ Done (#50)
 
 ### Phase 6: Operational
 - Hypervisor view (admin)

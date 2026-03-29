@@ -40,6 +40,10 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 - **Confirmation dialogs** — all server state-change actions require explicit confirmation
 - **Dynamic tabs** — tabs appear based on available services (no Cinder? no Volumes tab)
 - **Auto-refresh** — all views refresh in the background at a configurable interval
+- **SSH integration** — launch SSH sessions directly from the TUI, or copy the SSH command to clipboard
+- **Console access** — retrieve noVNC console URL, open in browser or copy to clipboard
+- **Server cloning** — clone servers with one keypress
+- **Cross-resource navigation** — jump from server detail to attached volumes, security groups, or networks
 - **Console log** and **action history** per server
 - **Column sorting** on all list views
 - **Client-side filtering** with `/`
@@ -162,6 +166,10 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `r` | Rename |
 | `Ctrl+G` | Rebuild with new image |
 | `Ctrl+S` | Create snapshot |
+| `c` | Clone server |
+| `x` | SSH into server |
+| `y` | Copy SSH command |
+| `V` | Console URL (noVNC) |
 | `L` | Console log |
 | `a` | Action history |
 
@@ -184,6 +192,13 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `r` | Rename |
 | `Ctrl+G` | Rebuild with new image |
 | `Ctrl+S` | Create snapshot |
+| `c` | Clone server |
+| `x` | SSH into server |
+| `y` | Copy SSH command |
+| `V` | Console URL (noVNC) |
+| `v` | Jump to volumes |
+| `g` | Jump to security groups |
+| `N` | Jump to networks |
 | `L` | Console log |
 | `a` | Action history |
 | `Esc` | Back to list |
