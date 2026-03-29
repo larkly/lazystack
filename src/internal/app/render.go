@@ -33,8 +33,6 @@ func (m Model) viewName() string {
 		return "floatingiplist"
 	case viewSecGroupView:
 		return "secgroupview"
-	case viewSecGroupDetail:
-		return "sgdetail"
 	case viewKeypairList:
 		return "keypairlist"
 	case viewNetworkList:
@@ -169,8 +167,6 @@ func (m Model) viewContent() string {
 		content = m.floatingIPList.View()
 	case viewSecGroupView:
 		content = m.secGroupView.View()
-	case viewSecGroupDetail:
-		content = m.sgDetail.View()
 	case viewKeypairList:
 		content = m.keypairList.View()
 	case viewNetworkList:

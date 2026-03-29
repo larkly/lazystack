@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/larkly/lazystack/internal/cloud"
@@ -37,7 +36,6 @@ import (
 	"github.com/larkly/lazystack/internal/ui/projectpicker"
 	"github.com/larkly/lazystack/internal/ui/quotaview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
-	"github.com/larkly/lazystack/internal/ui/sgdetail"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
@@ -73,7 +71,6 @@ const (
 	viewVolumeDetail
 	viewFloatingIPList
 	viewSecGroupView
-	viewSecGroupDetail
 	viewKeypairList
 	viewLBList
 	viewLBDetail
@@ -149,7 +146,6 @@ type Model struct {
 	volumeCreate  volumecreate.Model
 	floatingIPList floatingiplist.Model
 	secGroupView  secgroupview.Model
-	sgDetail      sgdetail.Model
 	keypairList    keypairlist.Model
 	keypairCreate  keypaircreate.Model
 	keypairDetail  keypairdetail.Model
@@ -663,52 +659,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Security group view: context-sensitive create/delete + Enter to detail
+		// Security group view: context-sensitive actions based on focused pane
 		if m.view == viewSecGroupView {
-			if key.Matches(msg, shared.Keys.Enter) && !m.secGroupView.InRules() {
-				return m.openSGDetail()
-			}
-			if key.Matches(msg, shared.Keys.Delete) {
-				if m.secGroupView.InRules() {
+			pane := m.secGroupView.FocusedPane()
+			switch {
+			case key.Matches(msg, shared.Keys.Enter):
+				if serverID := m.secGroupView.SelectedServerID(); serverID != "" {
+					return m.handleDetailNavigation(shared.NavigateToDetailMsg{Resource: "server", ID: serverID})
+				}
+				if r := m.secGroupView.SelectedRule(); r != nil {
+					return m.openSGRuleEdit()
+				}
+			case key.Matches(msg, shared.Keys.Delete):
+				if pane == secgroupview.FocusRules && m.secGroupView.SelectedRuleID() != "" {
 					return m.openSGRuleDeleteConfirm()
 				}
-				return m.openSGDeleteConfirm()
-			}
-			if key.Matches(msg, shared.Keys.Create) {
-				if m.secGroupView.InRules() {
+				if (pane == secgroupview.FocusSelector || pane == secgroupview.FocusRules) && m.secGroupView.SelectedGroupName() != "default" {
+					return m.openSGDeleteConfirm()
+				}
+			case key.Matches(msg, shared.Keys.Create):
+				if pane == secgroupview.FocusRules {
 					return m.openSGRuleCreate()
 				}
 				return m.openSGCreate()
-			}
-		}
-
-		// Security group detail view
-		if m.view == viewSecGroupDetail {
-			if key.Matches(msg, shared.Keys.Enter) {
-				if serverID := m.sgDetail.SelectedServerID(); serverID != "" {
-					return m.openServerDetailFromSGDetail(serverID)
-				}
-				if r := m.sgDetail.SelectedRule(); r != nil {
-					return m.openSGRuleEditFromDetail()
-				}
-			}
-			if key.Matches(msg, shared.Keys.Delete) {
-				if m.sgDetail.FocusedPane() == sgdetail.FocusRules {
-					if ruleID := m.sgDetail.SelectedRuleID(); ruleID != "" {
-						return m.openSGRuleDeleteConfirmFromDetail()
-					}
-				}
-				if m.sgDetail.SGName() != "default" {
-					return m.openSGDeleteConfirmFromDetail()
-				}
-			}
-			if key.Matches(msg, shared.Keys.Create) {
-				return m.openSGRuleCreateFromDetail()
-			}
-			if key.Matches(msg, shared.Keys.Rename) && m.sgDetail.SGName() != "default" {
+			case key.Matches(msg, shared.Keys.Rename) && m.secGroupView.SelectedGroupName() != "default":
 				return m.openSGRename()
-			}
-			if key.Matches(msg, shared.Keys.Clone) {
+			case key.Matches(msg, shared.Keys.Clone):
 				return m.openSGClone()
 			}
 		}
@@ -1095,14 +1071,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = viewImageList
 			m.statusBar.CurrentView = "imagelist"
 		}
-		if m.view == viewSecGroupDetail {
-			if strings.Contains(msg.Action, "Deleted security group") {
-				m.view = viewSecGroupView
-				m.statusBar.CurrentView = "secgroupview"
-				return m, m.secGroupView.ForceRefresh()
-			}
-			// Rule delete, rename, clone: stay on detail and refresh
-			return m, m.sgDetail.ForceRefresh()
+		if m.view == viewSecGroupView {
+			return m, m.secGroupView.ForceRefresh()
 		}
 		return m, nil
 
