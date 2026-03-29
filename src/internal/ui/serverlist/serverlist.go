@@ -720,6 +720,15 @@ func (m Model) SelectionCount() int {
 	return len(m.selected)
 }
 
+// ServerNames returns a set of all server names in the current list.
+func (m Model) ServerNames() map[string]bool {
+	names := make(map[string]bool, len(m.servers))
+	for _, s := range m.servers {
+		names[s.Name] = true
+	}
+	return names
+}
+
 // ForceRefresh triggers a manual reload of the server list.
 func (m *Model) ForceRefresh() tea.Cmd {
 	m.loading = true

@@ -94,6 +94,14 @@ type ProjectSelectedMsg struct {
 	ProjectName string
 }
 
+// NavigateToResourceMsg requests navigation to a resource tab with the cursor
+// positioned on a specific resource. Used for cross-resource navigation
+// (e.g. server detail → attached volumes).
+type NavigateToResourceMsg struct {
+	Tab       string   // tab key: "volumes", "secgroups", "networks"
+	Highlight []string // resource IDs or names to scroll to
+}
+
 // SSHFinishedMsg is sent when the SSH process exits.
 type SSHFinishedMsg struct {
 	Err error

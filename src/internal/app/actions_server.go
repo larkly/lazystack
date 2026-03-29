@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/larkly/lazystack/internal/compute"
@@ -16,6 +17,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
@@ -26,6 +28,40 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"charm.land/bubbletea/v2"
 )
+
+func (m Model) openClone() (Model, tea.Cmd) {
+	var srv *compute.Server
+	switch m.view {
+	case viewServerList:
+		srv = m.serverList.SelectedServer()
+	case viewServerDetail:
+		srv = m.serverDetail.Server()
+	}
+	if srv == nil {
+		return m, nil
+	}
+
+	// Deduplicate server name using existing server list
+	cloneName := shared.DeduplicateName(srv.Name, m.serverList.ServerNames())
+
+	cfg := servercreate.CloneConfig{
+		SourceName:    cloneName,
+		ImageID:       srv.ImageID,
+		FlavorID:      srv.FlavorID,
+		FlavorName:    srv.FlavorName,
+		KeyName:       srv.KeyName,
+		SecGroupNames: srv.SecGroups,
+		NetworkNames:  srv.Networks,
+		VolumeIDs:     srv.VolAttach,
+	}
+
+	m.serverCreate = servercreate.NewClone(m.client.Compute, m.client.Image, m.client.Network, cfg)
+	m.serverCreate.SetSize(m.width, m.height)
+	m.view = viewServerCreate
+	m.statusBar.CurrentView = "servercreate"
+	m.statusBar.Hint = m.serverCreate.Hints()
+	return m, m.serverCreate.Init()
+}
 
 func (m Model) openRename() (Model, tea.Cmd) {
 	var id, name string
@@ -97,20 +133,18 @@ func (m Model) openDeleteConfirm() (Model, tea.Cmd) {
 		m.activeModal = modalConfirm
 		return m, nil
 	}
-	var id, name string
+	var srv *compute.Server
 	switch m.view {
 	case viewServerList:
-		if s := m.serverList.SelectedServer(); s != nil {
-			id, name = s.ID, s.Name
-		}
+		srv = m.serverList.SelectedServer()
 	case viewServerDetail:
-		id = m.serverDetail.ServerID()
-		name = m.serverDetail.ServerName()
+		srv = m.serverDetail.Server()
 	}
-	if id == "" {
+	if srv == nil {
 		return m, nil
 	}
-	m.confirm = modal.NewConfirm("delete", id, name)
+	m.confirm = modal.NewConfirm("delete", srv.ID, srv.Name)
+	m.confirm.VolumeIDs = srv.VolAttach
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil
@@ -505,10 +539,42 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 
 	switch action.Action {
 	case "delete":
+		bsClient := m.client.BlockStorage
+		computeC := m.client.Compute
+		deleteVols := action.DeleteVolumes
+		volIDs := action.VolumeIDs
 		return m, func() tea.Msg {
+			// Detach volumes before deleting the server
+			if deleteVols && bsClient != nil {
+				for _, vid := range volIDs {
+					_ = volume.DetachVolume(context.Background(), computeC, action.ServerID, vid)
+				}
+				// Wait for volumes to detach (up to 30s)
+				for range 10 {
+					allDetached := true
+					for _, vid := range volIDs {
+						v, err := volume.GetVolume(context.Background(), bsClient, vid)
+						if err == nil && v.Status != "available" {
+							allDetached = false
+							break
+						}
+					}
+					if allDetached {
+						break
+					}
+					time.Sleep(3 * time.Second)
+				}
+			}
+
 			err := compute.DeleteServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				return shared.ServerActionErrMsg{Action: "Delete", Name: action.Name, Err: err}
+			}
+
+			if deleteVols && bsClient != nil {
+				for _, vid := range volIDs {
+					volume.DeleteVolume(context.Background(), bsClient, vid)
+				}
 			}
 			return shared.ServerActionMsg{Action: "Delete", Name: action.Name}
 		}

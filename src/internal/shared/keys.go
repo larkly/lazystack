@@ -48,6 +48,10 @@ type KeyMap struct {
 	Snapshot    key.Binding
 	Deactivate  key.Binding
 	Rescue      key.Binding
+	Clone        key.Binding
+	JumpVolumes  key.Binding
+	JumpSecGroups key.Binding
+	JumpNetworks key.Binding
 	SSH         key.Binding
 	CopySSH     key.Binding
 	ConsoleURL  key.Binding
@@ -234,13 +238,29 @@ var Keys = KeyMap{
 		key.WithKeys("ctrl+w"),
 		key.WithHelp("ctrl+w", "rescue/unrescue"),
 	),
+	Clone: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "clone"),
+	),
+	JumpVolumes: key.NewBinding(
+		key.WithKeys("v"),
+		key.WithHelp("v", "jump to volumes"),
+	),
+	JumpSecGroups: key.NewBinding(
+		key.WithKeys("g"),
+		key.WithHelp("g", "jump to sec groups"),
+	),
+	JumpNetworks: key.NewBinding(
+		key.WithKeys("N"),
+		key.WithHelp("N", "jump to networks"),
+	),
 	SSH: key.NewBinding(
 		key.WithKeys("x"),
 		key.WithHelp("x", "SSH into server"),
 	),
 	CopySSH: key.NewBinding(
-		key.WithKeys("c"),
-		key.WithHelp("c", "copy SSH command"),
+		key.WithKeys("y"),
+		key.WithHelp("y", "copy SSH command"),
 	),
 	ConsoleURL: key.NewBinding(
 		key.WithKeys("V"),

@@ -173,9 +173,47 @@ func (m Model) updateModal(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) handleResourceNavigation(msg shared.NavigateToResourceMsg) (Model, tea.Cmd) {
+	// Find the target tab index
+	tabIdx := -1
+	for i, td := range m.tabs {
+		if td.Key == msg.Tab {
+			tabIdx = i
+			break
+		}
+	}
+	if tabIdx < 0 {
+		return m, nil
+	}
+
+	m.returnToView = m.view
+	m, cmd := m.switchTab(tabIdx)
+
+	// Position cursor on highlighted resource
+	switch msg.Tab {
+	case "volumes":
+		m.volumeList.SetHighlight(msg.Highlight)
+	case "secgroups":
+		m.secGroupView.ScrollToNames(msg.Highlight)
+	case "networks":
+		m.networkList.ScrollToNames(msg.Highlight)
+	}
+
+	return m, cmd
+}
+
 func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 	switch msg.View {
 	case "serverlist":
+		// If returning from a cross-resource jump, go back to server detail
+		if m.returnToView == viewServerDetail && m.serverDetail.ServerID() != "" {
+			m.returnToView = 0
+			m.view = viewServerDetail
+			m.statusBar.CurrentView = "serverdetail"
+			m.statusBar.Hint = m.serverDetail.Hints()
+			return m, nil
+		}
+		m.returnToView = 0
 		m.view = viewServerList
 		m.statusBar.CurrentView = "serverlist"
 		m.statusBar.Hint = m.serverList.Hints()

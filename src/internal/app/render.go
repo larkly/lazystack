@@ -125,6 +125,9 @@ func (m Model) viewContent() string {
 	if m.serverResize.Active {
 		return m.serverResize.View()
 	}
+	if m.cloneProgress.Active {
+		return m.cloneProgress.View()
+	}
 	if m.sshPrompt.Active {
 		return m.sshPrompt.View()
 	}
