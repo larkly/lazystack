@@ -878,9 +878,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		}
 	case "delete_lb_member":
 		lbClient := m.client.LoadBalancer
-		memberID := action.ServerID
 		name := action.Name
-		poolID := m.lbDetail.SelectedPoolForMember()
+		// ServerID encodes "poolID|memberID" captured at confirm time
+		parts := strings.SplitN(action.ServerID, "|", 2)
+		if len(parts) != 2 {
+			return m, nil
+		}
+		poolID, memberID := parts[0], parts[1]
 		return m, func() tea.Msg {
 			err := loadbalancer.DeleteMember(context.Background(), lbClient, poolID, memberID)
 			if err != nil {

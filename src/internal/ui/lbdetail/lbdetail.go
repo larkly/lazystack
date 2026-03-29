@@ -119,9 +119,6 @@ func (m Model) FocusedPane() FocusPane {
 
 // SelectedListenerID returns the ID of the currently selected listener, or "".
 func (m Model) SelectedListenerID() string {
-	if m.focus != FocusListeners {
-		return ""
-	}
 	if m.listenerCursor >= 0 && m.listenerCursor < len(m.listeners) {
 		return m.listeners[m.listenerCursor].ID
 	}
@@ -158,9 +155,6 @@ func (m Model) SelectedPoolName() string {
 
 // SelectedMemberID returns the ID of the currently selected member, or "".
 func (m Model) SelectedMemberID() string {
-	if m.focus != FocusMembers {
-		return ""
-	}
 	members := m.selectedPoolMembers()
 	if m.memberCursor >= 0 && m.memberCursor < len(members) {
 		return members[m.memberCursor].ID
@@ -181,10 +175,6 @@ func (m Model) SelectedMemberName() string {
 	return ""
 }
 
-// SelectedPoolForMember returns the pool ID that owns the currently displayed members.
-func (m Model) SelectedPoolForMember() string {
-	return m.selectedPoolID()
-}
 
 // SelectedListener returns the full Listener struct for the cursor, or nil.
 func (m Model) SelectedListener() *loadbalancer.Listener {

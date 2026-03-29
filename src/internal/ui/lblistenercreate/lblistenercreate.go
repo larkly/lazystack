@@ -239,8 +239,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.Active = false
 			return m, nil
 		default:
-			m.focusField++
-			m.updateFocus()
+			m.advanceFocus(1)
 		}
 		return m, nil
 	}
@@ -265,6 +264,10 @@ func (m *Model) updateFocus() {
 
 func (m Model) submit() (Model, tea.Cmd) {
 	name := strings.TrimSpace(m.nameInput.Value())
+	if name == "" {
+		m.err = "Name is required"
+		return m, nil
+	}
 
 	if m.editMode {
 		m.submitting = true
@@ -374,7 +377,11 @@ func (m Model) View() string {
 	}
 
 	if m.submitting {
-		rows = append(rows, m.spinner.View()+" Creating listener...")
+		action := "Creating"
+		if m.editMode {
+			action = "Updating"
+		}
+		rows = append(rows, m.spinner.View()+" "+action+" listener...")
 	} else {
 		rows = append(rows, submitStyle.Render("[ Submit ]")+"  "+cancelStyle.Render("[ Cancel ]"))
 	}

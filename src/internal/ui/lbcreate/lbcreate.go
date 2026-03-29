@@ -338,6 +338,10 @@ func (m *Model) updateFocus() {
 
 func (m Model) submit() (Model, tea.Cmd) {
 	name := strings.TrimSpace(m.nameInput.Value())
+	if name == "" {
+		m.err = "Name is required"
+		return m, nil
+	}
 
 	if m.editMode {
 		m.submitting = true
