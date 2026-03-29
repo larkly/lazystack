@@ -984,7 +984,7 @@ func (m Model) copySSHCommand() (Model, tea.Cmd) {
 		return m, nil
 	}
 	keyPath := ssh.FindKeyPath(keyName)
-	cmdStr := ssh.BuildCommandString("USER", ip, keyPath)
+	cmdStr := ssh.BuildCommandString(ssh.Options{User: "USER", IP: ip, KeyPath: keyPath})
 	if err := clipboard.WriteAll(cmdStr); err != nil {
 		m.statusBar.StickyHint = "Clipboard error: " + err.Error()
 	} else {

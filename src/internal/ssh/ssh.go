@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+// Options holds SSH connection parameters.
+type Options struct {
+	User    string
+	IP      string
+	KeyPath string
+	Debug   bool
+}
+
 // FindKeyPath looks for a private key matching the given key pair name
 // in ~/.ssh/. Returns the path if found, empty string otherwise.
 func FindKeyPath(keyName string) string {
@@ -45,23 +53,36 @@ func ChooseIP(floatingIPs, ipv6, ipv4 []string) string {
 	return ""
 }
 
-// BuildArgs returns the argument slice for exec.Command("ssh", args...).
-func BuildArgs(user, ip, keyPath string) []string {
-	var args []string
-	if keyPath != "" {
-		args = append(args, "-i", keyPath)
+func baseArgs() []string {
+	return []string{
+		"-t",
+		"-o", "ConnectTimeout=10",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=3",
 	}
-	args = append(args, user+"@"+ip)
+}
+
+// BuildArgs returns the argument slice for exec.Command("ssh", args...).
+func BuildArgs(opts Options) []string {
+	args := baseArgs()
+	if opts.Debug {
+		args = append(args, "-v")
+	}
+	if opts.KeyPath != "" {
+		args = append(args, "-i", opts.KeyPath)
+	}
+	args = append(args, opts.User+"@"+opts.IP)
 	return args
 }
 
 // BuildCommandString returns the full SSH command string for clipboard use.
-func BuildCommandString(user, ip, keyPath string) string {
+func BuildCommandString(opts Options) string {
 	var parts []string
 	parts = append(parts, "ssh")
-	if keyPath != "" {
-		parts = append(parts, "-i", keyPath)
+	parts = append(parts, baseArgs()...)
+	if opts.KeyPath != "" {
+		parts = append(parts, "-i", opts.KeyPath)
 	}
-	parts = append(parts, user+"@"+ip)
+	parts = append(parts, opts.User+"@"+opts.IP)
 	return strings.Join(parts, " ")
 }

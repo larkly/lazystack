@@ -970,7 +970,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sshprompt.SSHConnectMsg:
 		m.sshPrompt.Active = false
-		args := ssh.BuildArgs(msg.User, msg.IP, msg.KeyPath)
+		args := ssh.BuildArgs(ssh.Options{
+			User:    msg.User,
+			IP:      msg.IP,
+			KeyPath: msg.KeyPath,
+			Debug:   msg.Debug,
+		})
 		c := exec.Command("ssh", args...)
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return shared.SSHFinishedMsg{Err: err}

@@ -1,6 +1,10 @@
 package sshprompt
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/larkly/lazystack/internal/shared"
@@ -10,11 +14,19 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+const (
+	fieldUser    = 0
+	fieldKeyPath = 1
+	fieldDebug   = 2
+	numFields    = 3
+)
+
 // SSHConnectMsg is emitted when the user confirms the SSH username.
 type SSHConnectMsg struct {
 	User    string
 	IP      string
 	KeyPath string
+	Debug   bool
 }
 
 // Model is the SSH username prompt overlay modal.
@@ -22,28 +34,53 @@ type Model struct {
 	Active     bool
 	serverName string
 	ip         string
-	keyPath    string
-	input      textinput.Model
+	userInput  textinput.Model
+	keyInput   textinput.Model
+	debug      bool
+	focusField int
 	err        string
 	width      int
 	height     int
+
+	// Key file picker state.
+	pickerOpen   bool
+	pickerCursor int
+	pickerFilter textinput.Model
+	pickerFiles  []string // full paths
 }
 
 // New creates an SSH prompt modal for the given server.
 func New(serverName, ip, keyPath string) Model {
-	ti := textinput.New()
-	ti.Prompt = ""
-	ti.Placeholder = "username"
-	ti.CharLimit = 64
-	ti.SetWidth(30)
-	ti.Focus()
+	ui := textinput.New()
+	ui.Prompt = ""
+	ui.Placeholder = "username"
+	ui.CharLimit = 64
+	ui.SetWidth(30)
+	ui.Focus()
+
+	ki := textinput.New()
+	ki.Prompt = ""
+	ki.Placeholder = "~/.ssh/id_rsa"
+	ki.CharLimit = 256
+	ki.SetWidth(30)
+	ki.SetValue(keyPath)
+	ki.Blur()
+
+	pf := textinput.New()
+	pf.Prompt = "  / "
+	pf.Placeholder = "filter"
+	pf.CharLimit = 64
+	pf.SetWidth(26)
 
 	return Model{
-		Active:     true,
-		serverName: serverName,
-		ip:         ip,
-		keyPath:    keyPath,
-		input:      ti,
+		Active:       true,
+		serverName:   serverName,
+		ip:           ip,
+		userInput:    ui,
+		keyInput:     ki,
+		pickerFilter: pf,
+		pickerFiles:  listSSHKeys(),
+		focusField:   fieldUser,
 	}
 }
 
@@ -62,27 +99,153 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
+	// Forward non-key messages (e.g. blink) to active text input.
+	if m.pickerOpen {
+		var cmd tea.Cmd
+		m.pickerFilter, cmd = m.pickerFilter.Update(msg)
+		return m, cmd
+	}
+	if m.isTextInput() {
+		var cmd tea.Cmd
+		if m.focusField == fieldUser {
+			m.userInput, cmd = m.userInput.Update(msg)
+		} else {
+			m.keyInput, cmd = m.keyInput.Update(msg)
+		}
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m Model) isTextInput() bool {
+	return m.focusField == fieldUser || m.focusField == fieldKeyPath
+}
+
+func (m *Model) updateFocus() {
+	if m.focusField == fieldUser {
+		m.userInput.Focus()
+	} else {
+		m.userInput.Blur()
+	}
+	if m.focusField == fieldKeyPath && !m.pickerOpen {
+		m.keyInput.Focus()
+	} else {
+		m.keyInput.Blur()
+	}
+}
+
+func (m *Model) advanceFocus() {
+	m.focusField = (m.focusField + 1) % numFields
+	m.updateFocus()
+}
+
+func (m *Model) retreatFocus() {
+	m.focusField = (m.focusField - 1 + numFields) % numFields
+	m.updateFocus()
+}
+
+func (m *Model) openPicker() {
+	m.pickerOpen = true
+	m.pickerCursor = 0
+	m.pickerFilter.SetValue("")
+	m.pickerFilter.Focus()
+	m.keyInput.Blur()
+}
+
+func (m *Model) closePicker() {
+	m.pickerOpen = false
+	m.pickerFilter.Blur()
+	m.updateFocus()
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.pickerOpen {
+		return m.updatePicker(msg)
+	}
+
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		m.Active = false
 		return m, nil
 	case key.Matches(msg, shared.Keys.Enter):
+		if m.focusField == fieldKeyPath {
+			m.openPicker()
+			return m, nil
+		}
 		return m.submit()
-	default:
+	case key.Matches(msg, shared.Keys.Tab):
+		m.advanceFocus()
+		return m, nil
+	case key.Matches(msg, shared.Keys.ShiftTab):
+		m.retreatFocus()
+		return m, nil
+	}
+
+	if m.isTextInput() {
 		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
+		if m.focusField == fieldUser {
+			m.userInput, cmd = m.userInput.Update(msg)
+		} else {
+			m.keyInput, cmd = m.keyInput.Update(msg)
+		}
 		return m, cmd
 	}
+
+	// On debug checkbox field.
+	if key.Matches(msg, shared.Keys.Select) {
+		m.debug = !m.debug
+	}
+	return m, nil
+}
+
+func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
+	filtered := m.filteredPickerFiles()
+
+	switch msg.String() {
+	case "esc":
+		m.closePicker()
+		return m, nil
+	case "enter":
+		if len(filtered) > 0 && m.pickerCursor < len(filtered) {
+			m.keyInput.SetValue(filtered[m.pickerCursor])
+		}
+		m.closePicker()
+		m.advanceFocus()
+		return m, nil
+	case "up", "k":
+		if m.pickerCursor > 0 {
+			m.pickerCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.pickerCursor < len(filtered)-1 {
+			m.pickerCursor++
+		}
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.pickerFilter, cmd = m.pickerFilter.Update(msg)
+	m.pickerCursor = 0
+	return m, cmd
+}
+
+func (m Model) filteredPickerFiles() []string {
+	q := strings.ToLower(m.pickerFilter.Value())
+	if q == "" {
+		return m.pickerFiles
+	}
+	var out []string
+	for _, f := range m.pickerFiles {
+		if strings.Contains(strings.ToLower(filepath.Base(f)), q) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
-	user := strings.TrimSpace(m.input.Value())
+	user := strings.TrimSpace(m.userInput.Value())
 	if user == "" {
 		m.err = "Username cannot be empty"
 		return m, nil
@@ -92,7 +255,8 @@ func (m Model) submit() (Model, tea.Cmd) {
 		return SSHConnectMsg{
 			User:    user,
 			IP:      m.ip,
-			KeyPath: m.keyPath,
+			KeyPath: strings.TrimSpace(m.keyInput.Value()),
+			Debug:   m.debug,
 		}
 	}
 }
@@ -109,20 +273,91 @@ func (m Model) View() string {
 
 	muted := lipgloss.NewStyle().Foreground(shared.ColorMuted)
 	label := lipgloss.NewStyle().Foreground(shared.ColorSecondary)
+	cursor := lipgloss.NewStyle().Foreground(shared.ColorPrimary).Bold(true)
 
 	body.WriteString("  " + label.Render("Server") + "  " + m.serverName + "\n")
-	body.WriteString("  " + label.Render("Host  ") + "  " + m.ip + "\n")
-	if m.keyPath != "" {
-		body.WriteString("  " + label.Render("Key   ") + "  " + muted.Render(m.keyPath) + "\n")
-	} else {
-		body.WriteString("  " + label.Render("Key   ") + "  " + muted.Render("(default)") + "\n")
+	body.WriteString("  " + label.Render("Host  ") + "  " + m.ip + "\n\n")
+
+	// User field
+	prefix := "  "
+	if m.focusField == fieldUser {
+		prefix = cursor.Render("> ")
 	}
-	body.WriteString("\n")
-	body.WriteString("  " + label.Render("User  ") + "  " + m.input.View() + "\n\n")
-	body.WriteString(shared.StyleHelp.Render("  enter: connect  esc: cancel"))
+	body.WriteString(prefix + label.Render("User  ") + "  " + m.userInput.View() + "\n")
+
+	// Key field
+	prefix = "  "
+	if m.focusField == fieldKeyPath {
+		prefix = cursor.Render("> ")
+	}
+	keyDisplay := m.keyInput.View()
+	if m.keyInput.Value() == "" && !m.keyInput.Focused() {
+		keyDisplay = muted.Render("(default)")
+	}
+	body.WriteString(prefix + label.Render("Key   ") + "  " + keyDisplay + "\n")
+
+	// Inline picker
+	if m.pickerOpen {
+		body.WriteString(m.renderPicker())
+	}
+
+	// Debug checkbox
+	prefix = "  "
+	if m.focusField == fieldDebug {
+		prefix = cursor.Render("> ")
+	}
+	check := "[ ]"
+	if m.debug {
+		check = "[x]"
+	}
+	body.WriteString(fmt.Sprintf("%s%s %s\n\n", prefix, check, muted.Render("verbose mode (-v)")))
+
+	help := "tab: next  space: toggle  enter: connect  esc: cancel"
+	if m.focusField == fieldKeyPath && !m.pickerOpen {
+		help = "enter: browse keys  tab: next  esc: cancel"
+	}
+	body.WriteString(shared.StyleHelp.Render("  " + help))
 
 	content := title + "\n\n" + body.String()
 	return m.renderModal(content)
+}
+
+func (m Model) renderPicker() string {
+	var b strings.Builder
+	filtered := m.filteredPickerFiles()
+
+	b.WriteString("    " + m.pickerFilter.View() + "\n")
+
+	maxShow := 8
+	if len(filtered) < maxShow {
+		maxShow = len(filtered)
+	}
+
+	start := 0
+	if m.pickerCursor >= maxShow {
+		start = m.pickerCursor - maxShow + 1
+	}
+	end := start + maxShow
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+
+	for i := start; i < end; i++ {
+		name := filepath.Base(filtered[i])
+		cur := "  "
+		style := lipgloss.NewStyle().Foreground(shared.ColorFg)
+		if i == m.pickerCursor {
+			cur = "▸ "
+			style = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
+		}
+		b.WriteString(fmt.Sprintf("      %s%s\n", cur, style.Render(name)))
+	}
+
+	if len(filtered) == 0 {
+		b.WriteString("      " + lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("no keys found") + "\n")
+	}
+
+	return b.String()
 }
 
 func (m Model) renderModal(content string) string {
@@ -138,4 +373,36 @@ func (m Model) renderModal(content string) string {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// listSSHKeys returns private key file paths from ~/.ssh/, sorted by name.
+func listSSHKeys() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	sshDir := filepath.Join(home, ".ssh")
+	entries, err := os.ReadDir(sshDir)
+	if err != nil {
+		return nil
+	}
+
+	var keys []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Skip public keys, known_hosts, config, and other non-key files.
+		if strings.HasSuffix(name, ".pub") ||
+			name == "known_hosts" ||
+			name == "known_hosts.old" ||
+			name == "config" ||
+			name == "authorized_keys" {
+			continue
+		}
+		keys = append(keys, filepath.Join(sshDir, name))
+	}
+	sort.Strings(keys)
+	return keys
 }
