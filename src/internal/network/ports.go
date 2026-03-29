@@ -11,14 +11,16 @@ import (
 
 // Port is a simplified representation of a Neutron port.
 type Port struct {
-	ID          string
-	Name        string
-	Status      string
-	MACAddress  string
-	FixedIPs    []FixedIP
-	DeviceOwner string
-	DeviceID    string
-	NetworkID   string
+	ID             string
+	Name           string
+	Status         string
+	MACAddress     string
+	FixedIPs       []FixedIP
+	DeviceOwner    string
+	DeviceID       string
+	NetworkID      string
+	SecurityGroups []string
+	AdminStateUp   bool
 }
 
 // FixedIP is an IP address assigned to a port.
@@ -37,13 +39,15 @@ func ListPortsByDevice(ctx context.Context, client *gophercloud.ServiceClient, d
 		}
 		for _, p := range extracted {
 			port := Port{
-				ID:          p.ID,
-				Name:        p.Name,
-				Status:      p.Status,
-				MACAddress:  p.MACAddress,
-				DeviceOwner: p.DeviceOwner,
-				DeviceID:    p.DeviceID,
-				NetworkID:   p.NetworkID,
+				ID:             p.ID,
+				Name:           p.Name,
+				Status:         p.Status,
+				MACAddress:     p.MACAddress,
+				DeviceOwner:    p.DeviceOwner,
+				DeviceID:       p.DeviceID,
+				NetworkID:      p.NetworkID,
+				SecurityGroups: p.SecurityGroups,
+				AdminStateUp:   p.AdminStateUp,
 			}
 			for _, ip := range p.FixedIPs {
 				port.FixedIPs = append(port.FixedIPs, FixedIP{
@@ -71,13 +75,15 @@ func ListPortsBySecurityGroup(ctx context.Context, client *gophercloud.ServiceCl
 		}
 		for _, p := range extracted {
 			port := Port{
-				ID:          p.ID,
-				Name:        p.Name,
-				Status:      p.Status,
-				MACAddress:  p.MACAddress,
-				DeviceOwner: p.DeviceOwner,
-				DeviceID:    p.DeviceID,
-				NetworkID:   p.NetworkID,
+				ID:             p.ID,
+				Name:           p.Name,
+				Status:         p.Status,
+				MACAddress:     p.MACAddress,
+				DeviceOwner:    p.DeviceOwner,
+				DeviceID:       p.DeviceID,
+				NetworkID:      p.NetworkID,
+				SecurityGroups: p.SecurityGroups,
+				AdminStateUp:   p.AdminStateUp,
 			}
 			for _, ip := range p.FixedIPs {
 				port.FixedIPs = append(port.FixedIPs, FixedIP{
@@ -105,13 +111,15 @@ func ListPorts(ctx context.Context, client *gophercloud.ServiceClient, networkID
 		}
 		for _, p := range extracted {
 			port := Port{
-				ID:          p.ID,
-				Name:        p.Name,
-				Status:      p.Status,
-				MACAddress:  p.MACAddress,
-				DeviceOwner: p.DeviceOwner,
-				DeviceID:    p.DeviceID,
-				NetworkID:   p.NetworkID,
+				ID:             p.ID,
+				Name:           p.Name,
+				Status:         p.Status,
+				MACAddress:     p.MACAddress,
+				DeviceOwner:    p.DeviceOwner,
+				DeviceID:       p.DeviceID,
+				NetworkID:      p.NetworkID,
+				SecurityGroups: p.SecurityGroups,
+				AdminStateUp:   p.AdminStateUp,
 			}
 			for _, ip := range p.FixedIPs {
 				port.FixedIPs = append(port.FixedIPs, FixedIP{
