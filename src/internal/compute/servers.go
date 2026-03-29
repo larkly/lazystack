@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/remoteconsoles"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 )
@@ -266,6 +267,19 @@ func RenameServer(ctx context.Context, client *gophercloud.ServiceClient, id, ne
 		return fmt.Errorf("renaming server %s: %w", id, err)
 	}
 	return nil
+}
+
+// GetRemoteConsole retrieves a noVNC console URL for a server.
+func GetRemoteConsole(ctx context.Context, client *gophercloud.ServiceClient, id string) (string, error) {
+	result := remoteconsoles.Create(ctx, client, id, remoteconsoles.CreateOpts{
+		Protocol: remoteconsoles.ConsoleProtocolVNC,
+		Type:     remoteconsoles.ConsoleTypeNoVNC,
+	})
+	rc, err := result.Extract()
+	if err != nil {
+		return "", fmt.Errorf("getting remote console for %s: %w", id, err)
+	}
+	return rc.URL, nil
 }
 
 // GetConsoleOutput retrieves console output for a server.

@@ -128,6 +128,12 @@ func (m Model) viewContent() string {
 	if m.cloneProgress.Active {
 		return m.cloneProgress.View()
 	}
+	if m.sshPrompt.Active {
+		return m.sshPrompt.View()
+	}
+	if m.consoleURL.Active {
+		return m.consoleURL.View()
+	}
 
 	var content string
 	switch m.view {

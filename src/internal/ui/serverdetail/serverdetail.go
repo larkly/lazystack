@@ -353,6 +353,38 @@ func (m Model) ServerLocked() bool {
 	return false
 }
 
+// ServerKeyName returns the server's key pair name.
+func (m Model) ServerKeyName() string {
+	if m.server != nil {
+		return m.server.KeyName
+	}
+	return ""
+}
+
+// ServerFloatingIPs returns the server's floating IPs.
+func (m Model) ServerFloatingIPs() []string {
+	if m.server != nil {
+		return m.server.FloatingIP
+	}
+	return nil
+}
+
+// ServerIPv6 returns the server's IPv6 addresses.
+func (m Model) ServerIPv6() []string {
+	if m.server != nil {
+		return m.server.IPv6
+	}
+	return nil
+}
+
+// ServerIPv4 returns the server's IPv4 addresses.
+func (m Model) ServerIPv4() []string {
+	if m.server != nil {
+		return m.server.IPv4
+	}
+	return nil
+}
+
 // SetServer updates the server data directly.
 func (m *Model) SetServer(s *compute.Server) {
 	if m.pendingAction != "" && s != nil && s.Status != "VERIFY_RESIZE" {

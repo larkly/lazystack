@@ -52,6 +52,9 @@ type KeyMap struct {
 	JumpVolumes  key.Binding
 	JumpSecGroups key.Binding
 	JumpNetworks key.Binding
+	SSH         key.Binding
+	CopySSH     key.Binding
+	ConsoleURL  key.Binding
 }
 
 var Keys = KeyMap{
@@ -250,5 +253,17 @@ var Keys = KeyMap{
 	JumpNetworks: key.NewBinding(
 		key.WithKeys("N"),
 		key.WithHelp("N", "jump to networks"),
+	),
+	SSH: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "SSH into server"),
+	),
+	CopySSH: key.NewBinding(
+		key.WithKeys("y"),
+		key.WithHelp("y", "copy SSH command"),
+	),
+	ConsoleURL: key.NewBinding(
+		key.WithKeys("V"),
+		key.WithHelp("V", "console URL (noVNC)"),
 	),
 }
