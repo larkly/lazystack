@@ -262,7 +262,7 @@ var viewSections = map[string][]string{
 	"volumecreate":  {"Create Form"},
 	"floatingiplist": {"Floating IPs"},
 	"secgroupview":  {"Security Groups"},
-	"networklist":   {"Networks"},
+	"networkview":   {"Networks"},
 	"keypairlist":   {"Key Pairs"},
 	"keypairdetail": {"Key Pairs"},
 	"keypaircreate": {"Create Form"},

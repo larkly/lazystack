@@ -31,7 +31,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/routerdetail"
 	"github.com/larkly/lazystack/internal/ui/routerlist"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
-	"github.com/larkly/lazystack/internal/ui/networklist"
+	"github.com/larkly/lazystack/internal/ui/networkview"
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/projectpicker"
 	"github.com/larkly/lazystack/internal/ui/quotaview"
@@ -146,7 +146,7 @@ type Model struct {
 	keypairDetail  keypairdetail.Model
 	imageList      imagelist.Model
 	imageDetail    imagedetail.Model
-	networkList   networklist.Model
+	networkView   networkview.Model
 	lbList         lblist.Model
 	lbDetail       lbdetail.Model
 	cloneProgress  cloneprogress.Model
@@ -684,18 +684,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Network list: context-sensitive create/delete for networks and subnets
-		// When expanded: ctrl+n creates subnet, ctrl+d on subnet deletes subnet
-		// When collapsed: ctrl+n creates network, ctrl+d deletes network
+		// Network view: context-sensitive create/delete for networks and subnets
+		// When subnets pane focused: ctrl+n creates subnet, ctrl+d deletes subnet
+		// Otherwise: ctrl+n creates network, ctrl+d deletes network
 		if m.view == viewNetworkList {
 			if key.Matches(msg, shared.Keys.Delete) {
-				if m.networkList.InSubnets() {
+				if m.networkView.InSubnets() {
 					return m.openSubnetDeleteConfirm()
 				}
 				return m.openNetworkDeleteConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Create) {
-				if m.networkList.InSubnets() || m.networkList.IsExpanded() {
+				if m.networkView.InSubnets() {
 					return m.openSubnetCreate()
 				}
 				return m.openNetworkCreate()
