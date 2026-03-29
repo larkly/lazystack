@@ -17,6 +17,7 @@ import (
 )
 
 var version = "dev"
+var noUpdate = "false"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -34,7 +35,14 @@ func main() {
 		return
 	}
 
+	noUpdateBuild := noUpdate == "true" || noUpdate == "1"
+
 	if *doUpdate {
+		if noUpdateBuild {
+			fmt.Fprintln(os.Stderr, "This build of lazystack is managed by your system package manager.")
+			fmt.Fprintln(os.Stderr, "Use your package manager to update (e.g., pacman -Syu, apt upgrade, dnf upgrade).")
+			os.Exit(1)
+		}
 		latest, downloadURL, checksumsURL, err := selfupdate.CheckLatest(version)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -101,6 +109,7 @@ func main() {
 		IdleTimeout:     time.Duration(cfg.General.IdleTimeout) * time.Minute,
 		Version:         version,
 		CheckUpdate:     cfg.General.CheckForUpdates,
+		NoUpdateBuild:   noUpdateBuild,
 		Plain:           cfg.General.PlainMode,
 		Config:          &cfg,
 	})
