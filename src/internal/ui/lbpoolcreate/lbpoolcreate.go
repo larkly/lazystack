@@ -367,6 +367,10 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) submit() (Model, tea.Cmd) {
 	name := strings.TrimSpace(m.nameInput.Value())
+	if name == "" {
+		m.err = "Name is required"
+		return m, nil
+	}
 	lbMethod := lbMethodOpts[m.selectedLBMethod]
 
 	if m.editMode {
@@ -449,7 +453,7 @@ func (m Model) Hints() string {
 	return "tab/↑↓ navigate • ←→ pick option • ctrl+s submit • esc cancel"
 }
 
-func renderPicker(opts []string, selected int, focused bool) string {
+func renderPicker(opts []string, selected int, _ bool) string {
 	var parts []string
 	for i, o := range opts {
 		if i == selected {

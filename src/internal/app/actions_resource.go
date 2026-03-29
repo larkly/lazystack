@@ -499,7 +499,7 @@ func (m Model) openLBPoolDeleteConfirm() (Model, tea.Cmd) {
 
 func (m Model) openLBMemberEdit() (Model, tea.Cmd) {
 	mem := m.lbDetail.SelectedMember()
-	poolID := m.lbDetail.SelectedPoolForMember()
+	poolID := m.lbDetail.SelectedPoolID()
 	poolName := m.lbDetail.SelectedPoolName()
 	if mem == nil || poolID == "" {
 		return m, nil
@@ -523,12 +523,12 @@ func (m Model) openLBMemberCreate() (Model, tea.Cmd) {
 func (m Model) openLBMemberDeleteConfirm() (Model, tea.Cmd) {
 	memberID := m.lbDetail.SelectedMemberID()
 	memberName := m.lbDetail.SelectedMemberName()
-	poolID := m.lbDetail.SelectedPoolForMember()
+	poolID := m.lbDetail.SelectedPoolID()
 	if memberID == "" || poolID == "" {
 		return m, nil
 	}
-	// Store poolID in the confirm action's ServerID field (reused for resource ID)
-	c := modal.NewConfirm("delete_lb_member", memberID, memberName)
+	// Encode poolID|memberID in ServerID so it's captured at confirm time
+	c := modal.NewConfirm("delete_lb_member", poolID+"|"+memberID, memberName)
 	c.Title = "Delete Member"
 	c.Body = fmt.Sprintf("Are you sure you want to remove member %q from the pool?", memberName)
 	c.SetSize(m.width, m.height)

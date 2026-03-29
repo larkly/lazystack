@@ -403,7 +403,11 @@ func (m Model) View() string {
 	}
 
 	if m.submitting {
-		rows = append(rows, m.spinner.View()+" Adding member...")
+		action := "Adding"
+		if m.editMode {
+			action = "Updating"
+		}
+		rows = append(rows, m.spinner.View()+" "+action+" member...")
 	} else {
 		rows = append(rows, submitStyle.Render("[ Submit ]")+"  "+cancelStyle.Render("[ Cancel ]"))
 	}

@@ -367,54 +367,6 @@ func UpdateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID
 	return nil
 }
 
-// CreateHealthMonitor creates a health monitor for a pool.
-func CreateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, poolID, monType string, delay, timeout, maxRetries int, urlPath, expectedCodes, httpMethod string) (*HealthMonitor, error) {
-	opts := monitors.CreateOpts{
-		PoolID:     poolID,
-		Type:       monType,
-		Delay:      delay,
-		Timeout:    timeout,
-		MaxRetries: maxRetries,
-	}
-	if urlPath != "" {
-		opts.URLPath = urlPath
-	}
-	if expectedCodes != "" {
-		opts.ExpectedCodes = expectedCodes
-	}
-	if httpMethod != "" {
-		opts.HTTPMethod = httpMethod
-	}
-	mon, err := monitors.Create(ctx, client, opts).Extract()
-	if err != nil {
-		return nil, fmt.Errorf("creating health monitor: %w", err)
-	}
-	return &HealthMonitor{
-		ID:                 mon.ID,
-		Name:               mon.Name,
-		Type:               mon.Type,
-		Delay:              mon.Delay,
-		Timeout:            mon.Timeout,
-		MaxRetries:         mon.MaxRetries,
-		MaxRetriesDown:     mon.MaxRetriesDown,
-		HTTPMethod:         mon.HTTPMethod,
-		URLPath:            mon.URLPath,
-		ExpectedCodes:      mon.ExpectedCodes,
-		AdminStateUp:       mon.AdminStateUp,
-		OperatingStatus:    mon.OperatingStatus,
-		ProvisioningStatus: mon.ProvisioningStatus,
-	}, nil
-}
-
-// DeleteHealthMonitor deletes a health monitor.
-func DeleteHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
-	r := monitors.Delete(ctx, client, id)
-	if r.Err != nil {
-		return fmt.Errorf("deleting health monitor %s: %w", id, r.Err)
-	}
-	return nil
-}
-
 // ListMembers fetches members for a pool.
 func ListMembers(ctx context.Context, client *gophercloud.ServiceClient, poolID string) ([]Member, error) {
 	var result []Member
