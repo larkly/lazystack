@@ -28,12 +28,12 @@ const (
 const focusPaneCount = 4
 const narrowThreshold = 80
 
-type routersLoadedMsg struct {
-	routers      []network.Router
+type routersLoadedMsg struct{ routers []network.Router }
+type routersErrMsg struct{ err error }
+type namesLoadedMsg struct {
 	networkNames map[string]string
 	subnetToNet  map[string]string
 }
-type routersErrMsg struct{ err error }
 type detailLoadedMsg struct {
 	routerID   string
 	interfaces []network.RouterInterface
@@ -94,7 +94,7 @@ func New(networkClient *gophercloud.ServiceClient, refreshInterval time.Duration
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchRouters())
+	return tea.Batch(m.spinner.Tick, m.fetchRouters(), m.fetchNames())
 }
 
 func (m Model) selectedRouter() *network.Router {
@@ -187,8 +187,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.routers = msg.routers
-		m.networkNames = msg.networkNames
-		m.subnetToNet = msg.subnetToNet
 		m.err = ""
 		if cursorID != "" {
 			for i, r := range m.routers {
@@ -213,6 +211,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, m.tickCmd()
+
+	case namesLoadedMsg:
+		m.networkNames = msg.networkNames
+		m.subnetToNet = msg.subnetToNet
+		return m, nil
 
 	case detailLoadedMsg:
 		if r := m.selectedRouter(); r != nil && r.ID == msg.routerID {
@@ -1032,7 +1035,7 @@ func (m Model) renderActionBar() string {
 // ForceRefresh triggers a manual reload.
 func (m *Model) ForceRefresh() tea.Cmd {
 	m.loading = true
-	cmds := []tea.Cmd{m.spinner.Tick, m.fetchRouters()}
+	cmds := []tea.Cmd{m.spinner.Tick, m.fetchRouters(), m.fetchNames()}
 	if r := m.selectedRouter(); r != nil {
 		m.detailLoading = true
 		cmds = append(cmds, m.fetchDetail(r.ID))
@@ -1092,40 +1095,38 @@ func (m Model) Hints() string {
 func (m Model) fetchRouters() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
-		ctx := context.Background()
-
-		routers, err := network.ListRouters(ctx, client)
+		routers, err := network.ListRouters(context.Background(), client)
 		if err != nil {
 			return routersErrMsg{err: err}
 		}
-		// Sort by name
 		sort.Slice(routers, func(i, j int) bool {
 			return strings.ToLower(routers[i].Name) < strings.ToLower(routers[j].Name)
 		})
+		return routersLoadedMsg{routers: routers}
+	}
+}
 
+func (m Model) fetchNames() tea.Cmd {
+	client := m.networkClient
+	return func() tea.Msg {
+		ctx := context.Background()
 		nets, err := network.ListNetworks(ctx, client)
 		if err != nil {
-			return routersErrMsg{err: err}
+			return namesLoadedMsg{} // non-fatal, use stale cache
 		}
 		networkNames := make(map[string]string, len(nets))
 		for _, n := range nets {
 			networkNames[n.ID] = n.Name
 		}
-
 		subs, err := network.ListSubnets(ctx, client)
 		if err != nil {
-			return routersErrMsg{err: err}
+			return namesLoadedMsg{networkNames: networkNames}
 		}
 		subnetToNet := make(map[string]string, len(subs))
 		for _, s := range subs {
 			subnetToNet[s.ID] = s.NetworkID
 		}
-
-		return routersLoadedMsg{
-			routers:      routers,
-			networkNames: networkNames,
-			subnetToNet:  subnetToNet,
-		}
+		return namesLoadedMsg{networkNames: networkNames, subnetToNet: subnetToNet}
 	}
 }
 
