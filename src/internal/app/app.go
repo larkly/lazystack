@@ -558,7 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.isSelectedServerLocked() && key.Matches(msg,
 				shared.Keys.Delete, shared.Keys.Reboot, shared.Keys.HardReboot,
 				shared.Keys.Pause, shared.Keys.Suspend, shared.Keys.Shelve,
-				shared.Keys.StopStart, shared.Keys.Rescue, shared.Keys.SSH,
+				shared.Keys.StopStart, shared.Keys.Rescue,
 				shared.Keys.Resize, shared.Keys.Rename, shared.Keys.Rebuild,
 				shared.Keys.Snapshot, shared.Keys.ConfirmResize, shared.Keys.RevertResize,
 				shared.Keys.Attach, shared.Keys.Clone,

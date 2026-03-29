@@ -23,11 +23,12 @@ type focusPane int
 const (
 	focusInfo focusPane = iota
 	focusInterfaces
+	focusVolumes
 	focusConsole
 	focusActions
 )
 
-const focusPaneCount = 4
+const focusPaneCount = 5
 
 const (
 	narrowThreshold = 80
@@ -66,8 +67,8 @@ type interfacesErrMsg struct {
 	err error
 }
 
-type volumeNamesLoadedMsg struct {
-	names map[string]string // volume ID → name
+type volumeInfoLoadedMsg struct {
+	volumes map[string]*volume.Volume
 }
 
 type detailTickMsg struct{}
@@ -103,7 +104,9 @@ type Model struct {
 	interfacesLoading bool
 	interfacesErr    string
 
-	volumeNames map[string]string // volume ID → display name
+	volumeInfo   map[string]*volume.Volume // volume ID → full volume data
+	volumeScroll int
+	volumeCursor int
 
 	focus focusPane
 }
@@ -124,7 +127,7 @@ func New(client, networkClient, blockClient *gophercloud.ServiceClient, serverID
 		interfacesLoading: true,
 		spinner:           s,
 		refreshInterval:   refreshInterval,
-		volumeNames:       make(map[string]string),
+		volumeInfo:        make(map[string]*volume.Volume),
 	}
 }
 
@@ -180,13 +183,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.server != nil && len(msg.server.VolAttach) > 0 && m.blockClient != nil {
 			needFetch := false
 			for _, va := range msg.server.VolAttach {
-				if _, ok := m.volumeNames[va.ID]; !ok {
+				if _, ok := m.volumeInfo[va.ID]; !ok {
 					needFetch = true
 					break
 				}
 			}
 			if needFetch {
-				return m, m.fetchVolumeNames(msg.server.VolAttach)
+				return m, m.fetchVolumeInfo(msg.server.VolAttach)
 			}
 		}
 		return m, nil
@@ -233,9 +236,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.interfacesErr = msg.err.Error()
 		return m, nil
 
-	case volumeNamesLoadedMsg:
-		for id, name := range msg.names {
-			m.volumeNames[id] = name
+	case volumeInfoLoadedMsg:
+		for id, vol := range msg.volumes {
+			m.volumeInfo[id] = vol
 		}
 		return m, nil
 
@@ -278,6 +281,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, shared.Keys.ShiftTab):
 		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
+		return m, nil
+
+	case key.Matches(msg, shared.Keys.Enter):
+		// Enter on volumes pane navigates to selected volume detail
+		if m.focus == focusVolumes && m.server != nil && len(m.server.VolAttach) > 0 {
+			idx := m.volumeCursor
+			if idx >= 0 && idx < len(m.server.VolAttach) {
+				volID := m.server.VolAttach[idx].ID
+				return m, func() tea.Msg {
+					return shared.NavigateToDetailMsg{Resource: "volume", ID: volID}
+				}
+			}
+		}
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Up):
@@ -358,6 +374,13 @@ func (m *Model) scrollUp(n int) {
 		if m.interfacesScroll < 0 {
 			m.interfacesScroll = 0
 		}
+	case focusVolumes:
+		if m.server != nil {
+			m.volumeCursor -= n
+			if m.volumeCursor < 0 {
+				m.volumeCursor = 0
+			}
+		}
 	case focusActions:
 		m.actionsScroll -= n
 		if m.actionsScroll < 0 {
@@ -372,6 +395,17 @@ func (m *Model) scrollDown(n int) {
 		m.scroll += n
 	case focusInterfaces:
 		m.interfacesScroll += n
+	case focusVolumes:
+		if m.server != nil {
+			m.volumeCursor += n
+			maxIdx := len(m.server.VolAttach) - 1
+			if maxIdx < 0 {
+				maxIdx = 0
+			}
+			if m.volumeCursor > maxIdx {
+				m.volumeCursor = maxIdx
+			}
+		}
 	case focusConsole:
 		m.consoleScroll += n
 		if max := m.consoleMaxScroll(); m.consoleScroll > max {
@@ -479,13 +513,8 @@ func (m Model) View() string {
 
 func (m Model) renderWide() string {
 	totalH := m.panelHeight()
-	leftWidth := m.width / 2
-	if leftWidth < 32 {
-		leftWidth = 32
-	}
-	rightWidth := m.width - leftWidth - 1
 
-	// Shared row heights so left and right panels align horizontally
+	// Shared row heights
 	topH := totalH * 65 / 100
 	if topH < 6 {
 		topH = 6
@@ -495,51 +524,74 @@ func (m Model) renderWide() string {
 		bottomH = 4
 	}
 
-	// Top row: Info (left) + Console Log (right)
-	infoContent := padContent(m.renderInfoContent(leftWidth-6), leftWidth-4)
+	// Top row: 50/50 split, 1 gap
+	leftW := m.width / 2
+	rightW := m.width - leftW - 1
+
+	// Bottom row: equal thirds, 2 gaps
+	bottomContentW := m.width - 2
+	col1W := bottomContentW / 3
+	col2W := bottomContentW / 3
+	col3W := bottomContentW - col1W - col2W
+
+	// Width in lipgloss v2 is total width INCLUDING borders.
+	// Content area = Width - 2 (borders). padContent adds 1 char indent, so content maxWidth = Width - 4.
+
+	// Top row panels
+	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
 	infoPanel := m.panelBorder(focusInfo).
-		Width(leftWidth - 2).
-		Height(topH - 2).
+		Width(leftW).
+		Height(topH).
 		Render(infoContent)
 
-	consoleContent := padContent(m.renderConsoleContent(rightWidth-6, topH-4), rightWidth-4)
+	consoleContent := padContent(m.panelTitle(focusConsole), m.renderConsoleContent(rightW-4, topH-4))
 	consolePanel := m.panelBorder(focusConsole).
-		Width(rightWidth - 2).
-		Height(topH - 2).
+		Width(rightW).
+		Height(topH).
 		Render(consoleContent)
 
-	// Bottom row: Interfaces (left) + Action History (right)
-	ifaceContent := padContent(m.renderInterfacesContent(leftWidth-6, bottomH-4), leftWidth-4)
+	// Bottom row panels — equal thirds
+	ifaceContent := padContent(m.panelTitle(focusInterfaces), m.renderInterfacesContent(col1W-4, bottomH-4))
 	ifacePanel := m.panelBorder(focusInterfaces).
-		Width(leftWidth - 2).
-		Height(bottomH - 2).
+		Width(col1W).
+		Height(bottomH).
 		Render(ifaceContent)
 
-	actionsContent := padContent(m.renderActionsContent(rightWidth-6, bottomH-4), rightWidth-4)
+	volContent := padContent(m.panelTitle(focusVolumes), m.renderVolumesContent(col2W-4, bottomH-4))
+	volPanel := m.panelBorder(focusVolumes).
+		Width(col2W).
+		Height(bottomH).
+		Render(volContent)
+
+	actionsContent := padContent(m.panelTitle(focusActions), m.renderActionsContent(col3W-4, bottomH-4))
 	actionsPanel := m.panelBorder(focusActions).
-		Width(rightWidth - 2).
-		Height(bottomH - 2).
+		Width(col3W).
+		Height(bottomH).
 		Render(actionsContent)
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", consolePanel)
-	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, ifacePanel, " ", actionsPanel)
+	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, ifacePanel, " ", volPanel, " ", actionsPanel)
 
-	return lipgloss.JoinVertical(lipgloss.Left, topRow, bottomRow) + "\n"
+	return topRow + "\n" + bottomRow + "\n"
 }
 
 func (m Model) renderNarrow() string {
 	totalH := m.panelHeight()
 	w := m.width - 2
-	infoH := totalH * 30 / 100
-	ifaceH := totalH * 20 / 100
-	consoleH := totalH * 30 / 100
-	actionsH := totalH - infoH - ifaceH - consoleH
+	infoH := totalH * 25 / 100
+	ifaceH := totalH * 15 / 100
+	volH := totalH * 15 / 100
+	consoleH := totalH * 25 / 100
+	actionsH := totalH - infoH - ifaceH - volH - consoleH
 
 	if infoH < 4 {
 		infoH = 4
 	}
 	if ifaceH < 3 {
 		ifaceH = 3
+	}
+	if volH < 3 {
+		volH = 3
 	}
 	if consoleH < 3 {
 		consoleH = 3
@@ -548,33 +600,69 @@ func (m Model) renderNarrow() string {
 		actionsH = 3
 	}
 
-	infoContent := padContent(m.renderInfoContent(w-6), w-4)
-	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH-2).Render(infoContent)
+	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4))
+	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(infoContent)
 
-	ifaceContent := padContent(m.renderInterfacesContent(w-6, ifaceH-4), w-4)
-	ifacePanel := m.panelBorder(focusInterfaces).Width(w).Height(ifaceH-2).Render(ifaceContent)
+	ifaceContent := padContent(m.panelTitle(focusInterfaces), m.renderInterfacesContent(w-4, ifaceH-4))
+	ifacePanel := m.panelBorder(focusInterfaces).Width(w).Height(ifaceH).Render(ifaceContent)
 
-	consoleContent := padContent(m.renderConsoleContent(w-6, consoleH-4), w-4)
-	consolePanel := m.panelBorder(focusConsole).Width(w).Height(consoleH-2).Render(consoleContent)
+	volContent := padContent(m.panelTitle(focusVolumes), m.renderVolumesContent(w-4, volH-4))
+	volPanel := m.panelBorder(focusVolumes).Width(w).Height(volH).Render(volContent)
 
-	actionsContent := padContent(m.renderActionsContent(w-6, actionsH-4), w-4)
-	actionsPanel := m.panelBorder(focusActions).Width(w).Height(actionsH-2).Render(actionsContent)
+	consoleContent := padContent(m.panelTitle(focusConsole), m.renderConsoleContent(w-4, consoleH-4))
+	consolePanel := m.panelBorder(focusConsole).Width(w).Height(consoleH).Render(consoleContent)
 
-	return lipgloss.JoinVertical(lipgloss.Left, infoPanel, ifacePanel, consolePanel, actionsPanel) + "\n"
+	actionsContent := padContent(m.panelTitle(focusActions), m.renderActionsContent(w-4, actionsH-4))
+	actionsPanel := m.panelBorder(focusActions).Width(w).Height(actionsH).Render(actionsContent)
+
+	return lipgloss.JoinVertical(lipgloss.Left, infoPanel, ifacePanel, volPanel, consolePanel, actionsPanel) + "\n"
 }
 
-// padContent adds a blank line above and 1-char indent to each line of content.
-func padContent(content string, _ int) string {
-	if content == "" {
-		return ""
-	}
-	lines := strings.Split(content, "\n")
+// padContent adds the title, a blank line, and 1-char indent to each line of content.
+func padContent(title, content string) string {
 	var out []string
-	out = append(out, "") // blank line after header
-	for _, l := range lines {
-		out = append(out, " "+l)
+	out = append(out, " "+title)
+	out = append(out, "") // blank line after title
+	if content != "" {
+		for _, l := range strings.Split(content, "\n") {
+			out = append(out, " "+l)
+		}
 	}
 	return strings.Join(out, "\n")
+}
+
+func (m Model) panelTitle(pane focusPane) string {
+	borderColor := shared.ColorMuted
+	if m.focus == pane {
+		borderColor = shared.ColorPrimary
+	}
+	titleStyle := lipgloss.NewStyle().Foreground(borderColor).Bold(true)
+
+	switch pane {
+	case focusInfo:
+		return titleStyle.Render("Info")
+	case focusInterfaces:
+		t := titleStyle.Render("Interfaces")
+		if m.interfacesLoading {
+			t += " " + m.spinner.View()
+		}
+		return t
+	case focusVolumes:
+		return titleStyle.Render("Volumes")
+	case focusConsole:
+		t := titleStyle.Render("Console Log")
+		if m.consoleLoading {
+			t += " " + m.spinner.View()
+		}
+		return t
+	case focusActions:
+		t := titleStyle.Render("Action History")
+		if m.actionsLoading {
+			t += " " + m.spinner.View()
+		}
+		return t
+	}
+	return ""
 }
 
 func (m Model) panelBorder(pane focusPane) lipgloss.Style {
@@ -583,35 +671,13 @@ func (m Model) panelBorder(pane focusPane) lipgloss.Style {
 		borderColor = shared.ColorPrimary
 	}
 
-	titleStr := ""
-	switch pane {
-	case focusInfo:
-		titleStr = " Info "
-	case focusInterfaces:
-		titleStr = " Interfaces "
-		if m.interfacesLoading {
-			titleStr += m.spinner.View() + " "
-		}
-	case focusConsole:
-		titleStr = " Console Log "
-		if m.consoleLoading {
-			titleStr += m.spinner.View() + " "
-		}
-	case focusActions:
-		titleStr = " Action History "
-		if m.actionsLoading {
-			titleStr += m.spinner.View() + " "
-		}
-	}
-
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		BorderTop(true).
 		BorderBottom(true).
 		BorderLeft(true).
-		BorderRight(true).
-		SetString(titleStr)
+		BorderRight(true)
 }
 
 func (m Model) renderInfoContent(maxWidth int) string {
@@ -730,25 +796,10 @@ func (m Model) renderInfoContent(maxWidth int) string {
 	lines := strings.Split(grid, "\n")
 
 	// Resources section
-	if len(s.VolAttach) > 0 || len(s.SecGroups) > 0 || len(s.Networks) > 0 {
+	if len(s.SecGroups) > 0 || len(s.Networks) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(shared.ColorSecondary).Render("Resources"))
 
-		if len(s.VolAttach) > 0 {
-			var volParts []string
-			for _, va := range s.VolAttach {
-				if name, ok := m.volumeNames[va.ID]; ok && name != "" {
-					volParts = append(volParts, name)
-				} else {
-					volParts = append(volParts, va.ID)
-				}
-			}
-			val := strings.Join(volParts, ", ")
-			if len(val) > maxWidth-14 && maxWidth > 18 {
-				val = fmt.Sprintf("%d attached", len(s.VolAttach))
-			}
-			lines = append(lines, labelStyle.Render("Volumes")+valueStyle.Render(val)+" "+jumpStyle.Render("[v]"))
-		}
 		if len(s.SecGroups) > 0 {
 			val := strings.Join(s.SecGroups, ", ")
 			if len(val) > maxWidth-14 && maxWidth > 18 {
@@ -796,8 +847,16 @@ func (m Model) renderInfoContent(maxWidth int) string {
 }
 
 func (m Model) renderConsoleContent(maxWidth, maxHeight int) string {
+	// Show friendly message for inactive servers instead of API error
+	if m.server != nil {
+		switch m.server.Status {
+		case "SHUTOFF", "SUSPENDED", "SHELVED", "SHELVED_OFFLOADED":
+			return lipgloss.NewStyle().Foreground(shared.ColorMuted).
+				Render(shared.StatusIcon(m.server.Status) + "Server " + m.server.Status + " \u2014 console unavailable")
+		}
+	}
 	if m.consoleErr != "" {
-		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.consoleErr)
+		return lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("Console unavailable")
 	}
 
 	if len(m.consoleLines) == 0 {
@@ -831,6 +890,75 @@ func (m Model) renderConsoleContent(maxWidth, maxHeight int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m Model) renderVolumesContent(maxWidth, maxHeight int) string {
+	if m.server == nil || len(m.server.VolAttach) == 0 {
+		return lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("No volumes attached.")
+	}
+
+	valueStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
+	mutedStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+	selectedStyle := lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
+	cursorStr := lipgloss.NewStyle().Foreground(shared.ColorPrimary).Bold(true).Render("\u25b8 ")
+
+	var lines []string
+	for i, va := range m.server.VolAttach {
+		selected := m.focus == focusVolumes && i == m.volumeCursor
+		prefix := "  "
+		style := valueStyle
+		if selected {
+			prefix = cursorStr
+			style = selectedStyle
+		}
+
+		vol, hasInfo := m.volumeInfo[va.ID]
+
+		// Line 1: name (or ID) — always shown
+		name := va.ID
+		if hasInfo && vol.Name != "" {
+			name = vol.Name
+		}
+
+		// Build detail parts by priority
+		// Priority: name > size > device > type > AZ
+		var parts []string
+		if hasInfo {
+			parts = append(parts, fmt.Sprintf("%dGB", vol.Size))
+			if va.Device != "" {
+				parts = append(parts, va.Device)
+			}
+			if maxWidth > 30 && vol.VolumeType != "" {
+				parts = append(parts, vol.VolumeType)
+			}
+			if maxWidth > 45 && vol.AZ != "" {
+				parts = append(parts, vol.AZ)
+			}
+		} else if va.Device != "" {
+			parts = append(parts, va.Device)
+		}
+
+		detail := ""
+		if len(parts) > 0 {
+			detail = " " + mutedStyle.Render("\u2022 "+strings.Join(parts, " \u2022 "))
+		}
+
+		lines = append(lines, prefix+style.Render(name)+detail)
+	}
+
+	start := m.volumeScroll
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+	if start >= end {
+		start = max(0, end-maxHeight)
+	}
+
+	return strings.Join(lines[start:end], "\n")
+}
+
 func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
 	if m.interfacesErr != "" {
 		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.interfacesErr)
@@ -847,24 +975,34 @@ func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
 	valueStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
 	mutedStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
 
+	labelW := 6
+	lbl := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Bold(true).Width(labelW)
+
 	var lines []string
-	for _, p := range m.interfaces {
-		// Port header: MAC + Status
-		header := labelStyle.Render(p.MACAddress) + " " + mutedStyle.Render(p.Status)
-		lines = append(lines, header)
+	for i, p := range m.interfaces {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		// Port header
+		lines = append(lines, labelStyle.Render(p.MACAddress)+" "+mutedStyle.Render(p.Status))
 
-		// Fixed IPs
-		for _, ip := range p.FixedIPs {
-			line := "  " + valueStyle.Render(ip.IPAddress) + " " + mutedStyle.Render(ip.SubnetID[:min(8, len(ip.SubnetID))])
-			lines = append(lines, line)
+		// Fixed IPs — one per line with label
+		for j, ip := range p.FixedIPs {
+			ipLabel := ""
+			if j == 0 {
+				ipLabel = "IPs"
+			}
+			lines = append(lines, lbl.Render(ipLabel)+valueStyle.Render(ip.IPAddress))
 		}
 
-		// Network ID (truncated)
-		netID := p.NetworkID
-		if len(netID) > 20 {
-			netID = netID[:20] + "\u2026"
+		// Network and port IDs (truncated for space)
+		if maxWidth > 40 {
+			netID := p.NetworkID
+			if len(netID) > maxWidth-10 {
+				netID = netID[:maxWidth-13] + "\u2026"
+			}
+			lines = append(lines, lbl.Render("Net")+mutedStyle.Render(netID))
 		}
-		lines = append(lines, "  "+mutedStyle.Render("net: "+netID))
 	}
 
 	start := m.interfacesScroll
@@ -1096,17 +1234,17 @@ func (m Model) fetchInterfaces() tea.Cmd {
 	}
 }
 
-func (m Model) fetchVolumeNames(attachments []compute.VolumeAttachment) tea.Cmd {
+func (m Model) fetchVolumeInfo(attachments []compute.VolumeAttachment) tea.Cmd {
 	client := m.blockClient
 	return func() tea.Msg {
-		names := make(map[string]string)
+		vols := make(map[string]*volume.Volume)
 		for _, va := range attachments {
 			v, err := volume.GetVolume(context.Background(), client, va.ID)
-			if err == nil && v.Name != "" {
-				names[va.ID] = v.Name
+			if err == nil {
+				vols[va.ID] = v
 			}
 		}
-		return volumeNamesLoadedMsg{names: names}
+		return volumeInfoLoadedMsg{volumes: vols}
 	}
 }
 
@@ -1225,6 +1363,8 @@ func (m Model) Hints() string {
 		return "\u2191\u2193 scroll info \u2022 v/g/N resources \u2022 " + base
 	case focusInterfaces:
 		return "\u2191\u2193 scroll interfaces \u2022 " + base
+	case focusVolumes:
+		return "\u2191\u2193 select \u2022 enter detail \u2022 " + base
 	case focusConsole:
 		return "\u2191\u2193 scroll log \u2022 g top \u2022 G bottom \u2022 " + base
 	case focusActions:

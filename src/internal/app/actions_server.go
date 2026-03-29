@@ -965,13 +965,12 @@ func (m Model) openSSH() (Model, tea.Cmd) {
 	if name == "" {
 		return m, nil
 	}
-	ip := ssh.ChooseIP(floatingIPs, ipv6, ipv4)
-	if ip == "" {
+	if len(floatingIPs) == 0 && len(ipv6) == 0 && len(ipv4) == 0 {
 		m.statusBar.StickyHint = "No IP address available for SSH"
 		return m, nil
 	}
 	keyPath := ssh.FindKeyPath(keyName)
-	m.sshPrompt = sshprompt.New(name, ip, keyPath)
+	m.sshPrompt = sshprompt.New(name, floatingIPs, ipv6, ipv4, keyPath)
 	m.sshPrompt.SetSize(m.width, m.height)
 	return m, m.sshPrompt.Init()
 }
