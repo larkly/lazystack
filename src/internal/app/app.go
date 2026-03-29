@@ -161,6 +161,7 @@ type Model struct {
 	cloudName        string
 	autoCloud        string
 	previousView    activeView
+	returnToView    activeView // for cross-resource navigation back-nav
 	refreshInterval time.Duration
 	minWidth        int
 	minHeight    int
@@ -455,20 +456,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 
+			// Back-navigation from cross-resource jump
+			if m.isTopLevelView() && m.returnToView == viewServerDetail && key.Matches(msg, shared.Keys.Back) {
+				if m.serverDetail.ServerID() != "" {
+					m.returnToView = 0
+					m.view = viewServerDetail
+					m.statusBar.CurrentView = "serverdetail"
+					m.statusBar.Hint = m.serverDetail.Hints()
+					return m, nil
+				}
+			}
+
 			// Tab switching (only from top-level list views)
 			if m.isTopLevelView() {
 				// Number keys 1-9 map to tab indices
 				if s := msg.String(); len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
 					idx := int(s[0] - '1')
 					if idx < len(m.tabs) {
+						m.returnToView = 0 // clear cross-resource back-nav
 						return m.switchTab(idx)
 					}
 				}
 				switch {
 				case key.Matches(msg, shared.Keys.Right):
+					m.returnToView = 0
 					next := (m.activeTab + 1) % len(m.tabs)
 					return m.switchTab(next)
 				case key.Matches(msg, shared.Keys.Left):
+					m.returnToView = 0
 					prev := (m.activeTab - 1 + len(m.tabs)) % len(m.tabs)
 					return m.switchTab(prev)
 				}
@@ -855,6 +870,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shared.ViewChangeMsg:
 		return m.handleViewChange(msg)
+
+	case shared.NavigateToResourceMsg:
+		return m.handleResourceNavigation(msg)
 
 	case modal.ConfirmAction:
 		if msg.Confirm && msg.Action == "update" {

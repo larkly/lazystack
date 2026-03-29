@@ -48,7 +48,10 @@ type KeyMap struct {
 	Snapshot    key.Binding
 	Deactivate  key.Binding
 	Rescue      key.Binding
-	Clone       key.Binding
+	Clone        key.Binding
+	JumpVolumes  key.Binding
+	JumpSecGroups key.Binding
+	JumpNetworks key.Binding
 }
 
 var Keys = KeyMap{
@@ -235,5 +238,17 @@ var Keys = KeyMap{
 	Clone: key.NewBinding(
 		key.WithKeys("c"),
 		key.WithHelp("c", "clone"),
+	),
+	JumpVolumes: key.NewBinding(
+		key.WithKeys("v"),
+		key.WithHelp("v", "jump to volumes"),
+	),
+	JumpSecGroups: key.NewBinding(
+		key.WithKeys("g"),
+		key.WithHelp("g", "jump to sec groups"),
+	),
+	JumpNetworks: key.NewBinding(
+		key.WithKeys("N"),
+		key.WithHelp("N", "jump to networks"),
 	),
 }
