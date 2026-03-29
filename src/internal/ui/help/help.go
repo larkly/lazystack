@@ -214,7 +214,9 @@ var allSections = []section{
 	{
 		name: "LB Detail",
 		binds: []string{
-			"↑/k ↓/j      scroll",
+			"↑/k ↓/j      navigate in pane",
+			"tab/shift+tab cycle panes",
+			"ctrl+d        delete load balancer",
 			"esc           back to list",
 		},
 	},
