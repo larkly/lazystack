@@ -184,6 +184,14 @@ func (m Model) handleDetailNavigation(msg shared.NavigateToDetailMsg) (Model, te
 		m.statusBar.CurrentView = "volumedetail"
 		m.statusBar.Hint = m.volumeDetail.Hints()
 		return m, m.volumeDetail.Init()
+	case "server":
+		m.serverDetail = serverdetail.New(m.client.Compute, m.client.Network, m.client.BlockStorage, msg.ID, m.refreshInterval)
+		m.serverDetail.SetSize(m.width, m.height)
+		m.returnToView = m.view
+		m.view = viewServerDetail
+		m.statusBar.CurrentView = "serverdetail"
+		m.statusBar.Hint = m.serverDetail.Hints()
+		return m, m.serverDetail.Init()
 	}
 	return m, nil
 }
@@ -220,12 +228,19 @@ func (m Model) handleResourceNavigation(msg shared.NavigateToResourceMsg) (Model
 func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 	switch msg.View {
 	case "serverlist":
-		// If returning from a cross-resource jump, go back to server detail
+		// If returning from a cross-resource jump, go back to the originating view
 		if m.returnToView == viewServerDetail && m.serverDetail.ServerID() != "" {
 			m.returnToView = 0
 			m.view = viewServerDetail
 			m.statusBar.CurrentView = "serverdetail"
 			m.statusBar.Hint = m.serverDetail.Hints()
+			return m, nil
+		}
+		if m.returnToView == viewSecGroupView {
+			m.returnToView = 0
+			m.view = viewSecGroupView
+			m.statusBar.CurrentView = "secgroupview"
+			m.statusBar.Hint = m.secGroupView.Hints()
 			return m, nil
 		}
 		m.returnToView = 0
@@ -310,6 +325,13 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		m.statusBar.CurrentView = "servercreate"
 		m.statusBar.Hint = m.serverCreate.Hints()
 		return m, m.serverCreate.Init()
+
+	case "secgroupview":
+		m.returnToView = 0
+		m.view = viewSecGroupView
+		m.statusBar.CurrentView = "secgroupview"
+		m.statusBar.Hint = m.secGroupView.Hints()
+		return m, m.secGroupView.ForceRefresh()
 
 	case "consolelog":
 		return m, nil // handled by openConsoleLog

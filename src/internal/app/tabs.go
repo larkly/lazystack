@@ -88,6 +88,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 		m.statusBar.CurrentView = "secgroupview"
 		if !m.tabInited[idx] {
 			m.secGroupView = secgroupview.New(m.client.Network, m.refreshInterval)
+			m.secGroupView.SetComputeClient(m.client.Compute)
 			m.secGroupView.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
 		}

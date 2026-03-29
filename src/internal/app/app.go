@@ -659,19 +659,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Security group view: context-sensitive create/delete
+		// Security group view: context-sensitive actions based on focused pane
 		if m.view == viewSecGroupView {
-			if key.Matches(msg, shared.Keys.Delete) {
-				if m.secGroupView.InRules() {
+			pane := m.secGroupView.FocusedPane()
+			switch {
+			case key.Matches(msg, shared.Keys.Enter):
+				if serverID := m.secGroupView.SelectedServerID(); serverID != "" {
+					return m.handleDetailNavigation(shared.NavigateToDetailMsg{Resource: "server", ID: serverID})
+				}
+				if r := m.secGroupView.SelectedRule(); r != nil {
+					return m.openSGRuleEdit()
+				}
+			case key.Matches(msg, shared.Keys.Delete):
+				if pane == secgroupview.FocusRules && m.secGroupView.SelectedRuleID() != "" {
 					return m.openSGRuleDeleteConfirm()
 				}
-				return m.openSGDeleteConfirm()
-			}
-			if key.Matches(msg, shared.Keys.Create) {
-				if m.secGroupView.InRules() {
+				if (pane == secgroupview.FocusSelector || pane == secgroupview.FocusRules) && m.secGroupView.SelectedGroupName() != "default" {
+					return m.openSGDeleteConfirm()
+				}
+			case key.Matches(msg, shared.Keys.Create):
+				if pane == secgroupview.FocusRules {
 					return m.openSGRuleCreate()
 				}
 				return m.openSGCreate()
+			case key.Matches(msg, shared.Keys.Rename) && m.secGroupView.SelectedGroupName() != "default":
+				return m.openSGRename()
+			case key.Matches(msg, shared.Keys.Clone):
+				return m.openSGClone()
 			}
 		}
 
@@ -1056,6 +1070,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewImageDetail {
 			m.view = viewImageList
 			m.statusBar.CurrentView = "imagelist"
+		}
+		if m.view == viewSecGroupView {
+			return m, m.secGroupView.ForceRefresh()
 		}
 		return m, nil
 

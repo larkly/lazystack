@@ -119,3 +119,81 @@ func DeleteSecurityGroupRule(ctx context.Context, client *gophercloud.ServiceCli
 	}
 	return nil
 }
+
+// GetSecurityGroup fetches a single security group by ID.
+func GetSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, id string) (*SecurityGroup, error) {
+	r := groups.Get(ctx, client, id)
+	sg, err := r.Extract()
+	if err != nil {
+		return nil, fmt.Errorf("getting security group %s: %w", id, err)
+	}
+	group := &SecurityGroup{
+		ID:          sg.ID,
+		Name:        sg.Name,
+		Description: sg.Description,
+	}
+	for _, r := range sg.Rules {
+		group.Rules = append(group.Rules, SecurityRule{
+			ID:             r.ID,
+			Direction:      r.Direction,
+			EtherType:      r.EtherType,
+			Protocol:       r.Protocol,
+			PortRangeMin:   r.PortRangeMin,
+			PortRangeMax:   r.PortRangeMax,
+			RemoteIPPrefix: r.RemoteIPPrefix,
+			RemoteGroupID:  r.RemoteGroupID,
+		})
+	}
+	return group, nil
+}
+
+// UpdateSecurityGroup updates a security group's name and description.
+func UpdateSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, id, name string, description *string) (*SecurityGroup, error) {
+	opts := groups.UpdateOpts{
+		Name:        name,
+		Description: description,
+	}
+	r := groups.Update(ctx, client, id, opts)
+	sg, err := r.Extract()
+	if err != nil {
+		return nil, fmt.Errorf("updating security group %s: %w", id, err)
+	}
+	return &SecurityGroup{
+		ID:          sg.ID,
+		Name:        sg.Name,
+		Description: sg.Description,
+	}, nil
+}
+
+// CloneSecurityGroup creates a copy of a security group with all its rules.
+func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, srcID, newName, newDesc string) (*SecurityGroup, error) {
+	src, err := GetSecurityGroup(ctx, client, srcID)
+	if err != nil {
+		return nil, fmt.Errorf("cloning: %w", err)
+	}
+	newSG, err := CreateSecurityGroup(ctx, client, newName, newDesc)
+	if err != nil {
+		return nil, fmt.Errorf("cloning: %w", err)
+	}
+	for _, r := range src.Rules {
+		// Skip default egress-allow-all rules — OpenStack creates these automatically
+		if r.Direction == "egress" && r.Protocol == "" && r.RemoteIPPrefix == "" && r.RemoteGroupID == "" && r.PortRangeMin == 0 && r.PortRangeMax == 0 {
+			continue
+		}
+		opts := rules.CreateOpts{
+			SecGroupID:     newSG.ID,
+			Direction:      rules.RuleDirection(r.Direction),
+			EtherType:      rules.RuleEtherType(r.EtherType),
+			Protocol:       rules.RuleProtocol(r.Protocol),
+			PortRangeMin:   r.PortRangeMin,
+			PortRangeMax:   r.PortRangeMax,
+			RemoteIPPrefix: r.RemoteIPPrefix,
+			RemoteGroupID:  r.RemoteGroupID,
+		}
+		_, err := CreateSecurityGroupRule(ctx, client, opts)
+		if err != nil {
+			return nil, fmt.Errorf("cloning rule: %w", err)
+		}
+	}
+	return GetSecurityGroup(ctx, client, newSG.ID)
+}

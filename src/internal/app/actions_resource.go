@@ -168,7 +168,7 @@ func (m Model) openSGDeleteConfirm() (Model, tea.Cmd) {
 }
 
 func (m Model) openSGRuleDeleteConfirm() (Model, tea.Cmd) {
-	ruleID := m.secGroupView.SelectedRule()
+	ruleID := m.secGroupView.SelectedRuleID()
 	if ruleID == "" {
 		return m, nil
 	}
@@ -190,6 +190,30 @@ func (m Model) openSGRuleCreate() (Model, tea.Cmd) {
 	m.sgRuleCreate = sgrulecreate.New(m.client.Network, sgID, sgName)
 	m.sgRuleCreate.SetSize(m.width, m.height)
 	return m, m.sgRuleCreate.Init()
+}
+
+func (m Model) openSGRuleEdit() (Model, tea.Cmd) {
+	r := m.secGroupView.SelectedRule()
+	if r == nil {
+		return m, nil
+	}
+	sgID := m.secGroupView.SelectedGroupID()
+	sgName := m.secGroupView.SelectedGroupName()
+	m.sgRuleCreate = sgrulecreate.NewEdit(m.client.Network, sgID, sgName, *r)
+	m.sgRuleCreate.SetSize(m.width, m.height)
+	return m, m.sgRuleCreate.Init()
+}
+
+func (m Model) openSGRename() (Model, tea.Cmd) {
+	m.sgCreate = sgcreate.NewRename(m.client.Network, m.secGroupView.SelectedGroupID(), m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
+	m.sgCreate.SetSize(m.width, m.height)
+	return m, m.sgCreate.Init()
+}
+
+func (m Model) openSGClone() (Model, tea.Cmd) {
+	m.sgCreate = sgcreate.NewClone(m.client.Network, m.secGroupView.SelectedGroupID(), m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
+	m.sgCreate.SetSize(m.width, m.height)
+	return m, m.sgCreate.Init()
 }
 
 // --- Network actions ---

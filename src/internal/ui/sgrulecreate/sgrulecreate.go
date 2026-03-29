@@ -38,7 +38,7 @@ var (
 type ruleCreatedMsg struct{}
 type ruleCreateErrMsg struct{ err error }
 
-// Model is the security group rule create form modal.
+// Model is the security group rule create/edit form modal.
 type Model struct {
 	Active    bool
 	client    *gophercloud.ServiceClient
@@ -58,6 +58,10 @@ type Model struct {
 	err        string
 	width      int
 	height     int
+
+	// Edit mode: delete old rule after creating the new one
+	editMode   bool
+	oldRuleID  string
 }
 
 // New creates a rule create form for the given security group.
@@ -98,6 +102,57 @@ func New(client *gophercloud.ServiceClient, sgID, sgName string) Model {
 	}
 }
 
+// NewEdit creates a rule edit form pre-filled with existing rule values.
+// Since OpenStack doesn't support updating rules, edit = delete old + create new.
+func NewEdit(client *gophercloud.ServiceClient, sgID, sgName string, rule network.SecurityRule) Model {
+	m := New(client, sgID, sgName)
+	m.editMode = true
+	m.oldRuleID = rule.ID
+
+	// Pre-fill direction
+	for i, d := range directions {
+		if d == rule.Direction {
+			m.selectedDirection = i
+			break
+		}
+	}
+
+	// Pre-fill ether type
+	for i, e := range etherTypes {
+		if e == rule.EtherType {
+			m.selectedEtherType = i
+			break
+		}
+	}
+
+	// Pre-fill protocol
+	proto := rule.Protocol
+	if proto == "" {
+		proto = "any"
+	}
+	for i, p := range protocols {
+		if p == proto {
+			m.selectedProtocol = i
+			break
+		}
+	}
+
+	// Pre-fill ports
+	if rule.PortRangeMin > 0 {
+		m.portMinInput.SetValue(strconv.Itoa(rule.PortRangeMin))
+	}
+	if rule.PortRangeMax > 0 {
+		m.portMaxInput.SetValue(strconv.Itoa(rule.PortRangeMax))
+	}
+
+	// Pre-fill remote IP
+	if rule.RemoteIPPrefix != "" {
+		m.remoteIPInput.SetValue(rule.RemoteIPPrefix)
+	}
+
+	return m
+}
+
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
 	return nil
@@ -109,8 +164,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case ruleCreatedMsg:
 		m.submitting = false
 		m.Active = false
+		action := "Created rule in"
+		if m.editMode {
+			action = "Updated rule in"
+		}
 		return m, func() tea.Msg {
-			return shared.ResourceActionMsg{Action: "Created rule in", Name: m.sgName}
+			return shared.ResourceActionMsg{Action: action, Name: m.sgName}
 		}
 	case ruleCreateErrMsg:
 		m.submitting = false
@@ -356,10 +415,16 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.submitting = true
 	m.err = ""
 	client := m.client
+	editMode := m.editMode
+	oldRuleID := m.oldRuleID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		_, err := network.CreateSecurityGroupRule(context.Background(), client, opts)
 		if err != nil {
 			return ruleCreateErrMsg{err: err}
+		}
+		// In edit mode, delete the old rule after successfully creating the new one
+		if editMode && oldRuleID != "" {
+			_ = network.DeleteSecurityGroupRule(context.Background(), client, oldRuleID)
 		}
 		return ruleCreatedMsg{}
 	})
@@ -367,7 +432,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 // View renders the rule create form modal.
 func (m Model) View() string {
-	title := shared.StyleModalTitle.Render("Add Rule to " + m.sgName)
+	titleText := "Add Rule to " + m.sgName
+	if m.editMode {
+		titleText = "Edit Rule in " + m.sgName
+	}
+	title := shared.StyleModalTitle.Render(titleText)
 
 	var body strings.Builder
 
