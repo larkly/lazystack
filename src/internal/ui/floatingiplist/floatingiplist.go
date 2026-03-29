@@ -72,10 +72,25 @@ func (m Model) SelectedFIP() *network.FloatingIP {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case fipsLoadedMsg:
+		var cursorID string
+		if m.cursor >= 0 && m.cursor < len(m.fips) {
+			cursorID = m.fips[m.cursor].ID
+		}
 		m.loading = false
 		m.fips = msg.fips
 		m.err = ""
 		m.sortFIPs()
+		if cursorID != "" {
+			for i, f := range m.fips {
+				if f.ID == cursorID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		if m.cursor >= len(m.fips) {
+			m.cursor = max(0, len(m.fips)-1)
+		}
 		return m, nil
 
 	case fipsErrMsg:
@@ -106,19 +121,43 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, shared.Keys.Sort):
+			var cursorID string
+			if m.cursor >= 0 && m.cursor < len(m.fips) {
+				cursorID = m.fips[m.cursor].ID
+			}
 			m.sortCol = (m.sortCol + 1) % len(fipSortColumns)
 			m.sortAsc = true
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortFIPs()
+			if cursorID != "" {
+				for i, f := range m.fips {
+					if f.ID == cursorID {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})
 		case key.Matches(msg, shared.Keys.ReverseSort):
+			var cursorID string
+			if m.cursor >= 0 && m.cursor < len(m.fips) {
+				cursorID = m.fips[m.cursor].ID
+			}
 			m.sortAsc = !m.sortAsc
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortFIPs()
+			if cursorID != "" {
+				for i, f := range m.fips {
+					if f.ID == cursorID {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})

@@ -64,10 +64,25 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case routersLoadedMsg:
+		var cursorID string
+		if m.cursor >= 0 && m.cursor < len(m.routers) {
+			cursorID = m.routers[m.cursor].ID
+		}
 		m.loading = false
 		m.routers = msg.routers
 		m.err = ""
 		m.sortRouters()
+		if cursorID != "" {
+			for i, r := range m.routers {
+				if r.ID == cursorID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		if m.cursor >= len(m.routers) {
+			m.cursor = max(0, len(m.routers)-1)
+		}
 		return m, nil
 
 	case routersErrMsg:
@@ -98,19 +113,43 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, shared.Keys.Sort):
+			var cursorID string
+			if m.cursor >= 0 && m.cursor < len(m.routers) {
+				cursorID = m.routers[m.cursor].ID
+			}
 			m.sortCol = (m.sortCol + 1) % len(routerSortColumns)
 			m.sortAsc = true
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortRouters()
+			if cursorID != "" {
+				for i, r := range m.routers {
+					if r.ID == cursorID {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})
 		case key.Matches(msg, shared.Keys.ReverseSort):
+			var cursorID string
+			if m.cursor >= 0 && m.cursor < len(m.routers) {
+				cursorID = m.routers[m.cursor].ID
+			}
 			m.sortAsc = !m.sortAsc
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortRouters()
+			if cursorID != "" {
+				for i, r := range m.routers {
+					if r.ID == cursorID {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})

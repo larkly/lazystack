@@ -64,10 +64,25 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case lbsLoadedMsg:
+		var cursorID string
+		if m.cursor >= 0 && m.cursor < len(m.lbs) {
+			cursorID = m.lbs[m.cursor].ID
+		}
 		m.loading = false
 		m.lbs = msg.lbs
 		m.err = ""
 		m.sortLBs()
+		if cursorID != "" {
+			for i, lb := range m.lbs {
+				if lb.ID == cursorID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		if m.cursor >= len(m.lbs) {
+			m.cursor = max(0, len(m.lbs)-1)
+		}
 		return m, nil
 
 	case lbsErrMsg:
@@ -98,19 +113,43 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, shared.Keys.Sort):
+			var cursorID string
+			if m.cursor >= 0 && m.cursor < len(m.lbs) {
+				cursorID = m.lbs[m.cursor].ID
+			}
 			m.sortCol = (m.sortCol + 1) % len(lbSortColumns)
 			m.sortAsc = true
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortLBs()
+			if cursorID != "" {
+				for i, lb := range m.lbs {
+					if lb.ID == cursorID {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})
 		case key.Matches(msg, shared.Keys.ReverseSort):
+			var cursorID string
+			if m.cursor >= 0 && m.cursor < len(m.lbs) {
+				cursorID = m.lbs[m.cursor].ID
+			}
 			m.sortAsc = !m.sortAsc
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortLBs()
+			if cursorID != "" {
+				for i, lb := range m.lbs {
+					if lb.ID == cursorID {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})

@@ -62,10 +62,25 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case keypairsLoadedMsg:
+		var cursorName string
+		if m.cursor >= 0 && m.cursor < len(m.pairs) {
+			cursorName = m.pairs[m.cursor].Name
+		}
 		m.loading = false
 		m.pairs = msg.keypairs
 		m.err = ""
 		m.sortPairs()
+		if cursorName != "" {
+			for i, kp := range m.pairs {
+				if kp.Name == cursorName {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		if m.cursor >= len(m.pairs) {
+			m.cursor = max(0, len(m.pairs)-1)
+		}
 		return m, nil
 
 	case keypairsErrMsg:
@@ -96,19 +111,43 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, shared.Keys.Sort):
+			var cursorName string
+			if m.cursor >= 0 && m.cursor < len(m.pairs) {
+				cursorName = m.pairs[m.cursor].Name
+			}
 			m.sortCol = (m.sortCol + 1) % len(kpSortColumns)
 			m.sortAsc = true
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortPairs()
+			if cursorName != "" {
+				for i, kp := range m.pairs {
+					if kp.Name == cursorName {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})
 		case key.Matches(msg, shared.Keys.ReverseSort):
+			var cursorName string
+			if m.cursor >= 0 && m.cursor < len(m.pairs) {
+				cursorName = m.pairs[m.cursor].Name
+			}
 			m.sortAsc = !m.sortAsc
 			m.sortHighlight = true
 			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 			m.sortPairs()
+			if cursorName != "" {
+				for i, kp := range m.pairs {
+					if kp.Name == cursorName {
+						m.cursor = i
+						break
+					}
+				}
+			}
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})

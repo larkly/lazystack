@@ -170,10 +170,25 @@ func (m Model) SelectedImage() *image.Image {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case imagesLoadedMsg:
+		var cursorID string
+		if m.cursor >= 0 && m.cursor < len(m.images) {
+			cursorID = m.images[m.cursor].ID
+		}
 		m.loading = false
 		m.images = msg.images
 		m.err = ""
 		m.sortImages()
+		if cursorID != "" {
+			for i, img := range m.images {
+				if img.ID == cursorID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		if m.cursor >= len(m.images) {
+			m.cursor = max(0, len(m.images)-1)
+		}
 		return m, nil
 
 	case imagesErrMsg:
@@ -207,21 +222,45 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Sort):
 			visibleCount := m.visibleColCount()
 			if visibleCount > 0 {
+				var cursorID string
+				if m.cursor >= 0 && m.cursor < len(m.images) {
+					cursorID = m.images[m.cursor].ID
+				}
 				m.sortCol = (m.sortCol + 1) % visibleCount
 				m.sortAsc = true
 				m.sortHighlight = true
 				m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 				m.sortImages()
+				if cursorID != "" {
+					for i, img := range m.images {
+						if img.ID == cursorID {
+							m.cursor = i
+							break
+						}
+					}
+				}
 				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 					return sortClearMsg{}
 				})
 			}
 		case key.Matches(msg, shared.Keys.ReverseSort):
 			if m.visibleColCount() > 0 {
+				var cursorID string
+				if m.cursor >= 0 && m.cursor < len(m.images) {
+					cursorID = m.images[m.cursor].ID
+				}
 				m.sortAsc = !m.sortAsc
 				m.sortHighlight = true
 				m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 				m.sortImages()
+				if cursorID != "" {
+					for i, img := range m.images {
+						if img.ID == cursorID {
+							m.cursor = i
+							break
+						}
+					}
+				}
 				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 					return sortClearMsg{}
 				})

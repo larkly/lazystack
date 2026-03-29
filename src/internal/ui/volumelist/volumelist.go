@@ -178,10 +178,25 @@ func (m Model) SelectedVolume() *volume.Volume {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case volumesLoadedMsg:
+		var cursorID string
+		if m.cursor >= 0 && m.cursor < len(m.volumes) {
+			cursorID = m.volumes[m.cursor].ID
+		}
 		m.loading = false
 		m.volumes = msg.volumes
 		m.err = ""
 		m.sortVolumes()
+		if cursorID != "" {
+			for i, v := range m.volumes {
+				if v.ID == cursorID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		if m.cursor >= len(m.volumes) {
+			m.cursor = max(0, len(m.volumes)-1)
+		}
 		m.applyHighlight()
 		return m, m.fetchMissingServerNames()
 
@@ -222,21 +237,45 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Sort):
 			visibleCount := m.visibleColCount()
 			if visibleCount > 0 {
+				var cursorID string
+				if m.cursor >= 0 && m.cursor < len(m.volumes) {
+					cursorID = m.volumes[m.cursor].ID
+				}
 				m.sortCol = (m.sortCol + 1) % visibleCount
 				m.sortAsc = true
 				m.sortHighlight = true
 				m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 				m.sortVolumes()
+				if cursorID != "" {
+					for i, v := range m.volumes {
+						if v.ID == cursorID {
+							m.cursor = i
+							break
+						}
+					}
+				}
 				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 					return sortClearMsg{}
 				})
 			}
 		case key.Matches(msg, shared.Keys.ReverseSort):
 			if m.visibleColCount() > 0 {
+				var cursorID string
+				if m.cursor >= 0 && m.cursor < len(m.volumes) {
+					cursorID = m.volumes[m.cursor].ID
+				}
 				m.sortAsc = !m.sortAsc
 				m.sortHighlight = true
 				m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
 				m.sortVolumes()
+				if cursorID != "" {
+					for i, v := range m.volumes {
+						if v.ID == cursorID {
+							m.cursor = i
+							break
+						}
+					}
+				}
 				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 					return sortClearMsg{}
 				})
