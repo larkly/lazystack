@@ -35,8 +35,9 @@ type sgDetailLoadedMsg struct {
 }
 type sgDetailErrMsg struct{ err error }
 type serversLoadedMsg struct {
-	servers []serverRef
-	ports   []network.Port
+	servers     []serverRef
+	ports       []network.Port
+	serverNames map[string]string
 }
 type serversErrMsg struct{ err error }
 type detailTickMsg struct{}
@@ -77,6 +78,7 @@ type Model struct {
 	ports       []network.Port
 	portsCursor int
 	portsScroll int
+	serverNames map[string]string // DeviceID -> server name for port display
 }
 
 // New creates a security group detail model.
@@ -138,6 +140,19 @@ func (m Model) SelectedRuleID() string {
 	return rules[m.ruleCursor].ID
 }
 
+// SelectedRule returns the currently selected rule, or nil if none.
+func (m Model) SelectedRule() *network.SecurityRule {
+	if m.focus != focusRules || m.sg == nil {
+		return nil
+	}
+	rules := m.sortedRules()
+	if m.ruleCursor < 0 || m.ruleCursor >= len(rules) {
+		return nil
+	}
+	r := rules[m.ruleCursor]
+	return &r
+}
+
 // SelectedServerID returns the ID of the currently selected server, or "" if none.
 func (m Model) SelectedServerID() string {
 	if m.focus != focusServers {
@@ -182,6 +197,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.serversErr = ""
 		m.servers = msg.servers
 		m.ports = msg.ports
+		m.serverNames = msg.serverNames
 		if m.serverCursor >= len(m.servers) {
 			m.serverCursor = max(0, len(m.servers)-1)
 		}
@@ -368,7 +384,7 @@ func (m Model) serversVisibleLines() int {
 	if bottomH < 4 {
 		bottomH = 4
 	}
-	lines := bottomH - 4
+	lines := bottomH - 5 // border(4) + header(1)
 	if lines < 1 {
 		lines = 1
 	}
@@ -451,9 +467,9 @@ func (m Model) renderWide() string {
 		Height(topH).
 		Render(rulesContent)
 
-	// Bottom row: servers (50%) | ports (50%), 1 gap
-	bottomLeftW := m.width / 2
-	bottomRightW := m.width - bottomLeftW - 1
+	// Bottom row: servers (35%) | ports (65%), aligned with top row
+	bottomLeftW := leftW
+	bottomRightW := rightW
 
 	serversContent := padContent(m.panelTitle(focusServers), m.renderServersContent(bottomLeftW-4, bottomH-4))
 	serversPanel := m.panelBorder(focusServers).
@@ -644,6 +660,21 @@ func (m Model) sortedRules() []network.SecurityRule {
 	return rules
 }
 
+func (m Model) formatRemote(r network.SecurityRule) string {
+	remote := r.RemoteIPPrefix
+	if remote == "" && r.RemoteGroupID != "" {
+		if name, ok := m.groupNames[r.RemoteGroupID]; ok {
+			remote = "group:" + name
+		} else {
+			remote = "group:" + r.RemoteGroupID[:min(8, len(r.RemoteGroupID))] + "\u2026"
+		}
+	}
+	if remote == "" {
+		remote = "any"
+	}
+	return remote
+}
+
 func (m Model) isDefaultEgressRule(r network.SecurityRule) bool {
 	return r.Direction == "egress" &&
 		r.Protocol == "" &&
@@ -660,22 +691,57 @@ func (m Model) renderRulesContent(maxWidth, maxHeight int) string {
 		return shared.StyleHelp.Render("No rules \u2014 Ctrl+N to add")
 	}
 
-	// Column widths: prefix(2) + dir(8) + proto(5) + ports(7) + ether(5) + spacing(4) = 31 fixed
-	// Remote gets the rest
 	const (
-		dirW   = 8
-		protoW = 5
-		portsW = 7
+		dirW   = 9  // "ingress" + pad
 		etherW = 4
+		gap    = 2
 	)
-	remoteW := maxWidth - 2 - dirW - protoW - portsW - etherW - 4 // 4 for inter-column spaces
-	if remoteW < 6 {
-		remoteW = 6
+
+	// Scan rules to find actual max proto and ports widths
+	protoW := len("Proto")
+	portsW := len("Ports")
+	for _, r := range rules {
+		p := r.Protocol
+		if p == "" {
+			p = "any"
+		}
+		if len(p) > protoW {
+			protoW = len(p)
+		}
+		var portStr string
+		if r.PortRangeMin == 0 && r.PortRangeMax == 0 {
+			portStr = "all"
+		} else if r.PortRangeMin == r.PortRangeMax {
+			portStr = fmt.Sprintf("%d", r.PortRangeMin)
+		} else {
+			portStr = fmt.Sprintf("%d-%d", r.PortRangeMin, r.PortRangeMax)
+		}
+		if len(portStr) > portsW {
+			portsW = len(portStr)
+		}
 	}
 
+	// Scan rules to find actual max remote width for tight columns
+	remoteW := len("Remote") // minimum = header label
+	for _, r := range rules {
+		remote := m.formatRemote(r)
+		if len(remote) > remoteW {
+			remoteW = len(remote)
+		}
+	}
+	// Cap to available space
+	maxRemote := maxWidth - 2 - dirW - protoW - portsW - etherW - gap*4
+	if maxRemote < 8 {
+		maxRemote = 8
+	}
+	if remoteW > maxRemote {
+		remoteW = maxRemote
+	}
+
+	sep := strings.Repeat(" ", gap)
 	headerStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted).Bold(true)
-	header := fmt.Sprintf("  %-*s %-*s %-*s %-*s %s",
-		dirW, "Dir", protoW, "Proto", portsW, "Ports", remoteW, "Remote", "Eth")
+	header := fmt.Sprintf("  %-*s%s%-*s%s%-*s%s%-*s%s%s",
+		dirW, "Dir", sep, protoW, "Proto", sep, portsW, "Ports", sep, remoteW, "Remote", sep, "Eth")
 	headerLine := headerStyle.Render(header)
 
 	// Visible lines for rules (subtract 1 for header)
@@ -717,17 +783,7 @@ func (m Model) renderRulesContent(maxWidth, maxHeight int) string {
 			ports = fmt.Sprintf("%d-%d", r.PortRangeMin, r.PortRangeMax)
 		}
 
-		remote := r.RemoteIPPrefix
-		if remote == "" && r.RemoteGroupID != "" {
-			if name, ok := m.groupNames[r.RemoteGroupID]; ok {
-				remote = "group:" + name
-			} else {
-				remote = "group:" + r.RemoteGroupID[:min(8, len(r.RemoteGroupID))] + "\u2026"
-			}
-		}
-		if remote == "" {
-			remote = "any"
-		}
+		remote := m.formatRemote(r)
 		if len(remote) > remoteW {
 			remote = remote[:remoteW-1] + "\u2026"
 		}
@@ -737,13 +793,16 @@ func (m Model) renderRulesContent(maxWidth, maxHeight int) string {
 			prefix = "\u25b8 "
 		}
 
-		line := fmt.Sprintf("%s%-*s %-*s %-*s %-*s %s",
+		dirCol := dirStyle.Render(fmt.Sprintf("%-*s", dirW, r.Direction))
+		etherCol := etherStyle.Render(r.EtherType)
+
+		line := fmt.Sprintf("%s%s%s%-*s%s%-*s%s%-*s%s%s",
 			prefix,
-			dirW, dirStyle.Render(r.Direction),
-			protoW, proto,
-			portsW, ports,
-			remoteW, remote,
-			etherStyle.Render(r.EtherType))
+			dirCol, sep,
+			protoW, proto, sep,
+			portsW, ports, sep,
+			remoteW, remote, sep,
+			etherCol)
 
 		if selected {
 			line = selectedBg.Render(line)
@@ -766,20 +825,35 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 		return shared.StyleHelp.Render("No servers using this group")
 	}
 
-	visibleLines := maxHeight
+	// Size name column to actual content
+	nameW := len("Name")
+	for _, srv := range m.servers {
+		if len(srv.Name) > nameW {
+			nameW = len(srv.Name)
+		}
+	}
+	maxNameW := maxWidth - 2 - 2 - 12 // prefix + gap + status
+	if maxNameW < 8 {
+		maxNameW = 8
+	}
+	if nameW > maxNameW {
+		nameW = maxNameW
+	}
+
+	headerStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted).Bold(true)
+	header := fmt.Sprintf("  %-*s  %s", nameW, "Name", "Status")
+	headerLine := headerStyle.Render(header)
+
+	visibleLines := maxHeight - 1 // subtract header
 	if visibleLines < 1 {
 		visibleLines = 1
 	}
 
 	selectedBg := lipgloss.NewStyle().Background(lipgloss.Color("#073642")).Bold(true)
 
-	// Dynamic name width: leave room for prefix(2) + space(1) + status icon+text(~10)
-	nameW := maxWidth - 13
-	if nameW < 10 {
-		nameW = 10
-	}
-
 	var lines []string
+	lines = append(lines, headerLine)
+
 	for i, srv := range m.servers {
 		if i < m.serversScroll {
 			continue
@@ -800,7 +874,7 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 		}
 
 		status := shared.StatusIcon(srv.Status) + srv.Status
-		line := fmt.Sprintf("%s%-*s %s", prefix, nameW, name, status)
+		line := fmt.Sprintf("%s%-*s  %s", prefix, nameW, name, status)
 
 		if selected {
 			line = selectedBg.Render(line)
@@ -821,24 +895,50 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 		return shared.StyleHelp.Render("No ports found")
 	}
 
-	visibleLines := maxHeight
+	const (
+		macW = 17
+		gap  = 2
+	)
+
+	// Size server column to actual content
+	serverW := len("Server")
+	for _, p := range m.ports {
+		name := m.serverNames[p.DeviceID]
+		if len(name) > serverW {
+			serverW = len(name)
+		}
+	}
+	if serverW > 20 {
+		serverW = 20
+	}
+
+	// IPs get remaining space
+	sep := strings.Repeat(" ", gap)
+	ipsW := maxWidth - 2 - macW - serverW - gap*2 // prefix + mac + server + gaps
+	if ipsW < 10 {
+		ipsW = 10
+	}
+
+	headerStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted).Bold(true)
+	header := fmt.Sprintf("  %-*s%s%-*s%s%s",
+		macW, "MAC", sep, serverW, "Server", sep, "IPs")
+	headerLine := headerStyle.Render(header)
+
+	visibleLines := maxHeight - 1 // subtract header
 	if visibleLines < 1 {
 		visibleLines = 1
 	}
 
 	selectedBg := lipgloss.NewStyle().Background(lipgloss.Color("#073642")).Bold(true)
-	macStyle := lipgloss.NewStyle().Foreground(shared.ColorFg).Bold(true)
-	ipStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
 
-	// Each port takes 2 lines: MAC+status, then IPs
 	var lines []string
-	lineIdx := 0
+	lines = append(lines, headerLine)
+
 	for i, p := range m.ports {
-		if lineIdx+1 < m.portsScroll {
-			lineIdx += 2
+		if i < m.portsScroll {
 			continue
 		}
-		if lineIdx-m.portsScroll >= visibleLines {
+		if i >= m.portsScroll+visibleLines {
 			break
 		}
 
@@ -848,40 +948,34 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 			prefix = "\u25b8 "
 		}
 
-		// Line 1: MAC + status
-		mac := p.MACAddress
-		if len(mac) > maxWidth-14 {
-			mac = mac[:maxWidth-15] + "\u2026"
+		serverName := m.serverNames[p.DeviceID]
+		if serverName == "" {
+			serverName = "\u2014"
 		}
-		line1 := fmt.Sprintf("%s%s %s", prefix, macStyle.Render(mac), p.Status)
+		if len(serverName) > serverW {
+			serverName = serverName[:serverW-1] + "\u2026"
+		}
 
-		// Line 2: IPs (indented)
 		var ips []string
 		for _, ip := range p.FixedIPs {
 			ips = append(ips, ip.IPAddress)
 		}
 		ipStr := strings.Join(ips, ", ")
-		if len(ipStr) > maxWidth-6 {
-			ipStr = ipStr[:maxWidth-7] + "\u2026"
+		if len(ipStr) > ipsW {
+			ipStr = ipStr[:ipsW-1] + "\u2026"
 		}
-		line2 := "    " + ipStyle.Render(ipStr)
 		if len(ips) == 0 {
-			line2 = "    " + ipStyle.Render("no IPs")
+			ipStr = "\u2014"
 		}
+
+		line := fmt.Sprintf("%s%-*s%s%-*s%s%s",
+			prefix, macW, p.MACAddress, sep, serverW, serverName, sep, ipStr)
 
 		if selected {
-			line1 = selectedBg.Render(line1)
+			line = selectedBg.Render(line)
 		}
 
-		if lineIdx >= m.portsScroll {
-			lines = append(lines, line1)
-		}
-		lineIdx++
-		if lineIdx >= m.portsScroll && lineIdx-m.portsScroll < visibleLines {
-			lines = append(lines, line2)
-		}
-		lineIdx++
-		_ = i
+		lines = append(lines, line)
 	}
 
 	return strings.Join(lines, "\n")
@@ -1002,7 +1096,7 @@ func (m Model) fetchServers() tea.Cmd {
 		}
 
 		if len(deviceIDs) == 0 {
-			return serversLoadedMsg{servers: nil, ports: fetchedPorts}
+			return serversLoadedMsg{servers: nil, ports: fetchedPorts, serverNames: nil}
 		}
 
 		// Fetch all servers and filter to matching ones
@@ -1016,6 +1110,7 @@ func (m Model) fetchServers() tea.Cmd {
 			serverMap[s.ID] = s
 		}
 
+		srvNames := make(map[string]string)
 		var refs []serverRef
 		for id := range deviceIDs {
 			if s, ok := serverMap[id]; ok {
@@ -1024,15 +1119,26 @@ func (m Model) fetchServers() tea.Cmd {
 					Name:   s.Name,
 					Status: s.Status,
 				})
+				srvNames[s.ID] = s.Name
 			}
 		}
 
-		// Sort by name
+		// Sort servers by name
 		sort.Slice(refs, func(i, j int) bool {
 			return refs[i].Name < refs[j].Name
 		})
 
-		return serversLoadedMsg{servers: refs, ports: fetchedPorts}
+		// Sort ports by server name, then MAC
+		sort.Slice(fetchedPorts, func(i, j int) bool {
+			ni := srvNames[fetchedPorts[i].DeviceID]
+			nj := srvNames[fetchedPorts[j].DeviceID]
+			if ni != nj {
+				return ni < nj
+			}
+			return fetchedPorts[i].MACAddress < fetchedPorts[j].MACAddress
+		})
+
+		return serversLoadedMsg{servers: refs, ports: fetchedPorts, serverNames: srvNames}
 	}
 }
 

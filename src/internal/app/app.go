@@ -688,6 +688,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if serverID := m.sgDetail.SelectedServerID(); serverID != "" {
 					return m.openServerDetailFromSGDetail(serverID)
 				}
+				if r := m.sgDetail.SelectedRule(); r != nil {
+					return m.openSGRuleEditFromDetail()
+				}
 			}
 			if key.Matches(msg, shared.Keys.Delete) {
 				if m.sgDetail.FocusedPane() == sgdetail.FocusRules {

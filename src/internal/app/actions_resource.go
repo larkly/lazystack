@@ -234,6 +234,18 @@ func (m Model) openSGRuleDeleteConfirmFromDetail() (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) openSGRuleEditFromDetail() (Model, tea.Cmd) {
+	r := m.sgDetail.SelectedRule()
+	if r == nil {
+		return m, nil
+	}
+	sgID := m.sgDetail.SGID()
+	sgName := m.sgDetail.SGName()
+	m.sgRuleCreate = sgrulecreate.NewEdit(m.client.Network, sgID, sgName, *r)
+	m.sgRuleCreate.SetSize(m.width, m.height)
+	return m, m.sgRuleCreate.Init()
+}
+
 func (m Model) openSGRuleCreateFromDetail() (Model, tea.Cmd) {
 	sgID := m.sgDetail.SGID()
 	sgName := m.sgDetail.SGName()
