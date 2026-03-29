@@ -48,6 +48,9 @@ type KeyMap struct {
 	Snapshot    key.Binding
 	Deactivate  key.Binding
 	Rescue      key.Binding
+	SSH         key.Binding
+	CopySSH     key.Binding
+	ConsoleURL  key.Binding
 }
 
 var Keys = KeyMap{
@@ -230,5 +233,17 @@ var Keys = KeyMap{
 	Rescue: key.NewBinding(
 		key.WithKeys("ctrl+w"),
 		key.WithHelp("ctrl+w", "rescue/unrescue"),
+	),
+	SSH: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "SSH into server"),
+	),
+	CopySSH: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "copy SSH command"),
+	),
+	ConsoleURL: key.NewBinding(
+		key.WithKeys("V"),
+		key.WithHelp("V", "console URL (noVNC)"),
 	),
 }

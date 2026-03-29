@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ssh"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
@@ -18,6 +20,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
+	"github.com/larkly/lazystack/internal/ui/sshprompt"
 	"github.com/larkly/lazystack/internal/volume"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
@@ -837,5 +840,77 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 			Action: act,
 			Name:   fmt.Sprintf("%d servers", len(targets)),
 		}
+	}
+}
+
+func (m Model) getServerSSHInfo() (name, keyName string, floatingIPs, ipv6, ipv4 []string) {
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			return s.Name, s.KeyName, s.FloatingIP, s.IPv6, s.IPv4
+		}
+	case viewServerDetail:
+		return m.serverDetail.ServerName(), m.serverDetail.ServerKeyName(),
+			m.serverDetail.ServerFloatingIPs(), m.serverDetail.ServerIPv6(), m.serverDetail.ServerIPv4()
+	}
+	return "", "", nil, nil, nil
+}
+
+func (m Model) openSSH() (Model, tea.Cmd) {
+	name, keyName, floatingIPs, ipv6, ipv4 := m.getServerSSHInfo()
+	if name == "" {
+		return m, nil
+	}
+	ip := ssh.ChooseIP(floatingIPs, ipv6, ipv4)
+	if ip == "" {
+		m.statusBar.StickyHint = "No IP address available for SSH"
+		return m, nil
+	}
+	keyPath := ssh.FindKeyPath(keyName)
+	m.sshPrompt = sshprompt.New(name, ip, keyPath)
+	m.sshPrompt.SetSize(m.width, m.height)
+	return m, m.sshPrompt.Init()
+}
+
+func (m Model) copySSHCommand() (Model, tea.Cmd) {
+	_, keyName, floatingIPs, ipv6, ipv4 := m.getServerSSHInfo()
+	ip := ssh.ChooseIP(floatingIPs, ipv6, ipv4)
+	if ip == "" {
+		m.statusBar.StickyHint = "No IP address available for SSH"
+		return m, nil
+	}
+	keyPath := ssh.FindKeyPath(keyName)
+	cmdStr := ssh.BuildCommandString("USER", ip, keyPath)
+	if err := clipboard.WriteAll(cmdStr); err != nil {
+		m.statusBar.StickyHint = "Clipboard error: " + err.Error()
+	} else {
+		m.statusBar.StickyHint = "Copied: " + cmdStr
+	}
+	return m, nil
+}
+
+func (m Model) openConsoleURL() (Model, tea.Cmd) {
+	var id, name string
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			id, name = s.ID, s.Name
+		}
+	case viewServerDetail:
+		id = m.serverDetail.ServerID()
+		name = m.serverDetail.ServerName()
+	}
+	if id == "" {
+		return m, nil
+	}
+	m.statusBar.StickyHint = "Fetching console URL..."
+	client := m.client.Compute
+	serverName := name
+	return m, func() tea.Msg {
+		url, err := compute.GetRemoteConsole(context.Background(), client, id)
+		if err != nil {
+			return shared.ConsoleURLErrMsg{Err: err, ServerName: serverName}
+		}
+		return shared.ConsoleURLMsg{URL: url, ServerName: serverName}
 	}
 }

@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"time"
 
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/selfupdate"
+	"github.com/larkly/lazystack/internal/ssh"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
@@ -41,6 +43,8 @@ import (
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/serverlist"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
+	"github.com/larkly/lazystack/internal/ui/sshprompt"
+	"github.com/larkly/lazystack/internal/ui/consoleurl"
 	"github.com/larkly/lazystack/internal/ui/statusbar"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/imagedetail"
@@ -121,6 +125,8 @@ type Model struct {
 	serverRebuild   serverrebuild.Model
 	serverSnapshot  serversnapshot.Model
 	serverResize    serverresize.Model
+	sshPrompt       sshprompt.Model
+	consoleURL      consoleurl.Model
 	fipPicker     fippicker.Model
 	serverPicker  serverpicker.Model
 	sgCreate       sgcreate.Model
@@ -285,6 +291,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.serverRebuild.SetSize(m.width, m.height)
 		m.serverSnapshot.SetSize(m.width, m.height)
 		m.serverResize.SetSize(m.width, m.height)
+		m.sshPrompt.SetSize(m.width, m.height)
+		m.consoleURL.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
 		m.serverPicker.SetSize(m.width, m.height)
 		m.sgCreate.SetSize(m.width, m.height)
@@ -356,6 +364,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverResize.Active {
 			var cmd tea.Cmd
 			m.serverResize, cmd = m.serverResize.Update(msg)
+			return m, cmd
+		}
+
+		// SSH prompt modal intercepts all keys when active
+		if m.sshPrompt.Active {
+			var cmd tea.Cmd
+			m.sshPrompt, cmd = m.sshPrompt.Update(msg)
+			return m, cmd
+		}
+
+		// Console URL modal intercepts all keys when active
+		if m.consoleURL.Active {
+			var cmd tea.Cmd
+			m.consoleURL, cmd = m.consoleURL.Update(msg)
 			return m, cmd
 		}
 
@@ -497,6 +519,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, shared.Keys.Rescue) {
 				return m.openToggleConfirm("rescue/unrescue")
+			}
+			if key.Matches(msg, shared.Keys.SSH) {
+				return m.openSSH()
+			}
+			if key.Matches(msg, shared.Keys.CopySSH) {
+				return m.copySSHCommand()
+			}
+			if key.Matches(msg, shared.Keys.ConsoleURL) {
+				return m.openConsoleURL()
 			}
 			if key.Matches(msg, shared.Keys.Console) {
 				return m.openConsoleLog()
@@ -865,6 +896,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case modal.ErrorDismissedMsg:
 		m.activeModal = modalNone
+		return m, nil
+
+	case sshprompt.SSHConnectMsg:
+		m.sshPrompt.Active = false
+		args := ssh.BuildArgs(msg.User, msg.IP, msg.KeyPath)
+		c := exec.Command("ssh", args...)
+		return m, tea.ExecProcess(c, func(err error) tea.Msg {
+			return shared.SSHFinishedMsg{Err: err}
+		})
+
+	case shared.SSHFinishedMsg:
+		if msg.Err != nil {
+			m.statusBar.StickyHint = "SSH error: " + msg.Err.Error()
+		}
+		return m, nil
+
+	case shared.ConsoleURLMsg:
+		m.statusBar.StickyHint = ""
+		m.consoleURL = consoleurl.New(msg.URL, msg.ServerName)
+		m.consoleURL.SetSize(m.width, m.height)
+		return m, nil
+
+	case shared.ConsoleURLErrMsg:
+		m.statusBar.StickyHint = "Console URL error: " + msg.Err.Error()
 		return m, nil
 
 	case shared.ServerActionMsg:

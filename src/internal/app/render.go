@@ -125,6 +125,12 @@ func (m Model) viewContent() string {
 	if m.serverResize.Active {
 		return m.serverResize.View()
 	}
+	if m.sshPrompt.Active {
+		return m.sshPrompt.View()
+	}
+	if m.consoleURL.Active {
+		return m.consoleURL.View()
+	}
 
 	var content string
 	switch m.view {

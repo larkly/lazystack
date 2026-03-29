@@ -93,3 +93,20 @@ type ProjectSelectedMsg struct {
 	ProjectID   string
 	ProjectName string
 }
+
+// SSHFinishedMsg is sent when the SSH process exits.
+type SSHFinishedMsg struct {
+	Err error
+}
+
+// ConsoleURLMsg is sent when a noVNC console URL has been fetched.
+type ConsoleURLMsg struct {
+	URL        string
+	ServerName string
+}
+
+// ConsoleURLErrMsg is sent when fetching a console URL fails.
+type ConsoleURLErrMsg struct {
+	Err        error
+	ServerName string
+}
