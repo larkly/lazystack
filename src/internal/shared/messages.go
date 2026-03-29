@@ -102,6 +102,12 @@ type NavigateToResourceMsg struct {
 	Highlight []string // resource IDs or names to scroll to
 }
 
+// NavigateToDetailMsg requests direct navigation to a resource detail view.
+type NavigateToDetailMsg struct {
+	Resource string // "volume", "image", etc.
+	ID       string // resource ID
+}
+
 // SSHFinishedMsg is sent when the SSH process exits.
 type SSHFinishedMsg struct {
 	Err error

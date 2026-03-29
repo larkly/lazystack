@@ -944,6 +944,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case shared.NavigateToResourceMsg:
 		return m.handleResourceNavigation(msg)
 
+	case shared.NavigateToDetailMsg:
+		return m.handleDetailNavigation(msg)
+
 	case modal.ConfirmAction:
 		if msg.Confirm && msg.Action == "update" {
 			m.updating = true

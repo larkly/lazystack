@@ -72,7 +72,7 @@ func (m Model) openClone() (Model, tea.Cmd) {
 		KeyName:       srv.KeyName,
 		SecGroupNames: srv.SecGroups,
 		NetworkNames:  srv.Networks,
-		VolumeIDs:     srv.VolAttach,
+		VolumeIDs:     compute.VolumeAttachmentIDs(srv.VolAttach),
 	}
 
 	m.serverCreate = servercreate.NewClone(m.client.Compute, m.client.Image, m.client.Network, cfg)
@@ -164,7 +164,7 @@ func (m Model) openDeleteConfirm() (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.confirm = modal.NewConfirm("delete", srv.ID, srv.Name)
-	m.confirm.VolumeIDs = srv.VolAttach
+	m.confirm.VolumeIDs = compute.VolumeAttachmentIDs(srv.VolAttach)
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil
