@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/volume"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
@@ -20,9 +22,12 @@ type focusPane int
 
 const (
 	focusInfo focusPane = iota
+	focusInterfaces
 	focusConsole
 	focusActions
 )
+
+const focusPaneCount = 4
 
 const (
 	narrowThreshold = 80
@@ -53,11 +58,25 @@ type actionsErrMsg struct {
 	err error
 }
 
+type interfacesLoadedMsg struct {
+	ports []network.Port
+}
+
+type interfacesErrMsg struct {
+	err error
+}
+
+type volumeNamesLoadedMsg struct {
+	names map[string]string // volume ID → name
+}
+
 type detailTickMsg struct{}
 
 // Model is the server detail dashboard view.
 type Model struct {
 	client          *gophercloud.ServiceClient
+	networkClient   *gophercloud.ServiceClient
+	blockClient     *gophercloud.ServiceClient
 	serverID        string
 	server          *compute.Server
 	loading         bool
@@ -79,34 +98,49 @@ type Model struct {
 	actionsLoading bool
 	actionsErr     string
 
+	interfaces       []network.Port
+	interfacesScroll int
+	interfacesLoading bool
+	interfacesErr    string
+
+	volumeNames map[string]string // volume ID → display name
+
 	focus focusPane
 }
 
 // New creates a server detail model.
-func New(client *gophercloud.ServiceClient, serverID string, refreshInterval time.Duration) Model {
+func New(client, networkClient, blockClient *gophercloud.ServiceClient, serverID string, refreshInterval time.Duration) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	return Model{
-		client:          client,
-		serverID:        serverID,
-		loading:         true,
-		consoleLoading:  true,
-		actionsLoading:  true,
-		spinner:         s,
-		refreshInterval: refreshInterval,
+		client:            client,
+		networkClient:     networkClient,
+		blockClient:       blockClient,
+		serverID:          serverID,
+		loading:           true,
+		consoleLoading:    true,
+		actionsLoading:    true,
+		interfacesLoading: true,
+		spinner:           s,
+		refreshInterval:   refreshInterval,
+		volumeNames:       make(map[string]string),
 	}
 }
 
 // Init fetches all data sources.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		m.fetchServer(),
 		m.fetchConsole(),
 		m.fetchActions(),
 		m.tickCmd(),
-	)
+	}
+	if m.networkClient != nil {
+		cmds = append(cmds, m.fetchInterfaces())
+	}
+	return tea.Batch(cmds...)
 }
 
 // ServerID returns the current server ID.
@@ -142,6 +176,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.server = msg.server
 		m.err = ""
+		// Fetch volume names if we have attachments and haven't yet
+		if msg.server != nil && len(msg.server.VolAttach) > 0 && m.blockClient != nil {
+			needFetch := false
+			for _, va := range msg.server.VolAttach {
+				if _, ok := m.volumeNames[va.ID]; !ok {
+					needFetch = true
+					break
+				}
+			}
+			if needFetch {
+				return m, m.fetchVolumeNames(msg.server.VolAttach)
+			}
+		}
 		return m, nil
 
 	case serverDetailErrMsg:
@@ -175,11 +222,32 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.actionsErr = msg.err.Error()
 		return m, nil
 
+	case interfacesLoadedMsg:
+		m.interfacesLoading = false
+		m.interfacesErr = ""
+		m.interfaces = msg.ports
+		return m, nil
+
+	case interfacesErrMsg:
+		m.interfacesLoading = false
+		m.interfacesErr = msg.err.Error()
+		return m, nil
+
+	case volumeNamesLoadedMsg:
+		for id, name := range msg.names {
+			m.volumeNames[id] = name
+		}
+		return m, nil
+
 	case detailTickMsg:
-		return m, tea.Batch(m.fetchServer(), m.fetchConsole(), m.fetchActions(), m.tickCmd())
+		cmds := []tea.Cmd{m.fetchServer(), m.fetchConsole(), m.fetchActions(), m.tickCmd()}
+		if m.networkClient != nil {
+			cmds = append(cmds, m.fetchInterfaces())
+		}
+		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
-		if m.loading || m.consoleLoading || m.actionsLoading {
+		if m.loading || m.consoleLoading || m.actionsLoading || m.interfacesLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -205,11 +273,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, shared.Keys.Tab):
-		m.focus = (m.focus + 1) % 3
+		m.focus = (m.focus + 1) % focusPaneCount
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.ShiftTab):
-		m.focus = (m.focus + 2) % 3
+		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Up):
@@ -230,7 +298,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, shared.Keys.JumpVolumes):
 		if m.server != nil && len(m.server.VolAttach) > 0 {
-			ids := m.server.VolAttach
+			ids := compute.VolumeAttachmentIDs(m.server.VolAttach)
+			if len(ids) == 1 {
+				// Single volume: go directly to detail
+				return m, func() tea.Msg {
+					return shared.NavigateToDetailMsg{Resource: "volume", ID: ids[0]}
+				}
+			}
 			return m, func() tea.Msg {
 				return shared.NavigateToResourceMsg{Tab: "volumes", Highlight: ids}
 			}
@@ -279,6 +353,11 @@ func (m *Model) scrollUp(n int) {
 		if m.consoleScroll < 0 {
 			m.consoleScroll = 0
 		}
+	case focusInterfaces:
+		m.interfacesScroll -= n
+		if m.interfacesScroll < 0 {
+			m.interfacesScroll = 0
+		}
 	case focusActions:
 		m.actionsScroll -= n
 		if m.actionsScroll < 0 {
@@ -291,6 +370,8 @@ func (m *Model) scrollDown(n int) {
 	switch m.focus {
 	case focusInfo:
 		m.scroll += n
+	case focusInterfaces:
+		m.interfacesScroll += n
 	case focusConsole:
 		m.consoleScroll += n
 		if max := m.consoleMaxScroll(); m.consoleScroll > max {
@@ -398,51 +479,67 @@ func (m Model) View() string {
 
 func (m Model) renderWide() string {
 	totalH := m.panelHeight()
-	leftWidth := m.width * 45 / 100
+	leftWidth := m.width / 2
 	if leftWidth < 32 {
 		leftWidth = 32
 	}
 	rightWidth := m.width - leftWidth - 1
 
-	_, consoleH, actionsH := m.rightPanelHeights()
+	// Shared row heights so left and right panels align horizontally
+	topH := totalH * 65 / 100
+	if topH < 6 {
+		topH = 6
+	}
+	bottomH := totalH - topH
+	if bottomH < 4 {
+		bottomH = 4
+	}
 
-	// Left panel: info (border=2, content padding=1 each side)
-	infoContent := padContent(m.renderInfoContent(leftWidth - 6), leftWidth-4)
-	infoBorder := m.panelBorder(focusInfo)
-	infoPanel := infoBorder.
+	// Top row: Info (left) + Console Log (right)
+	infoContent := padContent(m.renderInfoContent(leftWidth-6), leftWidth-4)
+	infoPanel := m.panelBorder(focusInfo).
 		Width(leftWidth - 2).
-		Height(totalH - 2).
+		Height(topH - 2).
 		Render(infoContent)
 
-	// Right panel: console + actions stacked
-	consoleContent := padContent(m.renderConsoleContent(rightWidth-6, consoleH-4), rightWidth-4)
-	consoleBorder := m.panelBorder(focusConsole)
-	consolePanel := consoleBorder.
+	consoleContent := padContent(m.renderConsoleContent(rightWidth-6, topH-4), rightWidth-4)
+	consolePanel := m.panelBorder(focusConsole).
 		Width(rightWidth - 2).
-		Height(consoleH - 2).
+		Height(topH - 2).
 		Render(consoleContent)
 
-	actionsContent := padContent(m.renderActionsContent(rightWidth-6, actionsH-4), rightWidth-4)
-	actionsBorder := m.panelBorder(focusActions)
-	actionsPanel := actionsBorder.
+	// Bottom row: Interfaces (left) + Action History (right)
+	ifaceContent := padContent(m.renderInterfacesContent(leftWidth-6, bottomH-4), leftWidth-4)
+	ifacePanel := m.panelBorder(focusInterfaces).
+		Width(leftWidth - 2).
+		Height(bottomH - 2).
+		Render(ifaceContent)
+
+	actionsContent := padContent(m.renderActionsContent(rightWidth-6, bottomH-4), rightWidth-4)
+	actionsPanel := m.panelBorder(focusActions).
 		Width(rightWidth - 2).
-		Height(actionsH - 2).
+		Height(bottomH - 2).
 		Render(actionsContent)
 
-	rightPanel := lipgloss.JoinVertical(lipgloss.Left, consolePanel, actionsPanel)
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", consolePanel)
+	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, ifacePanel, " ", actionsPanel)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", rightPanel) + "\n"
+	return lipgloss.JoinVertical(lipgloss.Left, topRow, bottomRow) + "\n"
 }
 
 func (m Model) renderNarrow() string {
 	totalH := m.panelHeight()
 	w := m.width - 2
-	infoH := totalH * 40 / 100
-	consoleH := totalH * 35 / 100
-	actionsH := totalH - infoH - consoleH
+	infoH := totalH * 30 / 100
+	ifaceH := totalH * 20 / 100
+	consoleH := totalH * 30 / 100
+	actionsH := totalH - infoH - ifaceH - consoleH
 
 	if infoH < 4 {
 		infoH = 4
+	}
+	if ifaceH < 3 {
+		ifaceH = 3
 	}
 	if consoleH < 3 {
 		consoleH = 3
@@ -454,13 +551,16 @@ func (m Model) renderNarrow() string {
 	infoContent := padContent(m.renderInfoContent(w-6), w-4)
 	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH-2).Render(infoContent)
 
+	ifaceContent := padContent(m.renderInterfacesContent(w-6, ifaceH-4), w-4)
+	ifacePanel := m.panelBorder(focusInterfaces).Width(w).Height(ifaceH-2).Render(ifaceContent)
+
 	consoleContent := padContent(m.renderConsoleContent(w-6, consoleH-4), w-4)
 	consolePanel := m.panelBorder(focusConsole).Width(w).Height(consoleH-2).Render(consoleContent)
 
 	actionsContent := padContent(m.renderActionsContent(w-6, actionsH-4), w-4)
 	actionsPanel := m.panelBorder(focusActions).Width(w).Height(actionsH-2).Render(actionsContent)
 
-	return lipgloss.JoinVertical(lipgloss.Left, infoPanel, consolePanel, actionsPanel) + "\n"
+	return lipgloss.JoinVertical(lipgloss.Left, infoPanel, ifacePanel, consolePanel, actionsPanel) + "\n"
 }
 
 // padContent adds a blank line above and 1-char indent to each line of content.
@@ -487,6 +587,11 @@ func (m Model) panelBorder(pane focusPane) lipgloss.Style {
 	switch pane {
 	case focusInfo:
 		titleStr = " Info "
+	case focusInterfaces:
+		titleStr = " Interfaces "
+		if m.interfacesLoading {
+			titleStr += m.spinner.View() + " "
+		}
 	case focusConsole:
 		titleStr = " Console Log "
 		if m.consoleLoading {
@@ -525,9 +630,14 @@ func (m Model) renderInfoContent(maxWidth int) string {
 		value string
 	}
 
+	flavorVal := s.FlavorName
+	if s.FlavorVCPUs > 0 {
+		flavorVal += fmt.Sprintf(" (%dv/%dM/%dG)", s.FlavorVCPUs, s.FlavorRAM, s.FlavorDisk)
+	}
+
 	allProps := []prop{
 		{"Status", shared.StatusIcon(s.Status) + s.Status},
-		{"Flavor", s.FlavorName},
+		{"Flavor", flavorVal},
 		{"Power", s.PowerState},
 		{"Image", s.ImageName},
 		{"IPv6", strings.Join(s.IPv6, ", ")},
@@ -625,7 +735,15 @@ func (m Model) renderInfoContent(maxWidth int) string {
 		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(shared.ColorSecondary).Render("Resources"))
 
 		if len(s.VolAttach) > 0 {
-			val := strings.Join(s.VolAttach, ", ")
+			var volParts []string
+			for _, va := range s.VolAttach {
+				if name, ok := m.volumeNames[va.ID]; ok && name != "" {
+					volParts = append(volParts, name)
+				} else {
+					volParts = append(volParts, va.ID)
+				}
+			}
+			val := strings.Join(volParts, ", ")
 			if len(val) > maxWidth-14 && maxWidth > 18 {
 				val = fmt.Sprintf("%d attached", len(s.VolAttach))
 			}
@@ -713,6 +831,57 @@ func (m Model) renderConsoleContent(maxWidth, maxHeight int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
+	if m.interfacesErr != "" {
+		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.interfacesErr)
+	}
+
+	if len(m.interfaces) == 0 {
+		if m.interfacesLoading {
+			return ""
+		}
+		return lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("No interfaces found.")
+	}
+
+	labelStyle := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Bold(true)
+	valueStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
+	mutedStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+
+	var lines []string
+	for _, p := range m.interfaces {
+		// Port header: MAC + Status
+		header := labelStyle.Render(p.MACAddress) + " " + mutedStyle.Render(p.Status)
+		lines = append(lines, header)
+
+		// Fixed IPs
+		for _, ip := range p.FixedIPs {
+			line := "  " + valueStyle.Render(ip.IPAddress) + " " + mutedStyle.Render(ip.SubnetID[:min(8, len(ip.SubnetID))])
+			lines = append(lines, line)
+		}
+
+		// Network ID (truncated)
+		netID := p.NetworkID
+		if len(netID) > 20 {
+			netID = netID[:20] + "\u2026"
+		}
+		lines = append(lines, "  "+mutedStyle.Render("net: "+netID))
+	}
+
+	start := m.interfacesScroll
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+	if start >= end {
+		start = max(0, end-maxHeight)
+	}
+
+	return strings.Join(lines[start:end], "\n")
+}
+
 func (m Model) renderActionsContent(maxWidth, maxHeight int) string {
 	if m.actionsErr != "" {
 		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.actionsErr)
@@ -780,29 +949,29 @@ func (m Model) renderActionBar() string {
 	s := m.server
 	var buttons []actionButton
 
-	// Always available (read-only)
-	buttons = append(buttons, btn("x", "SSH"), btn("y", "CopySSH"))
+	// Read-only actions (always available)
+	buttons = append(buttons, btn("x", "SSH"))
 
-	// Power state dependent
-	switch {
-	case s.Status == "VERIFY_RESIZE":
-		buttons = append(buttons, btn("^y", "Confirm"), btn("^x", "Revert"))
-	case s.Status == "ACTIVE":
-		buttons = append(buttons, btn("o", "Stop"), btn("^o", "Reboot"))
-	case s.Status == "SHUTOFF":
-		buttons = append(buttons, btn("o", "Start"))
-	case s.Status == "PAUSED":
-		buttons = append(buttons, btn("p", "Unpause"))
-	case s.Status == "SUSPENDED":
-		buttons = append(buttons, btn("^z", "Resume"))
-	case s.Status == "SHELVED", s.Status == "SHELVED_OFFLOADED":
-		buttons = append(buttons, btn("^e", "Unshelve"))
-	case s.Status == "RESCUE":
-		buttons = append(buttons, btn("^w", "Unrescue"))
-	}
-
-	// Mutating actions (hidden when locked)
 	if !s.Locked {
+		// Power state dependent (mutating, hidden when locked)
+		switch {
+		case s.Status == "VERIFY_RESIZE":
+			buttons = append(buttons, btn("^y", "Confirm"), btn("^x", "Revert"))
+		case s.Status == "ACTIVE":
+			buttons = append(buttons, btn("o", "Stop"), btn("^o", "Reboot"))
+		case s.Status == "SHUTOFF":
+			buttons = append(buttons, btn("o", "Start"))
+		case s.Status == "PAUSED":
+			buttons = append(buttons, btn("p", "Unpause"))
+		case s.Status == "SUSPENDED":
+			buttons = append(buttons, btn("^z", "Resume"))
+		case s.Status == "SHELVED", s.Status == "SHELVED_OFFLOADED":
+			buttons = append(buttons, btn("^e", "Unshelve"))
+		case s.Status == "RESCUE":
+			buttons = append(buttons, btn("^w", "Unrescue"))
+		}
+
+		// Other mutating actions
 		buttons = append(buttons,
 			btn("c", "Clone"),
 			btn("^d", "Delete"),
@@ -915,6 +1084,32 @@ func (m Model) fetchActions() tea.Cmd {
 	}
 }
 
+func (m Model) fetchInterfaces() tea.Cmd {
+	client := m.networkClient
+	id := m.serverID
+	return func() tea.Msg {
+		ports, err := network.ListPortsByDevice(context.Background(), client, id)
+		if err != nil {
+			return interfacesErrMsg{err: err}
+		}
+		return interfacesLoadedMsg{ports: ports}
+	}
+}
+
+func (m Model) fetchVolumeNames(attachments []compute.VolumeAttachment) tea.Cmd {
+	client := m.blockClient
+	return func() tea.Msg {
+		names := make(map[string]string)
+		for _, va := range attachments {
+			v, err := volume.GetVolume(context.Background(), client, va.ID)
+			if err == nil && v.Name != "" {
+				names[va.ID] = v.Name
+			}
+		}
+		return volumeNamesLoadedMsg{names: names}
+	}
+}
+
 func (m Model) tickCmd() tea.Cmd {
 	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
 		return detailTickMsg{}
@@ -926,7 +1121,12 @@ func (m *Model) ForceRefresh() tea.Cmd {
 	m.loading = true
 	m.consoleLoading = true
 	m.actionsLoading = true
-	return tea.Batch(m.spinner.Tick, m.fetchServer(), m.fetchConsole(), m.fetchActions())
+	m.interfacesLoading = true
+	cmds := []tea.Cmd{m.spinner.Tick, m.fetchServer(), m.fetchConsole(), m.fetchActions()}
+	if m.networkClient != nil {
+		cmds = append(cmds, m.fetchInterfaces())
+	}
+	return tea.Batch(cmds...)
 }
 
 // SetSize updates the dimensions.
@@ -1023,6 +1223,8 @@ func (m Model) Hints() string {
 	switch m.focus {
 	case focusInfo:
 		return "\u2191\u2193 scroll info \u2022 v/g/N resources \u2022 " + base
+	case focusInterfaces:
+		return "\u2191\u2193 scroll interfaces \u2022 " + base
 	case focusConsole:
 		return "\u2191\u2193 scroll log \u2022 g top \u2022 G bottom \u2022 " + base
 	case focusActions:

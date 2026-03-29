@@ -14,25 +14,45 @@ import (
 
 // Server is a simplified representation of a Nova server.
 type Server struct {
-	ID        string
-	Name      string
-	Status     string
-	PowerState string
-	FlavorName string
-	FlavorID   string
-	ImageID    string
-	ImageName  string
-	IPv4       []string
-	IPv6       []string
-	FloatingIP []string
-	Locked     bool
-	KeyName   string
-	Created   time.Time
-	TenantID  string
-	AZ        string
-	VolAttach []string
-	SecGroups []string
-	Networks  map[string][]string // network name → IPs
+	ID          string
+	Name        string
+	Description string
+	Status      string
+	PowerState  string
+	FlavorName  string
+	FlavorID    string
+	FlavorVCPUs int
+	FlavorRAM   int // MB
+	FlavorDisk  int // GB
+	ImageID     string
+	ImageName   string
+	IPv4        []string
+	IPv6        []string
+	FloatingIP  []string
+	Locked      bool
+	KeyName     string
+	Created     time.Time
+	TenantID    string
+	AZ          string
+	VolAttach   []VolumeAttachment
+	SecGroups   []string
+	Networks    map[string][]string // network name → IPs
+	Metadata    map[string]string
+}
+
+// VolumeAttachment holds a volume ID and its device path on the server.
+type VolumeAttachment struct {
+	ID     string
+	Device string
+}
+
+// VolumeAttachmentIDs returns just the IDs from a slice of VolumeAttachments.
+func VolumeAttachmentIDs(attachments []VolumeAttachment) []string {
+	ids := make([]string, len(attachments))
+	for i, a := range attachments {
+		ids[i] = a.ID
+	}
+	return ids
 }
 
 // ListServers fetches all servers from Nova.
@@ -301,6 +321,7 @@ func mapServer(s servers.Server) Server {
 		KeyName:    s.KeyName,
 		Created:    s.Created,
 		TenantID:   s.TenantID,
+		Metadata:   s.Metadata,
 	}
 
 	// Flavor — microversion 2.47+ embeds full flavor with original_name
@@ -309,6 +330,15 @@ func mapServer(s servers.Server) Server {
 	}
 	if id, ok := s.Flavor["id"].(string); ok {
 		srv.FlavorID = id
+	}
+	if vcpus, ok := s.Flavor["vcpus"].(float64); ok {
+		srv.FlavorVCPUs = int(vcpus)
+	}
+	if ram, ok := s.Flavor["ram"].(float64); ok {
+		srv.FlavorRAM = int(ram)
+	}
+	if disk, ok := s.Flavor["disk"].(float64); ok {
+		srv.FlavorDisk = int(disk)
 	}
 
 	// Image — can be empty for boot-from-volume
@@ -342,7 +372,7 @@ func mapServer(s servers.Server) Server {
 
 	// Attached volumes
 	for _, v := range s.AttachedVolumes {
-		srv.VolAttach = append(srv.VolAttach, v.ID)
+		srv.VolAttach = append(srv.VolAttach, VolumeAttachment{ID: v.ID})
 	}
 
 	return srv

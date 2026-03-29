@@ -4,6 +4,7 @@ import (
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
+	"github.com/larkly/lazystack/internal/ui/volumedetail"
 	"charm.land/bubbletea/v2"
 )
 
@@ -173,6 +174,20 @@ func (m Model) updateModal(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) handleDetailNavigation(msg shared.NavigateToDetailMsg) (Model, tea.Cmd) {
+	switch msg.Resource {
+	case "volume":
+		m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, msg.ID, m.refreshInterval)
+		m.volumeDetail.SetSize(m.width, m.height)
+		m.returnToView = m.view
+		m.view = viewVolumeDetail
+		m.statusBar.CurrentView = "volumedetail"
+		m.statusBar.Hint = m.volumeDetail.Hints()
+		return m, m.volumeDetail.Init()
+	}
+	return m, nil
+}
+
 func (m Model) handleResourceNavigation(msg shared.NavigateToResourceMsg) (Model, tea.Cmd) {
 	// Find the target tab index
 	tabIdx := -1
@@ -235,7 +250,7 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 			return m, func() tea.Msg { return shared.RefreshServersMsg{} }
 		}
 		if s := m.serverList.SelectedServer(); s != nil {
-			m.serverDetail = serverdetail.New(m.client.Compute, s.ID, m.refreshInterval)
+			m.serverDetail = serverdetail.New(m.client.Compute, m.client.Network, m.client.BlockStorage, s.ID, m.refreshInterval)
 			m.serverDetail.SetSize(m.width, m.height)
 			m.view = viewServerDetail
 			m.statusBar.CurrentView = "serverdetail"
@@ -245,6 +260,14 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "volumelist":
+		// If returning from a cross-resource jump, go back to server detail
+		if m.returnToView == viewServerDetail && m.serverDetail.ServerID() != "" {
+			m.returnToView = 0
+			m.view = viewServerDetail
+			m.statusBar.CurrentView = "serverdetail"
+			m.statusBar.Hint = m.serverDetail.Hints()
+			return m, nil
+		}
 		m.view = viewVolumeList
 		m.statusBar.CurrentView = "volumelist"
 		m.statusBar.Hint = m.volumeList.Hints()
