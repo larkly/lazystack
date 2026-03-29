@@ -94,6 +94,9 @@ func (m Model) viewContent() string {
 	if m.serverPicker.Active {
 		return m.serverPicker.View()
 	}
+	if m.volumePicker.Active {
+		return m.volumePicker.View()
+	}
 	if m.routerCreate.Active {
 		return m.routerCreate.View()
 	}

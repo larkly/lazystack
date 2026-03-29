@@ -39,6 +39,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
+	"github.com/larkly/lazystack/internal/ui/volumepicker"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
@@ -125,6 +126,7 @@ type Model struct {
 	consoleURL      consoleurl.Model
 	fipPicker     fippicker.Model
 	serverPicker  serverpicker.Model
+	volumePicker  volumepicker.Model
 	sgCreate       sgcreate.Model
 	networkCreate  networkcreate.Model
 	subnetCreate   subnetcreate.Model
@@ -299,6 +301,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.consoleURL.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
 		m.serverPicker.SetSize(m.width, m.height)
+		m.volumePicker.SetSize(m.width, m.height)
 		m.sgCreate.SetSize(m.width, m.height)
 		m.sgRuleCreate.SetSize(m.width, m.height)
 		m.networkCreate.SetSize(m.width, m.height)
@@ -409,6 +412,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverPicker.Active {
 			var cmd tea.Cmd
 			m.serverPicker, cmd = m.serverPicker.Update(msg)
+			return m, cmd
+		}
+
+		// Volume picker modal intercepts all keys when active
+		if m.volumePicker.Active {
+			var cmd tea.Cmd
+			m.volumePicker, cmd = m.volumePicker.Update(msg)
 			return m, cmd
 		}
 
@@ -546,6 +556,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openActionLog()
 			}
 
+			// Volume attach/detach from server detail volumes pane
+			if m.view == viewServerDetail && m.serverDetail.FocusedOnVolumes() {
+				if key.Matches(msg, shared.Keys.Attach) {
+					return m.openServerVolumeAttach()
+				}
+				if key.Matches(msg, shared.Keys.Detach) {
+					return m.openServerVolumeDetach()
+				}
+			}
+
 			// Block all mutating actions on locked servers
 			if m.isSelectedServerLocked() && key.Matches(msg,
 				shared.Keys.Delete, shared.Keys.Reboot, shared.Keys.HardReboot,
@@ -612,7 +632,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Volume list: Enter to open detail, ctrl+d to delete, ctrl+n to create
+		// Volume list: Enter to open detail, ctrl+d to delete, ctrl+n to create, ctrl+a attach, ctrl+t detach
 		if m.view == viewVolumeList {
 			if key.Matches(msg, shared.Keys.Enter) {
 				return m.openVolumeDetail()
@@ -622,6 +642,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, shared.Keys.Create) {
 				return m.openVolumeCreate()
+			}
+			if key.Matches(msg, shared.Keys.Attach) {
+				return m.openVolumeAttach()
+			}
+			if key.Matches(msg, shared.Keys.Detach) {
+				return m.openVolumeDetach()
 			}
 		}
 
@@ -1147,6 +1173,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverPicker.Active {
 			var cmd tea.Cmd
 			m.serverPicker, cmd = m.serverPicker.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.volumePicker.Active {
+			var cmd tea.Cmd
+			m.volumePicker, cmd = m.volumePicker.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.routerCreate.Active {

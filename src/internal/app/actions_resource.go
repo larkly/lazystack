@@ -15,6 +15,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/routercreate"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
+	"github.com/larkly/lazystack/internal/ui/volumepicker"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
@@ -70,8 +71,19 @@ func (m Model) openVolumeDeleteConfirm() (Model, tea.Cmd) {
 }
 
 func (m Model) openVolumeAttach() (Model, tea.Cmd) {
-	id := m.volumeDetail.SelectedVolumeID()
-	name := m.volumeDetail.SelectedVolumeName()
+	var id, name string
+	switch m.view {
+	case viewVolumeDetail:
+		id = m.volumeDetail.SelectedVolumeID()
+		name = m.volumeDetail.SelectedVolumeName()
+	case viewVolumeList:
+		if v := m.volumeList.SelectedVolume(); v != nil {
+			id, name = v.ID, v.Name
+			if name == "" {
+				name = id
+			}
+		}
+	}
 	if id == "" {
 		return m, nil
 	}
@@ -81,17 +93,59 @@ func (m Model) openVolumeAttach() (Model, tea.Cmd) {
 }
 
 func (m Model) openVolumeDetach() (Model, tea.Cmd) {
-	if m.view != viewVolumeDetail {
-		return m, nil
+	var id, name string
+	switch m.view {
+	case viewVolumeDetail:
+		id = m.volumeDetail.SelectedVolumeID()
+		name = m.volumeDetail.SelectedVolumeName()
+	case viewVolumeList:
+		if v := m.volumeList.SelectedVolume(); v != nil {
+			if v.AttachedServerID == "" {
+				return m, nil
+			}
+			id, name = v.ID, v.Name
+			if name == "" {
+				name = id
+			}
+		}
 	}
-	id := m.volumeDetail.SelectedVolumeID()
-	name := m.volumeDetail.SelectedVolumeName()
 	if id == "" {
 		return m, nil
 	}
 	m.confirm = modal.NewConfirm("detach_volume", id, name)
 	m.confirm.Title = "Detach Volume"
 	m.confirm.Body = fmt.Sprintf("Are you sure you want to detach volume %q?", name)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+func (m Model) openServerVolumeAttach() (Model, tea.Cmd) {
+	if m.view != viewServerDetail {
+		return m, nil
+	}
+	serverID := m.serverDetail.ServerID()
+	serverName := m.serverDetail.ServerName()
+	if serverID == "" {
+		return m, nil
+	}
+	m.volumePicker = volumepicker.New(m.client.Compute, m.client.BlockStorage, serverID, serverName)
+	m.volumePicker.SetSize(m.width, m.height)
+	return m, m.volumePicker.Init()
+}
+
+func (m Model) openServerVolumeDetach() (Model, tea.Cmd) {
+	if m.view != viewServerDetail {
+		return m, nil
+	}
+	volID := m.serverDetail.SelectedVolumeID()
+	volName := m.serverDetail.SelectedVolumeName()
+	if volID == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("detach_volume", volID, volName)
+	m.confirm.Title = "Detach Volume"
+	m.confirm.Body = fmt.Sprintf("Are you sure you want to detach volume %q from server %q?", volName, m.serverDetail.ServerName())
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil
