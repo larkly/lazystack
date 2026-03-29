@@ -39,6 +39,7 @@ type detailLoadedMsg struct {
 	netID       string
 	ports       []network.Port
 	serverNames map[string]string
+	sgNames     map[string]string
 }
 type detailErrMsg struct {
 	netID string
@@ -61,6 +62,7 @@ type Model struct {
 	// Detail state for currently selected network
 	ports       []network.Port
 	serverNames map[string]string // DeviceID → server name
+	sgNames     map[string]string // SG ID → name
 	detailErr   string
 
 	// Pane focus and cursors
@@ -230,6 +232,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.detailErr = ""
 			m.ports = msg.ports
 			m.serverNames = msg.serverNames
+			m.sgNames = msg.sgNames
 			m.clampDetailCursors()
 		}
 		return m, nil
@@ -272,6 +275,7 @@ func (m *Model) resetDetailState() {
 	m.detailErr = ""
 	m.ports = nil
 	m.serverNames = nil
+	m.sgNames = nil
 	m.subnetCursor = 0
 	m.subnetsScroll = 0
 	m.portsCursor = 0
@@ -897,7 +901,15 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 		gap     = 2
 	)
 
-	// Calculate device name width
+	// Calculate dynamic column widths
+	ipsW := len("IPs")
+	for _, p := range m.ports {
+		ipStr := m.portIPStr(p)
+		if len(ipStr) > ipsW {
+			ipsW = len(ipStr)
+		}
+	}
+
 	deviceW := len("Device")
 	for _, p := range m.ports {
 		name := m.deviceName(p)
@@ -909,7 +921,6 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 		deviceW = 20
 	}
 
-	// Calculate owner width
 	ownerW := len("Owner")
 	for _, p := range m.ports {
 		owner := shortOwner(p.DeviceOwner)
@@ -921,15 +932,19 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 		ownerW = 15
 	}
 
-	sep := strings.Repeat(" ", gap)
-	ipsW := maxWidth - 2 - statusW - macW - deviceW - ownerW - gap*4
-	if ipsW < 10 {
-		ipsW = 10
+	// Clamp IPs width to remaining space
+	maxIPs := maxWidth - 2 - statusW - deviceW - ownerW - macW - gap*4
+	if maxIPs < 10 {
+		maxIPs = 10
+	}
+	if ipsW > maxIPs {
+		ipsW = maxIPs
 	}
 
+	sep := strings.Repeat(" ", gap)
 	headerStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted).Bold(true)
-	header := fmt.Sprintf("  %-*s%s%-*s%s%-*s%s%-*s%s%s",
-		statusW, "Status", sep, macW, "MAC", sep, ipsW, "IPs", sep, deviceW, "Device", sep, "Owner")
+	header := fmt.Sprintf("  %-*s%s%-*s%s%-*s%s%-*s%s%-*s",
+		statusW, "Status", sep, ipsW, "IPs", sep, deviceW, "Device", sep, ownerW, "Owner", sep, macW, "MAC")
 	headerLine := headerStyle.Render(header)
 
 	visibleLines := maxHeight - 1
@@ -956,22 +971,13 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 			prefix = "\u25b8 "
 		}
 
-		statusColor := shared.ColorSuccess
-		if p.Status != "ACTIVE" {
-			statusColor = shared.ColorWarning
-		}
-		statusStr := lipgloss.NewStyle().Foreground(statusColor).Width(statusW).Render(shared.StatusIcon(p.Status) + p.Status)
+		// Build status string as plain text for alignment, color the whole line
+		statusIcon := shared.StatusIcon(p.Status)
+		statusPlain := fmt.Sprintf("%-*s", statusW, statusIcon+p.Status)
 
-		var ips []string
-		for _, ip := range p.FixedIPs {
-			ips = append(ips, ip.IPAddress)
-		}
-		ipStr := strings.Join(ips, ", ")
+		ipStr := m.portIPStr(p)
 		if len(ipStr) > ipsW {
 			ipStr = ipStr[:ipsW-1] + "\u2026"
-		}
-		if len(ips) == 0 {
-			ipStr = "\u2014"
 		}
 
 		device := m.deviceName(p)
@@ -984,16 +990,71 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 			owner = owner[:ownerW-1] + "\u2026"
 		}
 
-		line := fmt.Sprintf("%s%s%s%-*s%s%-*s%s%-*s%s%s",
-			prefix, statusStr, sep, ipsW, ipStr, sep, deviceW, device, sep, ownerW, owner, sep, p.MACAddress)
+		mac := p.MACAddress
+
+		plainLine := fmt.Sprintf("%s%-*s%s%-*s%s%-*s%s%-*s%s%-*s",
+			prefix, statusW, statusPlain, sep, ipsW, ipStr, sep, deviceW, device, sep, ownerW, owner, sep, macW, mac)
 
 		if selected {
-			line = selectedBg.Render(line)
+			lines = append(lines, selectedBg.Render(plainLine))
+		} else {
+			// Color the status portion
+			statusColor := shared.ColorSuccess
+			if p.Status != "ACTIVE" {
+				statusColor = shared.ColorWarning
+			}
+			if !p.AdminStateUp {
+				statusColor = shared.ColorError
+			}
+			coloredStatus := lipgloss.NewStyle().Foreground(statusColor).Render(statusPlain)
+			rest := fmt.Sprintf("%s%-*s%s%-*s%s%-*s%s%-*s",
+				sep, ipsW, ipStr, sep, deviceW, device, sep, ownerW, owner, sep, macW, mac)
+			lines = append(lines, prefix+coloredStatus+rest)
 		}
-		lines = append(lines, line)
+
+		// Show extra detail for the selected port
+		if selected {
+			detailStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+			adminStr := "up"
+			if !p.AdminStateUp {
+				adminStr = lipgloss.NewStyle().Foreground(shared.ColorError).Render("down")
+			}
+			detailLine := fmt.Sprintf("      ID: %s  Admin: %s", p.ID[:min(8, len(p.ID))]+"\u2026", adminStr)
+			if p.Name != "" {
+				detailLine += "  Name: " + p.Name
+			}
+			lines = append(lines, detailStyle.Render(detailLine))
+
+			// Show security groups
+			if len(p.SecurityGroups) > 0 {
+				var sgStrs []string
+				for _, sgID := range p.SecurityGroups {
+					if name, ok := m.sgNames[sgID]; ok {
+						sgStrs = append(sgStrs, name)
+					} else if len(sgID) > 8 {
+						sgStrs = append(sgStrs, sgID[:8]+"\u2026")
+					} else {
+						sgStrs = append(sgStrs, sgID)
+					}
+				}
+				sgLine := "      SGs: " + strings.Join(sgStrs, ", ")
+				lines = append(lines, detailStyle.Render(sgLine))
+			}
+		}
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) portIPStr(p network.Port) string {
+	if len(p.FixedIPs) == 0 {
+		return "\u2014"
+	}
+	var ips []string
+	for _, ip := range p.FixedIPs {
+		ips = append(ips, ip.IPAddress)
+	}
+	return strings.Join(ips, ", ")
 }
 
 func (m Model) deviceName(p network.Port) string {
@@ -1188,8 +1249,27 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 			return fetchedPorts[i].MACAddress < fetchedPorts[j].MACAddress
 		})
 
+		// Resolve security group names
+		sgIDs := make(map[string]bool)
+		for _, p := range fetchedPorts {
+			for _, sgID := range p.SecurityGroups {
+				sgIDs[sgID] = true
+			}
+		}
+		sgNameMap := make(map[string]string)
+		if len(sgIDs) > 0 {
+			sgs, err := network.ListSecurityGroups(context.Background(), networkClient)
+			if err == nil {
+				for _, sg := range sgs {
+					if sgIDs[sg.ID] {
+						sgNameMap[sg.ID] = sg.Name
+					}
+				}
+			}
+		}
+
 		if computeClient == nil {
-			return detailLoadedMsg{netID: netID, ports: fetchedPorts}
+			return detailLoadedMsg{netID: netID, ports: fetchedPorts, sgNames: sgNameMap}
 		}
 
 		// Collect device IDs that look like compute instances
@@ -1215,7 +1295,6 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 		// Also resolve router device IDs
 		for _, p := range fetchedPorts {
 			if strings.HasPrefix(p.DeviceOwner, "network:router_interface") && p.DeviceID != "" {
-				// DeviceID is the router ID — try to get the router name
 				router, err := network.GetRouter(context.Background(), networkClient, p.DeviceID)
 				if err == nil && router != nil {
 					srvNames[p.DeviceID] = router.Name
@@ -1223,7 +1302,7 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 			}
 		}
 
-		return detailLoadedMsg{netID: netID, ports: fetchedPorts, serverNames: srvNames}
+		return detailLoadedMsg{netID: netID, ports: fetchedPorts, serverNames: srvNames, sgNames: sgNameMap}
 	}
 }
 
