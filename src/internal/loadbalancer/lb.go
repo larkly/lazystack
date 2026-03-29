@@ -7,6 +7,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 )
@@ -34,10 +35,11 @@ type Listener struct {
 
 // Pool is a simplified pool.
 type Pool struct {
-	ID       string
-	Name     string
-	Protocol string
-	LBMethod string
+	ID        string
+	Name      string
+	Protocol  string
+	LBMethod  string
+	MonitorID string
 }
 
 // Member is a simplified pool member.
@@ -48,6 +50,23 @@ type Member struct {
 	ProtocolPort    int
 	Weight          int
 	OperatingStatus string
+}
+
+// HealthMonitor is a simplified health monitor.
+type HealthMonitor struct {
+	ID                 string
+	Name               string
+	Type               string
+	Delay              int
+	Timeout            int
+	MaxRetries         int
+	MaxRetriesDown     int
+	HTTPMethod         string
+	URLPath            string
+	ExpectedCodes      string
+	AdminStateUp       bool
+	OperatingStatus    string
+	ProvisioningStatus string
 }
 
 // ListLoadBalancers fetches all load balancers.
@@ -140,10 +159,11 @@ func ListPools(ctx context.Context, client *gophercloud.ServiceClient, lbID stri
 		}
 		for _, p := range extracted {
 			result = append(result, Pool{
-				ID:       p.ID,
-				Name:     p.Name,
-				Protocol: p.Protocol,
-				LBMethod: p.LBMethod,
+				ID:        p.ID,
+				Name:      p.Name,
+				Protocol:  p.Protocol,
+				LBMethod:  p.LBMethod,
+				MonitorID: p.MonitorID,
 			})
 		}
 		return true, nil
@@ -152,6 +172,29 @@ func ListPools(ctx context.Context, client *gophercloud.ServiceClient, lbID stri
 		return nil, fmt.Errorf("listing pools for LB %s: %w", lbID, err)
 	}
 	return result, nil
+}
+
+// GetHealthMonitor fetches a single health monitor by ID.
+func GetHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string) (*HealthMonitor, error) {
+	mon, err := monitors.Get(ctx, client, id).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("getting health monitor %s: %w", id, err)
+	}
+	return &HealthMonitor{
+		ID:                 mon.ID,
+		Name:               mon.Name,
+		Type:               mon.Type,
+		Delay:              mon.Delay,
+		Timeout:            mon.Timeout,
+		MaxRetries:         mon.MaxRetries,
+		MaxRetriesDown:     mon.MaxRetriesDown,
+		HTTPMethod:         mon.HTTPMethod,
+		URLPath:            mon.URLPath,
+		ExpectedCodes:      mon.ExpectedCodes,
+		AdminStateUp:       mon.AdminStateUp,
+		OperatingStatus:    mon.OperatingStatus,
+		ProvisioningStatus: mon.ProvisioningStatus,
+	}, nil
 }
 
 // ListMembers fetches members for a pool.
