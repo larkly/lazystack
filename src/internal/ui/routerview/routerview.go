@@ -234,11 +234,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		cmds := []tea.Cmd{m.fetchRouters()}
-		if r := m.selectedRouter(); r != nil {
-			cmds = append(cmds, m.fetchDetail(r.ID))
-		}
-		return m, tea.Batch(cmds...)
+		// Only refresh the router list on tick. Interfaces/routes rarely
+		// change and are fetched on selection change or manual refresh.
+		return m, m.fetchRouters()
 
 	case spinner.TickMsg:
 		if m.loading || m.detailLoading {
