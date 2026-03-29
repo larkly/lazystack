@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	fieldUser    = 0
-	fieldKeyPath = 1
-	fieldDebug   = 2
-	numFields    = 3
+	fieldHost    = 0
+	fieldUser    = 1
+	fieldKeyPath = 2
+	fieldDebug   = 3
+	numFields    = 4
 )
 
 // SSHConnectMsg is emitted when the user confirms the SSH username.
@@ -29,11 +30,18 @@ type SSHConnectMsg struct {
 	Debug   bool
 }
 
+// ipOption holds an IP address and its type label.
+type ipOption struct {
+	IP    string
+	Label string // "floating", "ipv6", "ipv4"
+}
+
 // Model is the SSH username prompt overlay modal.
 type Model struct {
 	Active     bool
 	serverName string
-	ip         string
+	ips        []ipOption
+	ipIndex    int
 	userInput  textinput.Model
 	keyInput   textinput.Model
 	debug      bool
@@ -41,6 +49,10 @@ type Model struct {
 	err        string
 	width      int
 	height     int
+
+	// IP picker state.
+	ipPickerOpen   bool
+	ipPickerCursor int
 
 	// Key file picker state.
 	pickerOpen   bool
@@ -50,13 +62,25 @@ type Model struct {
 }
 
 // New creates an SSH prompt modal for the given server.
-func New(serverName, ip, keyPath string) Model {
+func New(serverName string, floatingIPs, ipv6, ipv4 []string, keyPath string) Model {
+	// Build IP options list with labels
+	var ips []ipOption
+	for _, ip := range floatingIPs {
+		ips = append(ips, ipOption{IP: ip, Label: "floating"})
+	}
+	for _, ip := range ipv6 {
+		ips = append(ips, ipOption{IP: ip, Label: "ipv6"})
+	}
+	for _, ip := range ipv4 {
+		ips = append(ips, ipOption{IP: ip, Label: "ipv4"})
+	}
+
 	ui := textinput.New()
 	ui.Prompt = ""
 	ui.Placeholder = "username"
 	ui.CharLimit = 64
 	ui.SetWidth(30)
-	ui.Focus()
+	ui.Blur()
 
 	ki := textinput.New()
 	ki.Prompt = ""
@@ -75,12 +99,13 @@ func New(serverName, ip, keyPath string) Model {
 	return Model{
 		Active:       true,
 		serverName:   serverName,
-		ip:           ip,
+		ips:          ips,
+		ipIndex:      0,
 		userInput:    ui,
 		keyInput:     ki,
 		pickerFilter: pf,
 		pickerFiles:  listSSHKeys(),
-		focusField:   fieldUser,
+		focusField:   fieldHost,
 	}
 }
 
@@ -159,6 +184,9 @@ func (m *Model) closePicker() {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.ipPickerOpen {
+		return m.updateIPPicker(msg)
+	}
 	if m.pickerOpen {
 		return m.updatePicker(msg)
 	}
@@ -168,6 +196,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.Active = false
 		return m, nil
 	case key.Matches(msg, shared.Keys.Enter):
+		if m.focusField == fieldHost && len(m.ips) > 1 {
+			m.ipPickerOpen = true
+			m.ipPickerCursor = m.ipIndex
+			return m, nil
+		}
 		if m.focusField == fieldKeyPath {
 			m.openPicker()
 			return m, nil
@@ -178,6 +211,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, shared.Keys.ShiftTab):
 		m.retreatFocus()
+		return m, nil
+	}
+
+	// Host field: left/right to cycle IPs
+	if m.focusField == fieldHost {
+		switch {
+		case key.Matches(msg, shared.Keys.Left) || key.Matches(msg, shared.Keys.Right):
+			if len(m.ips) > 1 {
+				if key.Matches(msg, shared.Keys.Right) {
+					m.ipIndex = (m.ipIndex + 1) % len(m.ips)
+				} else {
+					m.ipIndex = (m.ipIndex - 1 + len(m.ips)) % len(m.ips)
+				}
+			}
+			return m, nil
+		}
 		return m, nil
 	}
 
@@ -194,6 +243,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// On debug checkbox field.
 	if key.Matches(msg, shared.Keys.Select) {
 		m.debug = !m.debug
+	}
+	return m, nil
+}
+
+func (m Model) updateIPPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.ipPickerOpen = false
+		return m, nil
+	case "enter":
+		if m.ipPickerCursor < len(m.ips) {
+			m.ipIndex = m.ipPickerCursor
+		}
+		m.ipPickerOpen = false
+		m.advanceFocus()
+		return m, nil
+	case "up", "k":
+		if m.ipPickerCursor > 0 {
+			m.ipPickerCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.ipPickerCursor < len(m.ips)-1 {
+			m.ipPickerCursor++
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -244,6 +319,13 @@ func (m Model) filteredPickerFiles() []string {
 	return out
 }
 
+func (m Model) selectedIP() string {
+	if len(m.ips) == 0 {
+		return ""
+	}
+	return m.ips[m.ipIndex].IP
+}
+
 func (m Model) submit() (Model, tea.Cmd) {
 	user := strings.TrimSpace(m.userInput.Value())
 	if user == "" {
@@ -251,10 +333,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.Active = false
+	ip := m.selectedIP()
 	return m, func() tea.Msg {
 		return SSHConnectMsg{
 			User:    user,
-			IP:      m.ip,
+			IP:      ip,
 			KeyPath: strings.TrimSpace(m.keyInput.Value()),
 			Debug:   m.debug,
 		}
@@ -276,10 +359,30 @@ func (m Model) View() string {
 	cursor := lipgloss.NewStyle().Foreground(shared.ColorPrimary).Bold(true)
 
 	body.WriteString("  " + label.Render("Server") + "  " + m.serverName + "\n")
-	body.WriteString("  " + label.Render("Host  ") + "  " + m.ip + "\n\n")
+
+	// Host field with IP selector
+	prefix := "  "
+	if m.focusField == fieldHost {
+		prefix = cursor.Render("> ")
+	}
+	if len(m.ips) > 0 {
+		opt := m.ips[m.ipIndex]
+		ipDisplay := opt.IP + " " + muted.Render(opt.Label)
+		if len(m.ips) > 1 {
+			counter := muted.Render(fmt.Sprintf("[%d/%d]", m.ipIndex+1, len(m.ips)))
+			ipDisplay = ipDisplay + " " + counter
+		}
+		body.WriteString(prefix + label.Render("Host  ") + "  " + ipDisplay + "\n")
+
+		// Inline IP picker
+		if m.ipPickerOpen {
+			body.WriteString(m.renderIPPicker())
+		}
+	}
+	body.WriteString("\n")
 
 	// User field
-	prefix := "  "
+	prefix = "  "
 	if m.focusField == fieldUser {
 		prefix = cursor.Render("> ")
 	}
@@ -313,13 +416,32 @@ func (m Model) View() string {
 	body.WriteString(fmt.Sprintf("%s%s %s\n\n", prefix, check, muted.Render("verbose mode (-v)")))
 
 	help := "tab: next  space: toggle  enter: connect  esc: cancel"
-	if m.focusField == fieldKeyPath && !m.pickerOpen {
+	if m.ipPickerOpen {
+		help = "\u2191/\u2193: select  enter: confirm  esc: close"
+	} else if m.focusField == fieldHost && len(m.ips) > 1 {
+		help = "\u2190/\u2192: change IP  enter: pick from list  tab: next  esc: cancel"
+	} else if m.focusField == fieldKeyPath && !m.pickerOpen {
 		help = "enter: browse keys  tab: next  esc: cancel"
 	}
 	body.WriteString(shared.StyleHelp.Render("  " + help))
 
 	content := title + "\n\n" + body.String()
 	return m.renderModal(content)
+}
+
+func (m Model) renderIPPicker() string {
+	var b strings.Builder
+	for i, opt := range m.ips {
+		cur := "  "
+		style := lipgloss.NewStyle().Foreground(shared.ColorFg)
+		if i == m.ipPickerCursor {
+			cur = "\u25b8 "
+			style = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
+		}
+		labelStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+		b.WriteString(fmt.Sprintf("      %s%s %s\n", cur, style.Render(opt.IP), labelStyle.Render(opt.Label)))
+	}
+	return b.String()
 }
 
 func (m Model) renderPicker() string {
@@ -347,7 +469,7 @@ func (m Model) renderPicker() string {
 		cur := "  "
 		style := lipgloss.NewStyle().Foreground(shared.ColorFg)
 		if i == m.pickerCursor {
-			cur = "▸ "
+			cur = "\u25b8 "
 			style = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
 		}
 		b.WriteString(fmt.Sprintf("      %s%s\n", cur, style.Render(name)))
@@ -361,8 +483,8 @@ func (m Model) renderPicker() string {
 }
 
 func (m Model) renderModal(content string) string {
-	modalWidth := 50
-	if m.width > 0 && m.width < 60 {
+	modalWidth := 64
+	if m.width > 0 && m.width < 72 {
 		modalWidth = m.width - 6
 	}
 	box := shared.StyleModal.Width(modalWidth).Render(content)
