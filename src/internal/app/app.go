@@ -771,6 +771,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.BlockStorageClient != nil {
 			m.tabs = append(m.tabs, TabDef{Name: "Volumes", Key: "volumes"})
 		}
+		m.tabs = append(m.tabs, TabDef{Name: "Images", Key: "images"})
 		m.tabs = append(m.tabs, TabDef{Name: "Floating IPs", Key: "floatingips"})
 		m.tabs = append(m.tabs, TabDef{Name: "Sec Groups", Key: "secgroups"})
 		m.tabs = append(m.tabs, TabDef{Name: "Networks", Key: "networks"})
@@ -779,7 +780,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tabs = append(m.tabs, TabDef{Name: "Load Balancers", Key: "loadbalancers"})
 		}
 		m.tabs = append(m.tabs, TabDef{Name: "Key Pairs", Key: "keypairs"})
-		m.tabs = append(m.tabs, TabDef{Name: "Images", Key: "images"})
 		m.tabInited = make([]bool, len(m.tabs))
 		m.activeTab = 0
 		m.statusBar.CloudName = m.cloudName
