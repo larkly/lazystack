@@ -665,5 +665,5 @@ func (m *Model) applyHighlight() {
 
 // Hints returns key hints.
 func (m Model) Hints() string {
-	return "↑↓ navigate • enter detail • ^n create • ^d delete • R refresh • 1-5/←→ switch tab • ? help"
+	return "↑↓ navigate • enter detail • ^n create • ^d delete • ^a attach • ^t detach • R refresh • 1-5/←→ switch tab • ? help"
 }

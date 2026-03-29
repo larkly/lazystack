@@ -159,6 +159,34 @@ func (m Model) ServerName() string {
 	return m.serverID
 }
 
+// SelectedVolumeID returns the volume ID under the cursor in the volumes pane.
+func (m Model) SelectedVolumeID() string {
+	if m.server == nil || len(m.server.VolAttach) == 0 {
+		return ""
+	}
+	if m.volumeCursor >= 0 && m.volumeCursor < len(m.server.VolAttach) {
+		return m.server.VolAttach[m.volumeCursor].ID
+	}
+	return ""
+}
+
+// SelectedVolumeName returns the name of the volume under the cursor.
+func (m Model) SelectedVolumeName() string {
+	id := m.SelectedVolumeID()
+	if id == "" {
+		return ""
+	}
+	if vol, ok := m.volumeInfo[id]; ok && vol.Name != "" {
+		return vol.Name
+	}
+	return id
+}
+
+// FocusedOnVolumes returns true when the volumes pane has focus.
+func (m Model) FocusedOnVolumes() bool {
+	return m.focus == focusVolumes
+}
+
 // ServerStatus returns the current server status.
 func (m Model) ServerStatus() string {
 	if m.server != nil {
@@ -1365,7 +1393,7 @@ func (m Model) Hints() string {
 	case focusInterfaces:
 		return "\u2191\u2193 scroll interfaces \u2022 " + base
 	case focusVolumes:
-		return "\u2191\u2193 select \u2022 enter detail \u2022 " + base
+		return "\u2191\u2193 select \u2022 enter detail \u2022 ^a attach \u2022 ^t detach \u2022 " + base
 	case focusConsole:
 		return "\u2191\u2193 scroll log \u2022 g top \u2022 G bottom \u2022 " + base
 	case focusActions:
