@@ -790,8 +790,8 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		netClient := m.client.Network
 		routerID := action.ServerID
 		name := action.Name
-		// Get the selected subnet ID from the detail view
-		subnetID := m.routerDetail.SelectedInterfaceSubnetID()
+		// Get the selected subnet ID from the router view
+		subnetID := m.routerView.SelectedInterfaceSubnetID()
 		return m, func() tea.Msg {
 			err := network.RemoveRouterInterface(context.Background(), netClient, routerID, subnetID)
 			if err != nil {

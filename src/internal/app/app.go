@@ -28,8 +28,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/networkcreate"
 	"github.com/larkly/lazystack/internal/ui/routercreate"
-	"github.com/larkly/lazystack/internal/ui/routerdetail"
-	"github.com/larkly/lazystack/internal/ui/routerlist"
+	"github.com/larkly/lazystack/internal/ui/routerview"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/networkview"
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
@@ -78,8 +77,7 @@ const (
 	viewKeypairCreate
 	viewNetworkList
 	viewKeypairDetail
-	viewRouterList
-	viewRouterDetail
+	viewRouterView
 	viewImageList
 	viewImageDetail
 )
@@ -130,8 +128,7 @@ type Model struct {
 	sgCreate       sgcreate.Model
 	networkCreate  networkcreate.Model
 	subnetCreate   subnetcreate.Model
-	routerList     routerlist.Model
-	routerDetail   routerdetail.Model
+	routerView     routerview.Model
 	routerCreate   routercreate.Model
 	subnetPicker   subnetpicker.Model
 	sgRuleCreate  sgrulecreate.Model
@@ -702,23 +699,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Router list: Enter detail, ctrl+n create, ctrl+d delete
-		if m.view == viewRouterList {
-			if key.Matches(msg, shared.Keys.Enter) {
-				return m.openRouterDetail()
-			}
+		// Router view: context-sensitive actions based on focused pane
+		if m.view == viewRouterView {
 			if key.Matches(msg, shared.Keys.Delete) {
 				return m.openRouterDeleteConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Create) {
+				if m.routerView.InInterfaces() {
+					return m.openAddRouterInterface()
+				}
 				return m.openRouterCreate()
-			}
-		}
-
-		// Router detail: ctrl+a add interface, ctrl+t remove interface, ctrl+d delete
-		if m.view == viewRouterDetail {
-			if key.Matches(msg, shared.Keys.Delete) {
-				return m.openRouterDeleteConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Attach) {
 				return m.openAddRouterInterface()
@@ -1024,10 +1014,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = viewKeypairList
 			m.statusBar.CurrentView = "keypairlist"
 		}
-		if m.view == viewRouterDetail {
-			m.view = viewRouterList
-			m.statusBar.CurrentView = "routerlist"
-		}
+		// Router detail is now inline in routerview — no ESC handler needed
 		if m.view == viewLBDetail {
 			m.view = viewLBList
 			m.statusBar.CurrentView = "lblist"
