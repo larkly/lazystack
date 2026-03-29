@@ -16,16 +16,17 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 )
 
-type focusPane int
+// FocusPane identifies a pane in the load balancer detail view.
+type FocusPane int
 
 const (
-	focusInfo focusPane = iota
-	focusListeners
-	focusPools
-	focusMembers
+	FocusInfo FocusPane = iota
+	FocusListeners
+	FocusPools
+	FocusMembers
 )
 
-const focusPaneCount = 4
+const FocusPaneCount = 4
 const narrowThreshold = 80
 
 var selectedRowStyle = lipgloss.NewStyle().Background(lipgloss.Color("#073642")).Bold(true)
@@ -61,7 +62,7 @@ type Model struct {
 	refreshInterval time.Duration
 
 	// Pane focus and cursors
-	focus          focusPane
+	focus          FocusPane
 	listenerCursor int
 	listenerScroll int
 	poolCursor     int
@@ -104,6 +105,80 @@ func (m Model) LBName() string {
 		return m.lbID
 	}
 	return m.lbID
+}
+
+// FocusedPane returns the currently focused pane.
+func (m Model) FocusedPane() FocusPane {
+	return m.focus
+}
+
+// SelectedListenerID returns the ID of the currently selected listener, or "".
+func (m Model) SelectedListenerID() string {
+	if m.focus != FocusListeners {
+		return ""
+	}
+	if m.listenerCursor >= 0 && m.listenerCursor < len(m.listeners) {
+		return m.listeners[m.listenerCursor].ID
+	}
+	return ""
+}
+
+// SelectedListenerName returns the name of the currently selected listener.
+func (m Model) SelectedListenerName() string {
+	if m.listenerCursor >= 0 && m.listenerCursor < len(m.listeners) {
+		l := m.listeners[m.listenerCursor]
+		if l.Name != "" {
+			return l.Name
+		}
+		return fmt.Sprintf("%s:%d", l.Protocol, l.ProtocolPort)
+	}
+	return ""
+}
+
+// SelectedPoolID returns the ID of the currently selected pool, or "".
+func (m Model) SelectedPoolID() string {
+	if m.poolCursor >= 0 && m.poolCursor < len(m.pools) {
+		return m.pools[m.poolCursor].ID
+	}
+	return ""
+}
+
+// SelectedPoolName returns the name of the currently selected pool.
+func (m Model) SelectedPoolName() string {
+	if m.poolCursor >= 0 && m.poolCursor < len(m.pools) {
+		return m.pools[m.poolCursor].Name
+	}
+	return ""
+}
+
+// SelectedMemberID returns the ID of the currently selected member, or "".
+func (m Model) SelectedMemberID() string {
+	if m.focus != FocusMembers {
+		return ""
+	}
+	members := m.selectedPoolMembers()
+	if m.memberCursor >= 0 && m.memberCursor < len(members) {
+		return members[m.memberCursor].ID
+	}
+	return ""
+}
+
+// SelectedMemberName returns a display name for the currently selected member.
+func (m Model) SelectedMemberName() string {
+	members := m.selectedPoolMembers()
+	if m.memberCursor >= 0 && m.memberCursor < len(members) {
+		mem := members[m.memberCursor]
+		if mem.Name != "" {
+			return mem.Name
+		}
+		return fmt.Sprintf("%s:%d", mem.Address, mem.ProtocolPort)
+	}
+	return ""
+}
+
+// SelectedPoolForMember returns the pool ID that owns the currently displayed members.
+func (m Model) SelectedPoolForMember() string {
+	return m.selectedPoolID()
 }
 
 // Update handles messages.
@@ -155,11 +230,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, shared.Keys.Tab):
-		m.focus = (m.focus + 1) % focusPaneCount
+		m.focus = (m.focus + 1) % FocusPaneCount
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.ShiftTab):
-		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
+		m.focus = (m.focus + FocusPaneCount - 1) % FocusPaneCount
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Up):
@@ -179,13 +254,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) scrollUp(n int) Model {
 	switch m.focus {
-	case focusListeners:
+	case FocusListeners:
 		m.listenerCursor -= n
 		if m.listenerCursor < 0 {
 			m.listenerCursor = 0
 		}
 		m.ensureListenerCursorVisible()
-	case focusPools:
+	case FocusPools:
 		prev := m.poolCursor
 		m.poolCursor -= n
 		if m.poolCursor < 0 {
@@ -196,7 +271,7 @@ func (m Model) scrollUp(n int) Model {
 			m.memberCursor = 0
 			m.memberScroll = 0
 		}
-	case focusMembers:
+	case FocusMembers:
 		m.memberCursor -= n
 		if m.memberCursor < 0 {
 			m.memberCursor = 0
@@ -208,7 +283,7 @@ func (m Model) scrollUp(n int) Model {
 
 func (m Model) scrollDown(n int) Model {
 	switch m.focus {
-	case focusListeners:
+	case FocusListeners:
 		m.listenerCursor += n
 		maxIdx := len(m.listeners) - 1
 		if maxIdx < 0 {
@@ -218,7 +293,7 @@ func (m Model) scrollDown(n int) Model {
 			m.listenerCursor = maxIdx
 		}
 		m.ensureListenerCursorVisible()
-	case focusPools:
+	case FocusPools:
 		prev := m.poolCursor
 		m.poolCursor += n
 		maxIdx := len(m.pools) - 1
@@ -233,7 +308,7 @@ func (m Model) scrollDown(n int) Model {
 			m.memberCursor = 0
 			m.memberScroll = 0
 		}
-	case focusMembers:
+	case FocusMembers:
 		m.memberCursor += n
 		members := m.selectedPoolMembers()
 		maxIdx := len(members) - 1
@@ -402,17 +477,17 @@ func (m Model) renderWide() string {
 	leftW := m.width * 35 / 100
 	rightW := m.width - leftW - 1
 
-	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
-	infoPanel := m.panelBorder(focusInfo).Width(leftW).Height(topH).Render(infoContent)
+	infoContent := padContent(m.panelTitle(FocusInfo), m.renderInfoContent(leftW-4))
+	infoPanel := m.panelBorder(FocusInfo).Width(leftW).Height(topH).Render(infoContent)
 
-	listenersContent := padContent(m.panelTitle(focusListeners), m.renderListenersContent(rightW-4, topH-4))
-	listenersPanel := m.panelBorder(focusListeners).Width(rightW).Height(topH).Render(listenersContent)
+	listenersContent := padContent(m.panelTitle(FocusListeners), m.renderListenersContent(rightW-4, topH-4))
+	listenersPanel := m.panelBorder(FocusListeners).Width(rightW).Height(topH).Render(listenersContent)
 
-	poolsContent := padContent(m.panelTitle(focusPools), m.renderPoolsContent(leftW-4, bottomH-4))
-	poolsPanel := m.panelBorder(focusPools).Width(leftW).Height(bottomH).Render(poolsContent)
+	poolsContent := padContent(m.panelTitle(FocusPools), m.renderPoolsContent(leftW-4, bottomH-4))
+	poolsPanel := m.panelBorder(FocusPools).Width(leftW).Height(bottomH).Render(poolsContent)
 
-	membersContent := padContent(m.panelTitle(focusMembers), m.renderMembersContent(rightW-4, bottomH-4))
-	membersPanel := m.panelBorder(focusMembers).Width(rightW).Height(bottomH).Render(membersContent)
+	membersContent := padContent(m.panelTitle(FocusMembers), m.renderMembersContent(rightW-4, bottomH-4))
+	membersPanel := m.panelBorder(FocusMembers).Width(rightW).Height(bottomH).Render(membersContent)
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", listenersPanel)
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, poolsPanel, " ", membersPanel)
@@ -435,10 +510,10 @@ func (m Model) renderNarrow() string {
 		}
 	}
 
-	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4)))
-	listenersPanel := m.panelBorder(focusListeners).Width(w).Height(listenersH).Render(padContent(m.panelTitle(focusListeners), m.renderListenersContent(w-4, listenersH-4)))
-	poolsPanel := m.panelBorder(focusPools).Width(w).Height(poolsH).Render(padContent(m.panelTitle(focusPools), m.renderPoolsContent(w-4, poolsH-4)))
-	membersPanel := m.panelBorder(focusMembers).Width(w).Height(membersH).Render(padContent(m.panelTitle(focusMembers), m.renderMembersContent(w-4, membersH-4)))
+	infoPanel := m.panelBorder(FocusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(FocusInfo), m.renderInfoContent(w-4)))
+	listenersPanel := m.panelBorder(FocusListeners).Width(w).Height(listenersH).Render(padContent(m.panelTitle(FocusListeners), m.renderListenersContent(w-4, listenersH-4)))
+	poolsPanel := m.panelBorder(FocusPools).Width(w).Height(poolsH).Render(padContent(m.panelTitle(FocusPools), m.renderPoolsContent(w-4, poolsH-4)))
+	membersPanel := m.panelBorder(FocusMembers).Width(w).Height(membersH).Render(padContent(m.panelTitle(FocusMembers), m.renderMembersContent(w-4, membersH-4)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, infoPanel, listenersPanel, poolsPanel, membersPanel)
 }
@@ -457,7 +532,7 @@ func padContent(title, content string) string {
 	return strings.Join(out, "\n")
 }
 
-func (m Model) panelTitle(pane focusPane) string {
+func (m Model) panelTitle(pane FocusPane) string {
 	borderColor := shared.ColorMuted
 	if m.focus == pane {
 		borderColor = shared.ColorPrimary
@@ -465,21 +540,21 @@ func (m Model) panelTitle(pane focusPane) string {
 	titleStyle := lipgloss.NewStyle().Foreground(borderColor).Bold(true)
 
 	switch pane {
-	case focusInfo:
+	case FocusInfo:
 		return titleStyle.Render("Info")
-	case focusListeners:
+	case FocusListeners:
 		t := titleStyle.Render("Listeners")
 		if m.loading {
 			t += " " + m.spinner.View()
 		}
 		return t
-	case focusPools:
+	case FocusPools:
 		t := titleStyle.Render("Pools")
 		if m.loading {
 			t += " " + m.spinner.View()
 		}
 		return t
-	case focusMembers:
+	case FocusMembers:
 		t := titleStyle.Render("Members")
 		poolName := ""
 		if m.poolCursor >= 0 && m.poolCursor < len(m.pools) {
@@ -496,7 +571,7 @@ func (m Model) panelTitle(pane focusPane) string {
 	return ""
 }
 
-func (m Model) panelBorder(pane focusPane) lipgloss.Style {
+func (m Model) panelBorder(pane FocusPane) lipgloss.Style {
 	borderColor := shared.ColorMuted
 	if m.focus == pane {
 		borderColor = shared.ColorPrimary
@@ -637,7 +712,7 @@ func (m Model) renderListenersContent(maxWidth, maxHeight int) string {
 			break
 		}
 
-		selected := m.focus == focusListeners && i == m.listenerCursor
+		selected := m.focus == FocusListeners && i == m.listenerCursor
 		prefix := "  "
 		if selected {
 			prefix = "\u25b8 "
@@ -731,7 +806,7 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 			break
 		}
 
-		selected := m.focus == focusPools && i == m.poolCursor
+		selected := m.focus == FocusPools && i == m.poolCursor
 		prefix := "  "
 		if selected {
 			prefix = "\u25b8 "
@@ -871,7 +946,7 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 			break
 		}
 
-		selected := m.focus == focusMembers && i == m.memberCursor
+		selected := m.focus == FocusMembers && i == m.memberCursor
 		prefix := "  "
 		if selected {
 			prefix = "\u25b8 "
@@ -921,11 +996,30 @@ func (m Model) renderActionBar() string {
 	labelStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
 
 	type btn struct{ key, label string }
-	buttons := []btn{
-		{"^d", "Delete LB"},
-		{"tab", "Switch Pane"},
-		{"esc", "Back"},
+	var buttons []btn
+
+	switch m.focus {
+	case FocusInfo:
+		buttons = append(buttons, btn{"^d", "Delete LB"})
+	case FocusListeners:
+		buttons = append(buttons, btn{"^n", "Add Listener"})
+		if m.SelectedListenerID() != "" {
+			buttons = append(buttons, btn{"^d", "Delete Listener"})
+		}
+	case FocusPools:
+		buttons = append(buttons, btn{"^n", "Add Pool"})
+		if m.SelectedPoolID() != "" {
+			buttons = append(buttons, btn{"^d", "Delete Pool"})
+		}
+	case FocusMembers:
+		if m.SelectedPoolID() != "" {
+			buttons = append(buttons, btn{"^n", "Add Member"})
+		}
+		if m.SelectedMemberID() != "" {
+			buttons = append(buttons, btn{"^d", "Delete Member"})
+		}
 	}
+	buttons = append(buttons, btn{"tab", "Switch Pane"}, btn{"esc", "Back"})
 
 	var parts []string
 	totalLen := 0
@@ -1059,11 +1153,11 @@ func (m *Model) SetSize(w, h int) {
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
 	switch m.focus {
-	case focusListeners:
+	case FocusListeners:
 		return "\u2191\u2193 navigate \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
-	case focusPools:
+	case FocusPools:
 		return "\u2191\u2193 select pool \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
-	case focusMembers:
+	case FocusMembers:
 		return "\u2191\u2193 navigate members \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
 	default:
 		return "tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"

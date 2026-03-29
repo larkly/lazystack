@@ -197,6 +197,148 @@ func GetHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id
 	}, nil
 }
 
+// CreateListener creates a listener on a load balancer.
+func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol string, port int) (*Listener, error) {
+	opts := listeners.CreateOpts{
+		LoadbalancerID: lbID,
+		Name:           name,
+		Protocol:       listeners.Protocol(protocol),
+		ProtocolPort:   port,
+	}
+	l, err := listeners.Create(ctx, client, opts).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating listener: %w", err)
+	}
+	return &Listener{
+		ID:            l.ID,
+		Name:          l.Name,
+		Protocol:      l.Protocol,
+		ProtocolPort:  l.ProtocolPort,
+		DefaultPoolID: l.DefaultPoolID,
+	}, nil
+}
+
+// DeleteListener deletes a listener.
+func DeleteListener(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := listeners.Delete(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("deleting listener %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// CreatePool creates a pool on a load balancer, optionally with a health monitor.
+func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol, lbMethod string, mon *monitors.CreateOpts) (*Pool, error) {
+	opts := pools.CreateOpts{
+		LoadbalancerID: lbID,
+		Name:           name,
+		Protocol:       pools.Protocol(protocol),
+		LBMethod:       pools.LBMethod(lbMethod),
+	}
+	if mon != nil {
+		opts.Monitor = mon
+	}
+	p, err := pools.Create(ctx, client, opts).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating pool: %w", err)
+	}
+	return &Pool{
+		ID:        p.ID,
+		Name:      p.Name,
+		Protocol:  p.Protocol,
+		LBMethod:  p.LBMethod,
+		MonitorID: p.MonitorID,
+	}, nil
+}
+
+// DeletePool deletes a pool.
+func DeletePool(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := pools.Delete(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("deleting pool %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// CreateMember adds a member to a pool.
+func CreateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, name, address string, port, weight int) (*Member, error) {
+	opts := pools.CreateMemberOpts{
+		Name:         name,
+		Address:      address,
+		ProtocolPort: port,
+		Weight:       &weight,
+	}
+	m, err := pools.CreateMember(ctx, client, poolID, opts).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating member: %w", err)
+	}
+	return &Member{
+		ID:              m.ID,
+		Name:            m.Name,
+		Address:         m.Address,
+		ProtocolPort:    m.ProtocolPort,
+		Weight:          m.Weight,
+		OperatingStatus: m.OperatingStatus,
+	}, nil
+}
+
+// DeleteMember removes a member from a pool.
+func DeleteMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string) error {
+	r := pools.DeleteMember(ctx, client, poolID, memberID)
+	if r.Err != nil {
+		return fmt.Errorf("deleting member %s: %w", memberID, r.Err)
+	}
+	return nil
+}
+
+// CreateHealthMonitor creates a health monitor for a pool.
+func CreateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, poolID, monType string, delay, timeout, maxRetries int, urlPath, expectedCodes, httpMethod string) (*HealthMonitor, error) {
+	opts := monitors.CreateOpts{
+		PoolID:     poolID,
+		Type:       monType,
+		Delay:      delay,
+		Timeout:    timeout,
+		MaxRetries: maxRetries,
+	}
+	if urlPath != "" {
+		opts.URLPath = urlPath
+	}
+	if expectedCodes != "" {
+		opts.ExpectedCodes = expectedCodes
+	}
+	if httpMethod != "" {
+		opts.HTTPMethod = httpMethod
+	}
+	mon, err := monitors.Create(ctx, client, opts).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating health monitor: %w", err)
+	}
+	return &HealthMonitor{
+		ID:                 mon.ID,
+		Name:               mon.Name,
+		Type:               mon.Type,
+		Delay:              mon.Delay,
+		Timeout:            mon.Timeout,
+		MaxRetries:         mon.MaxRetries,
+		MaxRetriesDown:     mon.MaxRetriesDown,
+		HTTPMethod:         mon.HTTPMethod,
+		URLPath:            mon.URLPath,
+		ExpectedCodes:      mon.ExpectedCodes,
+		AdminStateUp:       mon.AdminStateUp,
+		OperatingStatus:    mon.OperatingStatus,
+		ProvisioningStatus: mon.ProvisioningStatus,
+	}, nil
+}
+
+// DeleteHealthMonitor deletes a health monitor.
+func DeleteHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := monitors.Delete(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("deleting health monitor %s: %w", id, r.Err)
+	}
+	return nil
+}
+
 // ListMembers fetches members for a pool.
 func ListMembers(ctx context.Context, client *gophercloud.ServiceClient, poolID string) ([]Member, error) {
 	var result []Member
