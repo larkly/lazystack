@@ -268,7 +268,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case memberCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.SanitizeAPIError(msg.err)
 		return m, nil
 
 	case memberServersLoadedMsg:

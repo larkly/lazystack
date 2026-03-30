@@ -187,7 +187,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case lbCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.SanitizeAPIError(msg.err)
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting || m.subnetsLoading {
@@ -350,7 +350,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		id := m.lbID
 		desc := strings.TrimSpace(m.descInput.Value())
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdateLoadBalancer(context.Background(), client, id, &name, &desc)
+			err := loadbalancer.UpdateLoadBalancer(context.Background(), client, id, &name, &desc, nil)
 			if err != nil {
 				return lbCreateErrMsg{err: err}
 			}

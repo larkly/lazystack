@@ -127,6 +127,9 @@ func (m Model) viewContent() string {
 	if m.lbMemberCreate.Active {
 		return m.lbMemberCreate.View()
 	}
+	if m.lbMonitorCreate.Active {
+		return m.lbMonitorCreate.View()
+	}
 	if m.projectPicker.Active {
 		return m.projectPicker.View()
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -33,6 +34,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/lblist"
 	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
 	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
+	"github.com/larkly/lazystack/internal/ui/lbmonitorcreate"
 	"github.com/larkly/lazystack/internal/ui/lbpoolcreate"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/networkcreate"
@@ -156,6 +158,7 @@ type Model struct {
 	lbListenerCreate    lblistenercreate.Model
 	lbPoolCreate        lbpoolcreate.Model
 	lbMemberCreate      lbmembercreate.Model
+	lbMonitorCreate     lbmonitorcreate.Model
 	cloneProgress       cloneprogress.Model
 	statusBar           statusbar.Model
 	tabs                []TabDef
@@ -501,6 +504,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// LB monitor create modal intercepts all keys when active
+		if m.lbMonitorCreate.Active {
+			var cmd tea.Cmd
+			m.lbMonitorCreate, cmd = m.lbMonitorCreate.Update(msg)
+			return m, cmd
+		}
+
 		// Project picker modal intercepts all keys when active
 		if m.projectPicker.Active {
 			var cmd tea.Cmd
@@ -792,6 +802,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openLBDetail()
 			}
 			if key.Matches(msg, shared.Keys.Delete) {
+				if lb := m.lbList.SelectedLB(); lb != nil && strings.HasPrefix(lb.ProvisioningStatus, "PENDING_") {
+					m.statusBar.Error = "Load balancer is " + lb.ProvisioningStatus + ", please wait..."
+					return m, nil
+				}
 				return m.openLBDeleteConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Create) {
@@ -801,7 +815,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Load balancer detail: context-sensitive CRUD based on focused pane
 		if m.view == viewLBDetail {
+			// Reviewer fix #2: block ALL mutation keys during PENDING state
+			if lb := m.lbDetail.LB(); lb != nil && strings.HasPrefix(lb.ProvisioningStatus, "PENDING_") {
+				if key.Matches(msg, shared.Keys.Delete) ||
+					key.Matches(msg, shared.Keys.Create) ||
+					key.Matches(msg, shared.Keys.Enter) ||
+					key.Matches(msg, shared.Keys.StopStart) ||
+					msg.String() == "ctrl+h" {
+					m.statusBar.Error = "Load balancer is " + lb.ProvisioningStatus + ", please wait..."
+					return m, nil
+				}
+			}
+
 			pane := m.lbDetail.FocusedPane()
+
+			// Health monitor: ctrl+h on pools pane
+			if msg.String() == "ctrl+h" && pane == lbdetail.FocusPools {
+				if pool := m.lbDetail.SelectedPool(); pool != nil {
+					if pool.MonitorID != "" {
+						return m.openLBMonitorDeleteConfirm()
+					}
+					return m.openLBMonitorCreate()
+				}
+			}
+
+			// Admin state toggle: 'o' key
+			if key.Matches(msg, shared.Keys.StopStart) {
+				switch pane {
+				case lbdetail.FocusInfo:
+					return m.toggleLBAdminState()
+				case lbdetail.FocusListeners:
+					return m.toggleListenerAdminState()
+				case lbdetail.FocusPools:
+					return m.togglePoolAdminState()
+				case lbdetail.FocusMembers:
+					return m.toggleMemberAdminState()
+				}
+			}
+
 			switch {
 			case key.Matches(msg, shared.Keys.Delete):
 				switch pane {
@@ -842,7 +893,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m.openLBListenerEdit()
 					}
 				case lbdetail.FocusPools:
-					if m.lbDetail.SelectedPoolID() != "" {
+					if pool := m.lbDetail.SelectedPool(); pool != nil {
+						if pool.MonitorID != "" {
+							return m.openLBMonitorEdit()
+						}
 						return m.openLBPoolEdit()
 					}
 				case lbdetail.FocusMembers:
@@ -1331,6 +1385,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.lbMemberCreate.Active {
 			var cmd tea.Cmd
 			m.lbMemberCreate, cmd = m.lbMemberCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.lbMonitorCreate.Active {
+			var cmd tea.Cmd
+			m.lbMonitorCreate, cmd = m.lbMonitorCreate.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.projectPicker.Active {

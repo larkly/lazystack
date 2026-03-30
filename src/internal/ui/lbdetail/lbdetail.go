@@ -199,6 +199,30 @@ func (m Model) SelectedMember() *loadbalancer.Member {
 	return nil
 }
 
+// Listeners returns the current listeners list.
+func (m Model) Listeners() []loadbalancer.Listener {
+	return m.listeners
+}
+
+// Pools returns the current pools list.
+func (m Model) Pools() []loadbalancer.Pool {
+	return m.pools
+}
+
+// TotalMemberCount returns the total number of members across all pools.
+func (m Model) TotalMemberCount() int {
+	total := 0
+	for _, mems := range m.members {
+		total += len(mems)
+	}
+	return total
+}
+
+// SelectedPoolMonitor returns the health monitor for the selected pool, or nil.
+func (m Model) SelectedPoolMonitor() *loadbalancer.HealthMonitor {
+	return m.selectedPoolMonitor()
+}
+
 // SelectedPoolMembers returns the members of the currently selected pool.
 func (m Model) SelectedPoolMembers() []loadbalancer.Member {
 	members := m.selectedPoolMembers()
@@ -645,6 +669,11 @@ func (m Model) renderInfoContent(maxWidth int) string {
 		{"Provider", lb.Provider, nil},
 		{"Description", lb.Description, nil},
 	}
+	if !lb.AdminStateUp {
+		allProps = append(allProps, prop{"Admin", "DOWN", func(s string) lipgloss.Style {
+			return lipgloss.NewStyle().Foreground(shared.ColorError)
+		}})
+	}
 
 	valW := maxWidth - labelW
 	if valW < 4 {
@@ -873,12 +902,16 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 			}
 		}
 
+		memberCount := len(m.members[p.ID])
+		countStr := lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(fmt.Sprintf(" [%d]", memberCount))
+
 		line := fmt.Sprintf("%s%-*s  %-*s  %s",
 			prefix, nameW, name, methodW, method, health)
 
 		if selected {
 			line = selectedRowStyle.Render(line)
 		}
+		line += countStr
 		lines = append(lines, line)
 	}
 
@@ -998,8 +1031,12 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 		}
 
 		weight := fmt.Sprintf("%d", mem.Weight)
-		status := shared.StatusIcon(mem.OperatingStatus) + mem.OperatingStatus
-		statusStyle := memberStatusStyle(mem.OperatingStatus)
+		displayStatus := mem.OperatingStatus
+		if !mem.AdminStateUp {
+			displayStatus = "DISABLED"
+		}
+		status := shared.StatusIcon(displayStatus) + displayStatus
+		statusStyle := memberStatusStyle(displayStatus)
 
 		line := fmt.Sprintf("%s%-*s%s%-*s%s%-6s%s%s",
 			prefix, nameW, name, sep, addrW, addr, sep, weight, sep,
@@ -1021,6 +1058,12 @@ func (m Model) renderActionBar() string {
 		return ""
 	}
 
+	// Show PENDING status instead of actions when LB is provisioning
+	if strings.HasPrefix(m.lb.ProvisioningStatus, "PENDING_") {
+		return " " + lipgloss.NewStyle().Foreground(shared.ColorWarning).Render(
+			"\u25b2 "+m.lb.ProvisioningStatus+" \u2014 operations disabled")
+	}
+
 	keyStyle := lipgloss.NewStyle().
 		Foreground(shared.ColorHighlight).
 		Background(shared.ColorSecondary).
@@ -1033,25 +1076,51 @@ func (m Model) renderActionBar() string {
 	switch m.focus {
 	case FocusInfo:
 		buttons = append(buttons, btn{"enter", "Edit LB"})
+		if m.lb.AdminStateUp {
+			buttons = append(buttons, btn{"o", "Disable"})
+		} else {
+			buttons = append(buttons, btn{"o", "Enable"})
+		}
 		buttons = append(buttons, btn{"^d", "Delete LB"})
 	case FocusListeners:
 		buttons = append(buttons, btn{"^n", "Add Listener"})
-		if m.SelectedListenerID() != "" {
+		if l := m.SelectedListener(); l != nil {
 			buttons = append(buttons, btn{"enter", "Edit"})
+			if l.AdminStateUp {
+				buttons = append(buttons, btn{"o", "Disable"})
+			} else {
+				buttons = append(buttons, btn{"o", "Enable"})
+			}
 			buttons = append(buttons, btn{"^d", "Delete Listener"})
 		}
 	case FocusPools:
 		buttons = append(buttons, btn{"^n", "Add Pool"})
-		if m.SelectedPoolID() != "" {
-			buttons = append(buttons, btn{"enter", "Edit"})
+		if pool := m.SelectedPool(); pool != nil {
+			if pool.MonitorID != "" {
+				buttons = append(buttons, btn{"enter", "Edit Monitor"})
+				buttons = append(buttons, btn{"^h", "Remove Monitor"})
+			} else {
+				buttons = append(buttons, btn{"enter", "Edit Pool"})
+				buttons = append(buttons, btn{"^h", "Add Monitor"})
+			}
+			if pool.AdminStateUp {
+				buttons = append(buttons, btn{"o", "Disable"})
+			} else {
+				buttons = append(buttons, btn{"o", "Enable"})
+			}
 			buttons = append(buttons, btn{"^d", "Delete Pool"})
 		}
 	case FocusMembers:
 		if m.SelectedPoolID() != "" {
 			buttons = append(buttons, btn{"^n", "Add Member"})
 		}
-		if m.SelectedMemberID() != "" {
+		if mem := m.SelectedMember(); mem != nil {
 			buttons = append(buttons, btn{"enter", "Edit"})
+			if mem.AdminStateUp {
+				buttons = append(buttons, btn{"o", "Disable"})
+			} else {
+				buttons = append(buttons, btn{"o", "Enable"})
+			}
 			buttons = append(buttons, btn{"^d", "Delete Member"})
 		}
 	}
@@ -1110,7 +1179,7 @@ func memberStatusStyle(status string) lipgloss.Style {
 		fg = shared.ColorSuccess
 	case "OFFLINE", "ERROR":
 		fg = shared.ColorError
-	case "NO_MONITOR":
+	case "NO_MONITOR", "DISABLED":
 		fg = shared.ColorMuted
 	case "DRAINING":
 		fg = shared.ColorWarning
@@ -1188,12 +1257,12 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) Hints() string {
 	switch m.focus {
 	case FocusListeners:
-		return "\u2191\u2193 navigate \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
 	case FocusPools:
-		return "\u2191\u2193 select pool \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 select pool \u2022 ^h monitor \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
 	case FocusMembers:
-		return "\u2191\u2193 navigate members \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 navigate members \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
 	default:
-		return "tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
 	}
 }
