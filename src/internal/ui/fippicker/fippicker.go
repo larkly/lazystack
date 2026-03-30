@@ -249,14 +249,18 @@ func (m Model) associateFIP(fip network.FloatingIP) tea.Cmd {
 	fipID := fip.ID
 	fipAddr := fip.FloatingIP
 	return func() tea.Msg {
+		shared.Debugf("[fippicker] associating FIP %s (%s) to server %s", fipID, fipAddr, serverName)
 		portID, err := network.FindServerPortID(context.Background(), client, serverID)
 		if err != nil {
+			shared.Debugf("[fippicker] error finding port for server %s: %v", serverID, err)
 			return associateErrMsg{err: err}
 		}
 		err = network.AssociateFloatingIP(context.Background(), client, fipID, portID)
 		if err != nil {
+			shared.Debugf("[fippicker] error associating FIP %s: %v", fipID, err)
 			return associateErrMsg{err: err}
 		}
+		shared.Debugf("[fippicker] associated FIP %s to server %s", fipAddr, serverName)
 		return associateDoneMsg{fipAddr: fipAddr, serverName: serverName}
 	}
 }
@@ -266,25 +270,32 @@ func (m Model) allocateAndAssociate() tea.Cmd {
 	serverID := m.serverID
 	serverName := m.serverName
 	return func() tea.Msg {
+		shared.Debugf("[fippicker] allocating and associating FIP for server %s", serverName)
 		nets, err := network.ListExternalNetworks(context.Background(), client)
 		if err != nil {
+			shared.Debugf("[fippicker] error listing external networks: %v", err)
 			return allocateErrMsg{err: err}
 		}
 		if len(nets) == 0 {
+			shared.Debugf("[fippicker] no external networks available")
 			return allocateErrMsg{err: fmt.Errorf("no external networks available")}
 		}
 		fip, err := network.AllocateFloatingIP(context.Background(), client, nets[0].ID)
 		if err != nil {
+			shared.Debugf("[fippicker] error allocating FIP: %v", err)
 			return allocateErrMsg{err: err}
 		}
 		portID, err := network.FindServerPortID(context.Background(), client, serverID)
 		if err != nil {
+			shared.Debugf("[fippicker] error finding port for server %s: %v", serverID, err)
 			return allocateErrMsg{err: err}
 		}
 		err = network.AssociateFloatingIP(context.Background(), client, fip.ID, portID)
 		if err != nil {
+			shared.Debugf("[fippicker] error associating FIP %s: %v", fip.ID, err)
 			return allocateErrMsg{err: err}
 		}
+		shared.Debugf("[fippicker] allocated and associated FIP %s to server %s", fip.FloatingIP, serverName)
 		return allocateDoneMsg{fipAddr: fip.FloatingIP, serverName: serverName}
 	}
 }

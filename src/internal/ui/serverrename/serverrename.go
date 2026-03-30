@@ -127,10 +127,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 	id := m.serverID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[serverrename] renaming server %s to %q", id, newName)
 		err := compute.RenameServer(context.Background(), client, id, newName)
 		if err != nil {
+			shared.Debugf("[serverrename] error renaming server %s: %v", id, err)
 			return renameErrMsg{err: err}
 		}
+		shared.Debugf("[serverrename] renamed server %s to %q", id, newName)
 		return renameSuccessMsg{newName: newName}
 	})
 }

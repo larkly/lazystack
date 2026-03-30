@@ -269,10 +269,13 @@ func (m Model) attachVolume(srv compute.Server) tea.Cmd {
 	serverName := srv.Name
 	_ = volumeName // used in the msg struct
 	return func() tea.Msg {
+		shared.Debugf("[serverpicker] attaching volume %s to server %s (%s)", volumeID, serverID, serverName)
 		err := volume.AttachVolume(context.Background(), client, serverID, volumeID)
 		if err != nil {
+			shared.Debugf("[serverpicker] error attaching volume %s to server %s: %v", volumeID, serverID, err)
 			return attachErrMsg{err: err}
 		}
+		shared.Debugf("[serverpicker] attached volume %s to server %s (%s)", volumeName, serverID, serverName)
 		return attachDoneMsg{serverName: serverName, volumeName: volumeName}
 	}
 }

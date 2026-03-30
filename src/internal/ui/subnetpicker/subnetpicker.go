@@ -216,10 +216,13 @@ func (m Model) addInterface(sub network.Subnet) tea.Cmd {
 	routerName := m.routerName
 	subnetID := sub.ID
 	return func() tea.Msg {
+		shared.Debugf("[subnetpicker] adding interface (subnet %s) to router %s (%s)", subnetID, routerID, routerName)
 		err := network.AddRouterInterface(context.Background(), client, routerID, subnetID)
 		if err != nil {
+			shared.Debugf("[subnetpicker] error adding interface to router %s: %v", routerID, err)
 			return interfaceAddErrMsg{err: err}
 		}
+		shared.Debugf("[subnetpicker] added interface (subnet %s) to router %s", subnetID, routerName)
 		return interfaceAddedMsg{routerName: routerName}
 	}
 }

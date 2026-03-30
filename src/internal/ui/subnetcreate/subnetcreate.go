@@ -354,10 +354,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[subnetcreate] creating subnet %q in network %s (cidr=%s)", opts.Name, m.networkID, cidr)
 		_, err := network.CreateSubnet(context.Background(), client, opts)
 		if err != nil {
+			shared.Debugf("[subnetcreate] error creating subnet %q: %v", opts.Name, err)
 			return subnetCreateErrMsg{err: err}
 		}
+		shared.Debugf("[subnetcreate] created subnet %q in network %s", opts.Name, m.networkName)
 		return subnetCreatedMsg{}
 	})
 }

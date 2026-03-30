@@ -418,13 +418,24 @@ func (m Model) submit() (Model, tea.Cmd) {
 	editMode := m.editMode
 	oldRuleID := m.oldRuleID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		if editMode {
+			shared.Debugf("[sgrulecreate] editing rule in %q (replacing %s)", m.sgName, oldRuleID)
+		} else {
+			shared.Debugf("[sgrulecreate] creating rule in %q (%s %s %s)", m.sgName, dir, proto, etherType)
+		}
 		_, err := network.CreateSecurityGroupRule(context.Background(), client, opts)
 		if err != nil {
+			shared.Debugf("[sgrulecreate] error creating rule in %q: %v", m.sgName, err)
 			return ruleCreateErrMsg{err: err}
 		}
 		// In edit mode, delete the old rule after successfully creating the new one
 		if editMode && oldRuleID != "" {
 			_ = network.DeleteSecurityGroupRule(context.Background(), client, oldRuleID)
+		}
+		if editMode {
+			shared.Debugf("[sgrulecreate] edited rule in %q", m.sgName)
+		} else {
+			shared.Debugf("[sgrulecreate] created rule in %q", m.sgName)
 		}
 		return ruleCreatedMsg{}
 	})

@@ -174,17 +174,22 @@ func (m Model) doAllocateFIP() (Model, tea.Cmd) {
 	m.statusBar.Hint = "Allocating floating IP..."
 	networkClient := m.client.Network
 	return m, func() tea.Msg {
+		shared.Debugf("[action] allocating floating IP")
 		nets, err := network.ListExternalNetworks(context.Background(), networkClient)
 		if err != nil {
+			shared.Debugf("[action] allocate floating IP failed: %s", err)
 			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
 		}
 		if len(nets) == 0 {
+			shared.Debugf("[action] allocate floating IP failed: no external networks available")
 			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: fmt.Errorf("no external networks available")}
 		}
 		fip, err := network.AllocateFloatingIP(context.Background(), networkClient, nets[0].ID)
 		if err != nil {
+			shared.Debugf("[action] allocate floating IP failed: %s", err)
 			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
 		}
+		shared.Debugf("[action] allocated floating IP %s", fip.FloatingIP)
 		return shared.ResourceActionMsg{Action: "Allocated", Name: fip.FloatingIP}
 	}
 }

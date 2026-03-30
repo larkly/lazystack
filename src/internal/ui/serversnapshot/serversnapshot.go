@@ -123,10 +123,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 	id := m.serverID
 	serverName := m.serverName
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[serversnapshot] creating snapshot %q for server %s", name, id)
 		err := compute.CreateSnapshot(context.Background(), client, id, name)
 		if err != nil {
+			shared.Debugf("[serversnapshot] error creating snapshot %q: %v", name, err)
 			return snapshotErrMsg{err: err}
 		}
+		shared.Debugf("[serversnapshot] created snapshot %q for server %s", name, serverName)
 		return snapshotSuccessMsg{name: serverName}
 	})
 }
