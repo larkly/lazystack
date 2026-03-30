@@ -1096,11 +1096,10 @@ func (m Model) renderActionBar() string {
 	case FocusPools:
 		buttons = append(buttons, btn{"^n", "Add Pool"})
 		if pool := m.SelectedPool(); pool != nil {
+			buttons = append(buttons, btn{"enter", "Edit Pool"})
 			if pool.MonitorID != "" {
-				buttons = append(buttons, btn{"enter", "Edit Monitor"})
-				buttons = append(buttons, btn{"^h", "Remove Monitor"})
+				buttons = append(buttons, btn{"^h", "Edit Monitor"})
 			} else {
-				buttons = append(buttons, btn{"enter", "Edit Pool"})
 				buttons = append(buttons, btn{"^h", "Add Monitor"})
 			}
 			if pool.AdminStateUp {
@@ -1108,7 +1107,11 @@ func (m Model) renderActionBar() string {
 			} else {
 				buttons = append(buttons, btn{"o", "Enable"})
 			}
-			buttons = append(buttons, btn{"^d", "Delete Pool"})
+			if pool.MonitorID != "" {
+				buttons = append(buttons, btn{"^d", "Delete Monitor"})
+			} else {
+				buttons = append(buttons, btn{"^d", "Delete Pool"})
+			}
 		}
 	case FocusMembers:
 		if m.SelectedPoolID() != "" {

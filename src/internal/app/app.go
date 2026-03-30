@@ -833,7 +833,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "ctrl+h" && pane == lbdetail.FocusPools {
 				if pool := m.lbDetail.SelectedPool(); pool != nil {
 					if pool.MonitorID != "" {
-						return m.openLBMonitorDeleteConfirm()
+						return m.openLBMonitorEdit()
 					}
 					return m.openLBMonitorCreate()
 				}
@@ -862,6 +862,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m.openLBDeleteConfirm()
 				case lbdetail.FocusPools:
+					if pool := m.lbDetail.SelectedPool(); pool != nil && pool.MonitorID != "" {
+						return m.openLBMonitorDeleteConfirm()
+					}
 					if m.lbDetail.SelectedPoolID() != "" {
 						return m.openLBPoolDeleteConfirm()
 					}
@@ -894,9 +897,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				case lbdetail.FocusPools:
 					if pool := m.lbDetail.SelectedPool(); pool != nil {
-						if pool.MonitorID != "" {
-							return m.openLBMonitorEdit()
-						}
 						return m.openLBPoolEdit()
 					}
 				case lbdetail.FocusMembers:

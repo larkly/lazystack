@@ -224,7 +224,7 @@ var allSections = []section{
 			"enter         edit (context-sensitive)",
 			"ctrl+n        add listener/pool/member",
 			"ctrl+d        delete (context-sensitive)",
-			"ctrl+h        add/remove health monitor",
+			"ctrl+h        add/edit health monitor",
 			"o             enable/disable (admin state)",
 			"esc           back to list",
 		},
