@@ -125,11 +125,19 @@ func (m Model) openVolumeDetach() (Model, tea.Cmd) {
 }
 
 func (m Model) openServerVolumeAttach() (Model, tea.Cmd) {
-	if m.view != viewServerDetail {
+	var serverID, serverName string
+	switch m.view {
+	case viewServerDetail:
+		serverID = m.serverDetail.ServerID()
+		serverName = m.serverDetail.ServerName()
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			serverID = s.ID
+			serverName = s.Name
+		}
+	default:
 		return m, nil
 	}
-	serverID := m.serverDetail.ServerID()
-	serverName := m.serverDetail.ServerName()
 	if serverID == "" {
 		return m, nil
 	}

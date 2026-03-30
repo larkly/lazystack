@@ -33,6 +33,7 @@ type KeyMap struct {
 	Deny       key.Binding
 	Restart    key.Binding
 	Attach     key.Binding
+	AssignFIP  key.Binding
 	Detach     key.Binding
 	Allocate   key.Binding
 	PageUp      key.Binding
@@ -178,6 +179,10 @@ var Keys = KeyMap{
 	Attach: key.NewBinding(
 		key.WithKeys("ctrl+a"),
 		key.WithHelp("ctrl+a", "attach"),
+	),
+	AssignFIP: key.NewBinding(
+		key.WithKeys("ctrl+b"),
+		key.WithHelp("ctrl+b", "assign floating IP"),
 	),
 	Detach: key.NewBinding(
 		key.WithKeys("ctrl+t"),

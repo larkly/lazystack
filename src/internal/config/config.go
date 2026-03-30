@@ -120,6 +120,7 @@ func DefaultKeybindings() map[string]string {
 		"deny":           "n",
 		"restart":        "ctrl+r",
 		"attach":         "ctrl+a",
+		"assign_fip":     "ctrl+b",
 		"detach":         "ctrl+t",
 		"allocate":       "ctrl+n",
 		"page_up":        "pgup",

@@ -593,11 +593,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openActionLog()
 			}
 
-			// Volume attach/detach from server detail volumes pane
+			// Volume detach from server detail volumes pane
 			if m.view == viewServerDetail && m.serverDetail.FocusedOnVolumes() {
-				if key.Matches(msg, shared.Keys.Attach) {
-					return m.openServerVolumeAttach()
-				}
 				if key.Matches(msg, shared.Keys.Detach) {
 					return m.openServerVolumeDetach()
 				}
@@ -662,6 +659,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.doRevertResize()
 			}
 			if key.Matches(msg, shared.Keys.Attach) {
+				return m.openServerVolumeAttach()
+			}
+			if key.Matches(msg, shared.Keys.AssignFIP) {
 				return m.doAllocateAndAssociateFIP()
 			}
 			if key.Matches(msg, shared.Keys.Clone) {
@@ -1342,4 +1342,3 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, viewCmd
 	}
 }
-
