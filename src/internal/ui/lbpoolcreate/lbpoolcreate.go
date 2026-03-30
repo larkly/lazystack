@@ -196,7 +196,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case poolCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.SanitizeAPIError(msg.err)
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting {
@@ -379,7 +379,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		client := m.client
 		id := m.poolID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdatePool(context.Background(), client, id, &name, lbMethod)
+			err := loadbalancer.UpdatePool(context.Background(), client, id, &name, lbMethod, nil)
 			if err != nil {
 				return poolCreateErrMsg{err: err}
 			}

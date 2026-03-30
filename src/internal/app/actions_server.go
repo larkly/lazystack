@@ -876,6 +876,17 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			return shared.ResourceActionMsg{Action: "Deleted pool", Name: name}
 		}
+	case "delete_lb_monitor":
+		lbClient := m.client.LoadBalancer
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			err := loadbalancer.DeleteHealthMonitor(context.Background(), lbClient, id)
+			if err != nil {
+				return shared.ResourceActionErrMsg{Action: "Delete monitor", Name: name, Err: err}
+			}
+			return shared.ResourceActionMsg{Action: "Removed monitor from", Name: name}
+		}
 	case "delete_lb_member":
 		lbClient := m.client.LoadBalancer
 		name := action.Name

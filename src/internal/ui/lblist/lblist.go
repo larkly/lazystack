@@ -417,7 +417,14 @@ func (m Model) fetchLBs() tea.Cmd {
 }
 
 func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
+	interval := m.refreshInterval
+	for _, lb := range m.lbs {
+		if strings.HasPrefix(lb.ProvisioningStatus, "PENDING_") {
+			interval = 3 * time.Second
+			break
+		}
+	}
+	return tea.Tick(interval, func(time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }

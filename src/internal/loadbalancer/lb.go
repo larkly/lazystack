@@ -22,6 +22,7 @@ type LoadBalancer struct {
 	ProvisioningStatus string
 	OperatingStatus    string
 	Provider           string
+	AdminStateUp       bool
 }
 
 // Listener is a simplified listener.
@@ -33,15 +34,17 @@ type Listener struct {
 	ProtocolPort  int
 	DefaultPoolID string
 	ConnLimit     int
+	AdminStateUp  bool
 }
 
 // Pool is a simplified pool.
 type Pool struct {
-	ID        string
-	Name      string
-	Protocol  string
-	LBMethod  string
-	MonitorID string
+	ID           string
+	Name         string
+	Protocol     string
+	LBMethod     string
+	MonitorID    string
+	AdminStateUp bool
 }
 
 // Member is a simplified pool member.
@@ -52,6 +55,7 @@ type Member struct {
 	ProtocolPort    int
 	Weight          int
 	OperatingStatus string
+	AdminStateUp    bool
 }
 
 // HealthMonitor is a simplified health monitor.
@@ -89,6 +93,7 @@ func ListLoadBalancers(ctx context.Context, client *gophercloud.ServiceClient) (
 				ProvisioningStatus: lb.ProvisioningStatus,
 				OperatingStatus:    lb.OperatingStatus,
 				Provider:           lb.Provider,
+				AdminStateUp:       lb.AdminStateUp,
 			})
 		}
 		return true, nil
@@ -114,6 +119,7 @@ func GetLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id 
 		ProvisioningStatus: lb.ProvisioningStatus,
 		OperatingStatus:    lb.OperatingStatus,
 		Provider:           lb.Provider,
+		AdminStateUp:       lb.AdminStateUp,
 	}, nil
 }
 
@@ -137,14 +143,16 @@ func CreateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, 
 		ProvisioningStatus: lb.ProvisioningStatus,
 		OperatingStatus:    lb.OperatingStatus,
 		Provider:           lb.Provider,
+		AdminStateUp:       lb.AdminStateUp,
 	}, nil
 }
 
-// UpdateLoadBalancer updates a load balancer's name and/or description.
-func UpdateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string) error {
+// UpdateLoadBalancer updates a load balancer's name, description, and/or admin state.
+func UpdateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string, adminStateUp *bool) error {
 	opts := loadbalancers.UpdateOpts{
-		Name:        name,
-		Description: description,
+		Name:         name,
+		Description:  description,
+		AdminStateUp: adminStateUp,
 	}
 	_, err := loadbalancers.Update(ctx, client, id, opts).Extract()
 	if err != nil {
@@ -179,6 +187,7 @@ func ListListeners(ctx context.Context, client *gophercloud.ServiceClient, lbID 
 				ProtocolPort:  l.ProtocolPort,
 				DefaultPoolID: l.DefaultPoolID,
 				ConnLimit:     l.ConnLimit,
+				AdminStateUp:  l.AdminStateUp,
 			})
 		}
 		return true, nil
@@ -199,11 +208,12 @@ func ListPools(ctx context.Context, client *gophercloud.ServiceClient, lbID stri
 		}
 		for _, p := range extracted {
 			result = append(result, Pool{
-				ID:        p.ID,
-				Name:      p.Name,
-				Protocol:  p.Protocol,
-				LBMethod:  p.LBMethod,
-				MonitorID: p.MonitorID,
+				ID:           p.ID,
+				Name:         p.Name,
+				Protocol:     p.Protocol,
+				LBMethod:     p.LBMethod,
+				MonitorID:    p.MonitorID,
+				AdminStateUp: p.AdminStateUp,
 			})
 		}
 		return true, nil
@@ -257,6 +267,7 @@ func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID
 		ProtocolPort:  l.ProtocolPort,
 		DefaultPoolID: l.DefaultPoolID,
 		ConnLimit:     l.ConnLimit,
+		AdminStateUp:  l.AdminStateUp,
 	}, nil
 }
 
@@ -269,12 +280,13 @@ func DeleteListener(ctx context.Context, client *gophercloud.ServiceClient, id s
 	return nil
 }
 
-// UpdateListener updates a listener's name.
-func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string, connLimit *int) error {
+// UpdateListener updates a listener's name, description, connection limit, and/or admin state.
+func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string, connLimit *int, adminStateUp *bool) error {
 	opts := listeners.UpdateOpts{
-		Name:        name,
-		Description: description,
-		ConnLimit:   connLimit,
+		Name:         name,
+		Description:  description,
+		ConnLimit:    connLimit,
+		AdminStateUp: adminStateUp,
 	}
 	_, err := listeners.Update(ctx, client, id, opts).Extract()
 	if err != nil {
@@ -299,11 +311,12 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 		return nil, fmt.Errorf("creating pool: %w", err)
 	}
 	return &Pool{
-		ID:        p.ID,
-		Name:      p.Name,
-		Protocol:  p.Protocol,
-		LBMethod:  p.LBMethod,
-		MonitorID: p.MonitorID,
+		ID:           p.ID,
+		Name:         p.Name,
+		Protocol:     p.Protocol,
+		LBMethod:     p.LBMethod,
+		MonitorID:    p.MonitorID,
+		AdminStateUp: p.AdminStateUp,
 	}, nil
 }
 
@@ -316,10 +329,11 @@ func DeletePool(ctx context.Context, client *gophercloud.ServiceClient, id strin
 	return nil
 }
 
-// UpdatePool updates a pool's name and/or LB method.
-func UpdatePool(ctx context.Context, client *gophercloud.ServiceClient, id string, name *string, lbMethod string) error {
+// UpdatePool updates a pool's name, LB method, and/or admin state.
+func UpdatePool(ctx context.Context, client *gophercloud.ServiceClient, id string, name *string, lbMethod string, adminStateUp *bool) error {
 	opts := pools.UpdateOpts{
-		Name: name,
+		Name:         name,
+		AdminStateUp: adminStateUp,
 	}
 	if lbMethod != "" {
 		opts.LBMethod = pools.LBMethod(lbMethod)
@@ -350,6 +364,7 @@ func CreateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID
 		ProtocolPort:    m.ProtocolPort,
 		Weight:          m.Weight,
 		OperatingStatus: m.OperatingStatus,
+		AdminStateUp:    m.AdminStateUp,
 	}, nil
 }
 
@@ -362,15 +377,92 @@ func DeleteMember(ctx context.Context, client *gophercloud.ServiceClient, poolID
 	return nil
 }
 
-// UpdateMember updates a member's name and/or weight.
-func UpdateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string, name *string, weight *int) error {
+// UpdateMember updates a member's name, weight, and/or admin state.
+func UpdateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string, name *string, weight *int, adminStateUp *bool) error {
 	opts := pools.UpdateMemberOpts{
-		Name:   name,
-		Weight: weight,
+		Name:         name,
+		Weight:       weight,
+		AdminStateUp: adminStateUp,
 	}
 	_, err := pools.UpdateMember(ctx, client, poolID, memberID, opts).Extract()
 	if err != nil {
 		return fmt.Errorf("updating member %s: %w", memberID, err)
+	}
+	return nil
+}
+
+// CreateHealthMonitor creates a health monitor for a pool.
+func CreateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, poolID, monType string, delay, timeout, maxRetries int, urlPath, expectedCodes, httpMethod string) (*HealthMonitor, error) {
+	opts := monitors.CreateOpts{
+		PoolID:     poolID,
+		Type:       monType,
+		Delay:      delay,
+		Timeout:    timeout,
+		MaxRetries: maxRetries,
+	}
+	if urlPath != "" {
+		opts.URLPath = urlPath
+	}
+	if expectedCodes != "" {
+		opts.ExpectedCodes = expectedCodes
+	}
+	if httpMethod != "" {
+		opts.HTTPMethod = httpMethod
+	}
+	mon, err := monitors.Create(ctx, client, opts).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating health monitor: %w", err)
+	}
+	return &HealthMonitor{
+		ID:                 mon.ID,
+		Name:               mon.Name,
+		Type:               mon.Type,
+		Delay:              mon.Delay,
+		Timeout:            mon.Timeout,
+		MaxRetries:         mon.MaxRetries,
+		MaxRetriesDown:     mon.MaxRetriesDown,
+		HTTPMethod:         mon.HTTPMethod,
+		URLPath:            mon.URLPath,
+		ExpectedCodes:      mon.ExpectedCodes,
+		AdminStateUp:       mon.AdminStateUp,
+		OperatingStatus:    mon.OperatingStatus,
+		ProvisioningStatus: mon.ProvisioningStatus,
+	}, nil
+}
+
+// UpdateHealthMonitor updates a health monitor's configuration.
+func UpdateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string, delay, timeout, maxRetries *int, urlPath, expectedCodes, httpMethod *string) error {
+	opts := monitors.UpdateOpts{}
+	if delay != nil {
+		opts.Delay = *delay
+	}
+	if timeout != nil {
+		opts.Timeout = *timeout
+	}
+	if maxRetries != nil {
+		opts.MaxRetries = *maxRetries
+	}
+	if urlPath != nil {
+		opts.URLPath = *urlPath
+	}
+	if expectedCodes != nil {
+		opts.ExpectedCodes = *expectedCodes
+	}
+	if httpMethod != nil {
+		opts.HTTPMethod = *httpMethod
+	}
+	_, err := monitors.Update(ctx, client, id, opts).Extract()
+	if err != nil {
+		return fmt.Errorf("updating health monitor %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteHealthMonitor deletes a health monitor.
+func DeleteHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	r := monitors.Delete(ctx, client, id)
+	if r.Err != nil {
+		return fmt.Errorf("deleting health monitor %s: %w", id, r.Err)
 	}
 	return nil
 }
@@ -391,6 +483,7 @@ func ListMembers(ctx context.Context, client *gophercloud.ServiceClient, poolID 
 				ProtocolPort:    m.ProtocolPort,
 				Weight:          m.Weight,
 				OperatingStatus: m.OperatingStatus,
+				AdminStateUp:    m.AdminStateUp,
 			})
 		}
 		return true, nil

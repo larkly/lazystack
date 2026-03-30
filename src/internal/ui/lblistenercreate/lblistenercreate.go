@@ -167,7 +167,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case listenerCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.SanitizeAPIError(msg.err)
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting {
@@ -331,7 +331,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		client := m.client
 		id := m.listenerID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdateListener(context.Background(), client, id, &name, &desc, connLimit)
+			err := loadbalancer.UpdateListener(context.Background(), client, id, &name, &desc, connLimit, nil)
 			if err != nil {
 				return listenerCreateErrMsg{err: err}
 			}
@@ -390,6 +390,11 @@ func (m Model) View() string {
 		label = focusStyle.Bold(true).Width(12).Render("Name")
 	}
 	rows = append(rows, label+m.nameInput.View())
+
+	if m.editMode {
+		rows = append(rows, lipgloss.NewStyle().Foreground(shared.ColorMuted).Italic(true).Render(
+			"  Protocol and port cannot be changed. Delete and recreate to change."))
+	}
 
 	if !m.editMode {
 		// Protocol

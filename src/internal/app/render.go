@@ -118,6 +118,9 @@ func (m Model) viewContent() string {
 	if m.lbCreate.Active {
 		return m.lbCreate.View()
 	}
+	if m.lbMonitorCreate.Active {
+		return m.lbMonitorCreate.View()
+	}
 	if m.lbListenerCreate.Active {
 		return m.lbListenerCreate.View()
 	}

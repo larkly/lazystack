@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
@@ -13,6 +14,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/lbcreate"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
+	"github.com/larkly/lazystack/internal/ui/lbmonitorcreate"
 	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
 	"github.com/larkly/lazystack/internal/ui/lbpoolcreate"
 	"github.com/larkly/lazystack/internal/ui/modal"
@@ -403,7 +405,16 @@ func (m Model) openLBDeleteConfirm() (Model, tea.Cmd) {
 	}
 	m.confirm = modal.NewConfirm("delete_lb", id, name)
 	m.confirm.Title = "Delete Load Balancer"
-	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete load balancer %q?\nThis will cascade-delete all listeners, pools and members.", name)
+	body := fmt.Sprintf("Are you sure you want to delete load balancer %q?", name)
+	if m.view == viewLBDetail {
+		lc := len(m.lbDetail.Listeners())
+		pc := len(m.lbDetail.Pools())
+		mc := m.lbDetail.TotalMemberCount()
+		body += fmt.Sprintf("\nThis will cascade-delete %d listeners, %d pools, and %d members.", lc, pc, mc)
+	} else {
+		body += "\nThis will cascade-delete all listeners, pools and members."
+	}
+	m.confirm.Body = body
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil
@@ -475,6 +486,46 @@ func (m Model) openLBPoolEdit() (Model, tea.Cmd) {
 	return m, m.lbPoolCreate.Init()
 }
 
+// --- Load Balancer Health Monitor actions ---
+
+func (m Model) openLBMonitorCreate() (Model, tea.Cmd) {
+	poolID := m.lbDetail.SelectedPoolID()
+	poolName := m.lbDetail.SelectedPoolName()
+	if poolID == "" {
+		return m, nil
+	}
+	m.lbMonitorCreate = lbmonitorcreate.New(m.client.LoadBalancer, poolID, poolName)
+	m.lbMonitorCreate.SetSize(m.width, m.height)
+	return m, m.lbMonitorCreate.Init()
+}
+
+func (m Model) openLBMonitorEdit() (Model, tea.Cmd) {
+	pool := m.lbDetail.SelectedPool()
+	if pool == nil || pool.MonitorID == "" {
+		return m, nil
+	}
+	mon := m.lbDetail.SelectedPoolMonitor()
+	if mon == nil {
+		return m, nil
+	}
+	m.lbMonitorCreate = lbmonitorcreate.NewEdit(m.client.LoadBalancer, mon.ID, mon, m.lbDetail.SelectedPoolName())
+	m.lbMonitorCreate.SetSize(m.width, m.height)
+	return m, m.lbMonitorCreate.Init()
+}
+
+func (m Model) openLBMonitorDeleteConfirm() (Model, tea.Cmd) {
+	pool := m.lbDetail.SelectedPool()
+	if pool == nil || pool.MonitorID == "" {
+		return m, nil
+	}
+	m.confirm = modal.NewConfirm("delete_lb_monitor", pool.MonitorID, pool.Name)
+	m.confirm.Title = "Delete Health Monitor"
+	m.confirm.Body = fmt.Sprintf("Remove health monitor from pool %q?", pool.Name)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
 func (m Model) openLBPoolCreate() (Model, tea.Cmd) {
 	m.lbPoolCreate = lbpoolcreate.New(m.client.LoadBalancer, m.lbDetail.LBID(), m.lbDetail.LBName())
 	m.lbPoolCreate.SetSize(m.width, m.height)
@@ -535,6 +586,100 @@ func (m Model) openLBMemberDeleteConfirm() (Model, tea.Cmd) {
 	m.confirm = c
 	m.activeModal = modalConfirm
 	return m, nil
+}
+
+// --- Load Balancer admin state toggles ---
+
+func (m Model) toggleLBAdminState() (Model, tea.Cmd) {
+	lb := m.lbDetail.LB()
+	if lb == nil {
+		return m, nil
+	}
+	newState := !lb.AdminStateUp
+	client := m.client.LoadBalancer
+	id := lb.ID
+	name := lb.Name
+	return m, func() tea.Msg {
+		err := loadbalancer.UpdateLoadBalancer(context.Background(), client, id, nil, nil, &newState)
+		if err != nil {
+			return shared.ResourceActionErrMsg{Action: "Toggle admin state", Name: name, Err: err}
+		}
+		action := "Disabled"
+		if newState {
+			action = "Enabled"
+		}
+		return shared.ResourceActionMsg{Action: action, Name: name}
+	}
+}
+
+func (m Model) toggleListenerAdminState() (Model, tea.Cmd) {
+	l := m.lbDetail.SelectedListener()
+	if l == nil {
+		return m, nil
+	}
+	newState := !l.AdminStateUp
+	client := m.client.LoadBalancer
+	id := l.ID
+	name := l.Name
+	return m, func() tea.Msg {
+		err := loadbalancer.UpdateListener(context.Background(), client, id, nil, nil, nil, &newState)
+		if err != nil {
+			return shared.ResourceActionErrMsg{Action: "Toggle admin state", Name: name, Err: err}
+		}
+		action := "Disabled listener"
+		if newState {
+			action = "Enabled listener"
+		}
+		return shared.ResourceActionMsg{Action: action, Name: name}
+	}
+}
+
+func (m Model) togglePoolAdminState() (Model, tea.Cmd) {
+	p := m.lbDetail.SelectedPool()
+	if p == nil {
+		return m, nil
+	}
+	newState := !p.AdminStateUp
+	client := m.client.LoadBalancer
+	id := p.ID
+	name := p.Name
+	return m, func() tea.Msg {
+		err := loadbalancer.UpdatePool(context.Background(), client, id, nil, "", &newState)
+		if err != nil {
+			return shared.ResourceActionErrMsg{Action: "Toggle admin state", Name: name, Err: err}
+		}
+		action := "Disabled pool"
+		if newState {
+			action = "Enabled pool"
+		}
+		return shared.ResourceActionMsg{Action: action, Name: name}
+	}
+}
+
+func (m Model) toggleMemberAdminState() (Model, tea.Cmd) {
+	mem := m.lbDetail.SelectedMember()
+	poolID := m.lbDetail.SelectedPoolID()
+	if mem == nil || poolID == "" {
+		return m, nil
+	}
+	newState := !mem.AdminStateUp
+	client := m.client.LoadBalancer
+	memberID := mem.ID
+	name := mem.Name
+	if name == "" {
+		name = fmt.Sprintf("%s:%d", mem.Address, mem.ProtocolPort)
+	}
+	return m, func() tea.Msg {
+		err := loadbalancer.UpdateMember(context.Background(), client, poolID, memberID, nil, nil, &newState)
+		if err != nil {
+			return shared.ResourceActionErrMsg{Action: "Toggle admin state", Name: name, Err: err}
+		}
+		action := "Disabled member"
+		if newState {
+			action = "Enabled member"
+		}
+		return shared.ResourceActionMsg{Action: action, Name: name}
+	}
 }
 
 // --- Key Pair actions ---

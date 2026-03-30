@@ -2,6 +2,7 @@ package lbmembercreate
 
 import (
 	"context"
+	"net"
 	"strconv"
 	"strings"
 
@@ -160,7 +161,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case memberCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.SanitizeAPIError(msg.err)
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting {
@@ -313,7 +314,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		poolID := m.poolID
 		memberID := m.memberID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdateMember(context.Background(), client, poolID, memberID, &name, &weight)
+			err := loadbalancer.UpdateMember(context.Background(), client, poolID, memberID, &name, &weight, nil)
 			if err != nil {
 				return memberCreateErrMsg{err: err}
 			}
@@ -324,6 +325,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	addr := strings.TrimSpace(m.addrInput.Value())
 	if addr == "" {
 		m.err = "Address is required"
+		return m, nil
+	}
+	if net.ParseIP(addr) == nil {
+		m.err = "Address must be a valid IPv4 or IPv6 address"
 		return m, nil
 	}
 
