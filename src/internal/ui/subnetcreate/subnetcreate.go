@@ -3,6 +3,7 @@ package subnetcreate
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/larkly/lazystack/internal/network"
@@ -22,14 +23,18 @@ const (
 	fieldCIDR       = 3
 	fieldGateway    = 4
 	fieldDHCP       = 5
-	fieldSubmit     = 6
-	fieldCancel     = 7
-	numFields       = 8
+	fieldPrefixLen  = 6
+	fieldIPv6Cfg    = 7
+	fieldIPv6RA     = 8
+	fieldSubmit     = 9
+	fieldCancel     = 10
+	numFields       = 11
 )
 
 var (
 	ipVersions = []string{"IPv4", "IPv6"}
 	dhcpOpts   = []string{"Enabled", "Disabled"}
+	ipv6Modes  = []string{"SLAAC", "DHCPv6 stateful", "DHCPv6 stateless", "None"}
 )
 
 type subnetCreatedMsg struct{}
@@ -46,8 +51,11 @@ type Model struct {
 	nameInput      textinput.Model
 	cidrInput      textinput.Model
 	gatewayInput   textinput.Model
+	prefixLenInput textinput.Model
 	ipVersion      int // 0=IPv4, 1=IPv6
 	dhcp           int // 0=Enabled, 1=Disabled
+	ipv6CfgMode    int // index into ipv6Modes
+	ipv6RAMode     int // index into ipv6Modes
 	allSubnetPools []network.SubnetPool
 	subnetPools    []network.SubnetPool // filtered by IP version
 	subnetPool     int                  // 0=None, 1..N=pool index
@@ -81,6 +89,12 @@ func New(client *gophercloud.ServiceClient, networkID, networkName string) Model
 	gi.CharLimit = 39
 	gi.SetWidth(25)
 
+	pi := textinput.New()
+	pi.Prompt = ""
+	pi.Placeholder = "e.g. 64 (for subnet pool)"
+	pi.CharLimit = 3
+	pi.SetWidth(25)
+
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
@@ -92,6 +106,9 @@ func New(client *gophercloud.ServiceClient, networkID, networkName string) Model
 		nameInput:    ni,
 		cidrInput:    ci,
 		gatewayInput: gi,
+		prefixLenInput: pi,
+		ipv6CfgMode:  0, // SLAAC by default
+		ipv6RAMode:   0, // SLAAC by default
 		loading:      true,
 		spinner:      s,
 	}
@@ -171,7 +188,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) isTextInput() bool {
-	return m.focusField == fieldName || m.focusField == fieldCIDR || m.focusField == fieldGateway
+	return m.focusField == fieldName || m.focusField == fieldCIDR || m.focusField == fieldGateway || m.focusField == fieldPrefixLen
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -209,6 +226,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				var cmd tea.Cmd
 				m.gatewayInput, cmd = m.gatewayInput.Update(msg)
 				return m, cmd
+			case fieldPrefixLen:
+				var cmd tea.Cmd
+				m.prefixLenInput, cmd = m.prefixLenInput.Update(msg)
+				return m, cmd
 			}
 		}
 	}
@@ -241,6 +262,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldDHCP:
 			m.dhcp = (m.dhcp + 1) % len(dhcpOpts)
 			return m, nil
+		case fieldIPv6Cfg:
+			m.ipv6CfgMode = (m.ipv6CfgMode + 1) % len(ipv6Modes)
+			return m, nil
+		case fieldIPv6RA:
+			m.ipv6RAMode = (m.ipv6RAMode + 1) % len(ipv6Modes)
+			return m, nil
 		case fieldSubmit:
 			m.focusField = fieldCancel
 			return m, nil
@@ -262,6 +289,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldDHCP:
 			m.dhcp = (m.dhcp - 1 + len(dhcpOpts)) % len(dhcpOpts)
 			return m, nil
+		case fieldIPv6Cfg:
+			m.ipv6CfgMode = (m.ipv6CfgMode - 1 + len(ipv6Modes)) % len(ipv6Modes)
+			return m, nil
+		case fieldIPv6RA:
+			m.ipv6RAMode = (m.ipv6RAMode - 1 + len(ipv6Modes)) % len(ipv6Modes)
+			return m, nil
 		case fieldSubmit:
 			m.focusField = fieldCancel
 			return m, nil
@@ -272,7 +305,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, shared.Keys.Enter):
 		switch m.focusField {
-		case fieldName, fieldCIDR, fieldIPVersion, fieldGateway, fieldDHCP:
+		case fieldName, fieldCIDR, fieldIPVersion, fieldGateway, fieldDHCP, fieldPrefixLen, fieldIPv6Cfg, fieldIPv6RA:
 			m.focusField++
 			m.updateFocus()
 			return m, nil
@@ -301,6 +334,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.gatewayInput, cmd = m.gatewayInput.Update(msg)
 		return m, cmd
+	case fieldPrefixLen:
+		var cmd tea.Cmd
+		m.prefixLenInput, cmd = m.prefixLenInput.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil
@@ -322,6 +359,11 @@ func (m *Model) updateFocus() {
 	} else {
 		m.gatewayInput.Blur()
 	}
+	if m.focusField == fieldPrefixLen {
+		m.prefixLenInput.Focus()
+	} else {
+		m.prefixLenInput.Blur()
+	}
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
@@ -337,6 +379,19 @@ func (m Model) submit() (Model, tea.Cmd) {
 		ipVer = 6
 	}
 
+	prefixLen := 0
+	if ipVer == 6 && poolSelected {
+		prefixRaw := strings.TrimSpace(m.prefixLenInput.Value())
+		if prefixRaw != "" {
+			v, err := strconv.Atoi(prefixRaw)
+			if err != nil || v < 1 || v > 128 {
+				m.err = "Network mask must be a number between 1 and 128"
+				return m, nil
+			}
+			prefixLen = v
+		}
+	}
+
 	opts := network.SubnetCreateOpts{
 		NetworkID:  m.networkID,
 		Name:       strings.TrimSpace(m.nameInput.Value()),
@@ -344,9 +399,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 		IPVersion:  ipVer,
 		GatewayIP:  strings.TrimSpace(m.gatewayInput.Value()),
 		EnableDHCP: m.dhcp == 0,
+		PrefixLen:  prefixLen,
 	}
 	if poolSelected {
 		opts.SubnetPoolID = m.subnetPools[m.subnetPool-1].ID
+	}
+	if ipVer == 6 {
+		opts.IPv6AddressMode = ipv6ModeValue(m.ipv6CfgMode)
+		opts.IPv6RAMode = ipv6ModeValue(m.ipv6RAMode)
 	}
 
 	m.submitting = true
@@ -393,6 +453,13 @@ func (m Model) View() string {
 		{"CIDR", m.cidrInput.View(), m.focusField == fieldCIDR},
 		{"Gateway IP", m.gatewayInput.View(), m.focusField == fieldGateway},
 		{"DHCP", cycleDisplay(dhcpOpts, m.dhcp), m.focusField == fieldDHCP},
+	}
+	if m.ipVersion == 1 {
+		fields = append(fields,
+			field{"Network Mask", m.prefixLenInput.View(), m.focusField == fieldPrefixLen},
+			field{"Configuration Mode", cycleDisplay(ipv6Modes, m.ipv6CfgMode), m.focusField == fieldIPv6Cfg},
+			field{"RA Mode", cycleDisplay(ipv6Modes, m.ipv6RAMode), m.focusField == fieldIPv6RA},
+		)
 	}
 
 	for _, f := range fields {
@@ -457,6 +524,19 @@ func cycleDisplay(options []string, selected int) string {
 		}
 	}
 	return strings.Join(parts, "  ")
+}
+
+func ipv6ModeValue(idx int) string {
+	switch idx {
+	case 0:
+		return "slaac"
+	case 1:
+		return "dhcpv6-stateful"
+	case 2:
+		return "dhcpv6-stateless"
+	default:
+		return ""
+	}
 }
 
 func (m Model) renderModal(content string) string {
