@@ -15,9 +15,13 @@ var (
 	debugFile   *os.File
 )
 
-// EnableDebug opens a debug log file at ~/.cache/lazystack/debug.log.
+// EnableDebug opens a debug log file under the user cache directory.
 func EnableDebug() error {
-	dir := filepath.Join(os.Getenv("HOME"), ".cache", "lazystack")
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return fmt.Errorf("determine user cache dir: %w", err)
+	}
+	dir := filepath.Join(cacheDir, "lazystack")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

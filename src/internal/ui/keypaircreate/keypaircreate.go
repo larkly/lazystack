@@ -75,6 +75,7 @@ type Model struct {
 	keypairName    string
 	privateScroll  int
 	savedPath      string
+	publicKeySaved bool
 	saveErr        string
 
 	// Save path input
@@ -222,6 +223,8 @@ func (m Model) handleSaveInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.showSaveInput = false
 			return m, nil
 		}
+		m.saveErr = ""
+		m.publicKeySaved = false
 		// Expand ~ if present
 		if strings.HasPrefix(path, "~/") {
 			home, _ := os.UserHomeDir()
@@ -235,7 +238,13 @@ func (m Model) handleSaveInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		// Save public key alongside
 		if m.publicKey != "" {
-			_ = os.WriteFile(path+".pub", []byte(m.publicKey), 0644)
+			if err := os.WriteFile(path+".pub", []byte(m.publicKey), 0644); err != nil {
+				m.saveErr = fmt.Sprintf("private key saved to %s, but failed to save public key: %v", path, err)
+				m.savedPath = path
+				m.showSaveInput = false
+				return m, nil
+			}
+			m.publicKeySaved = true
 		}
 		m.savedPath = path
 		m.showSaveInput = false
@@ -612,8 +621,11 @@ func (m Model) renderPrivateKey() string {
 	if m.savedPath != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorSuccess).Render(
 			fmt.Sprintf("  ✓ Saved to %s", m.savedPath)) + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorSuccess).Render(
-			fmt.Sprintf("  ✓ Public key saved to %s.pub", m.savedPath)) + "\n\n")
+		if m.publicKey != "" && m.publicKeySaved {
+			b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorSuccess).Render(
+				fmt.Sprintf("  ✓ Public key saved to %s.pub", m.savedPath)) + "\n")
+		}
+		b.WriteString("\n")
 	} else {
 		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorWarning).Render(
 			"  ⚠ This private key will not be shown again. Press s to save to file.") + "\n\n")
