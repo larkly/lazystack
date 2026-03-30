@@ -128,9 +128,7 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 	case viewLBDetail:
 		m.lbDetail, cmd = m.lbDetail.Update(msg)
 		cmds = append(cmds, cmd)
-	case viewRouterView:
-		m.routerView, cmd = m.routerView.Update(msg)
-		cmds = append(cmds, cmd)
+	// viewRouterView is a tab view, not a sub-view — handled above
 	case viewImageDetail:
 		m.imageDetail, cmd = m.imageDetail.Update(msg)
 		cmds = append(cmds, cmd)
