@@ -51,7 +51,38 @@ type Member struct {
 	Address         string
 	ProtocolPort    int
 	Weight          int
+	AdminStateUp    bool
 	OperatingStatus string
+	Backup          bool
+	MonitorAddress  string
+	MonitorPort     int
+	Tags            []string
+}
+
+// MemberCreateOpts contains editable fields for creating a pool member.
+type MemberCreateOpts struct {
+	Name           string
+	Address        string
+	ProtocolPort   int
+	Weight         int
+	AdminStateUp   bool
+	Backup         bool
+	MonitorAddress string
+	MonitorPort    *int
+	Tags           []string
+}
+
+// MemberUpdateOpts contains editable fields for updating a pool member.
+type MemberUpdateOpts struct {
+	Name              *string
+	Weight            *int
+	AdminStateUp      *bool
+	Backup            *bool
+	MonitorAddress    *string
+	MonitorAddressSet bool
+	MonitorPort       *int
+	MonitorPortSet    bool
+	Tags              *[]string
 }
 
 // HealthMonitor is a simplified health monitor.
@@ -347,25 +378,24 @@ func UpdatePool(ctx context.Context, client *gophercloud.ServiceClient, id strin
 }
 
 // CreateMember adds a member to a pool.
-func CreateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, name, address string, port, weight int) (*Member, error) {
-	opts := pools.CreateMemberOpts{
-		Name:         name,
-		Address:      address,
-		ProtocolPort: port,
-		Weight:       &weight,
+func CreateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID string, opts MemberCreateOpts) (*Member, error) {
+	createOpts := pools.CreateMemberOpts{
+		Name:           opts.Name,
+		Address:        opts.Address,
+		ProtocolPort:   opts.ProtocolPort,
+		Weight:         &opts.Weight,
+		AdminStateUp:   &opts.AdminStateUp,
+		Backup:         &opts.Backup,
+		MonitorAddress: opts.MonitorAddress,
+		MonitorPort:    opts.MonitorPort,
+		Tags:           cloneStringSlice(opts.Tags),
 	}
-	m, err := pools.CreateMember(ctx, client, poolID, opts).Extract()
+	m, err := pools.CreateMember(ctx, client, poolID, createOpts).Extract()
 	if err != nil {
 		return nil, fmt.Errorf("creating member: %w", err)
 	}
-	return &Member{
-		ID:              m.ID,
-		Name:            m.Name,
-		Address:         m.Address,
-		ProtocolPort:    m.ProtocolPort,
-		Weight:          m.Weight,
-		OperatingStatus: m.OperatingStatus,
-	}, nil
+	member := simplifyMember(m)
+	return &member, nil
 }
 
 // DeleteMember removes a member from a pool.
@@ -377,13 +407,9 @@ func DeleteMember(ctx context.Context, client *gophercloud.ServiceClient, poolID
 	return nil
 }
 
-// UpdateMember updates a member's name and/or weight.
-func UpdateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string, name *string, weight *int) error {
-	opts := pools.UpdateMemberOpts{
-		Name:   name,
-		Weight: weight,
-	}
-	_, err := pools.UpdateMember(ctx, client, poolID, memberID, opts).Extract()
+// UpdateMember updates an existing member.
+func UpdateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string, opts MemberUpdateOpts) error {
+	_, err := pools.UpdateMember(ctx, client, poolID, memberID, memberUpdateRequest(opts)).Extract()
 	if err != nil {
 		return fmt.Errorf("updating member %s: %w", memberID, err)
 	}
@@ -399,14 +425,7 @@ func ListMembers(ctx context.Context, client *gophercloud.ServiceClient, poolID 
 			return false, err
 		}
 		for _, m := range extracted {
-			result = append(result, Member{
-				ID:              m.ID,
-				Name:            m.Name,
-				Address:         m.Address,
-				ProtocolPort:    m.ProtocolPort,
-				Weight:          m.Weight,
-				OperatingStatus: m.OperatingStatus,
-			})
+			result = append(result, simplifyMember(&m))
 		}
 		return true, nil
 	})
@@ -414,4 +433,69 @@ func ListMembers(ctx context.Context, client *gophercloud.ServiceClient, poolID 
 		return nil, fmt.Errorf("listing members for pool %s: %w", poolID, err)
 	}
 	return result, nil
+}
+
+type memberUpdateRequest MemberUpdateOpts
+
+func (opts memberUpdateRequest) ToMemberUpdateMap() (map[string]any, error) {
+	body := map[string]any{}
+	if opts.Name != nil {
+		body["name"] = *opts.Name
+	}
+	if opts.Weight != nil {
+		body["weight"] = *opts.Weight
+	}
+	if opts.AdminStateUp != nil {
+		body["admin_state_up"] = *opts.AdminStateUp
+	}
+	if opts.Backup != nil {
+		body["backup"] = *opts.Backup
+	}
+	if opts.MonitorAddressSet {
+		if opts.MonitorAddress == nil {
+			body["monitor_address"] = nil
+		} else {
+			body["monitor_address"] = *opts.MonitorAddress
+		}
+	}
+	if opts.MonitorPortSet {
+		if opts.MonitorPort == nil {
+			body["monitor_port"] = nil
+		} else {
+			body["monitor_port"] = *opts.MonitorPort
+		}
+	}
+	if opts.Tags != nil {
+		if len(*opts.Tags) == 0 {
+			body["tags"] = []string{}
+		} else {
+			body["tags"] = cloneStringSlice(*opts.Tags)
+		}
+	}
+	return map[string]any{"member": body}, nil
+}
+
+func simplifyMember(m *pools.Member) Member {
+	return Member{
+		ID:              m.ID,
+		Name:            m.Name,
+		Address:         m.Address,
+		ProtocolPort:    m.ProtocolPort,
+		Weight:          m.Weight,
+		AdminStateUp:    m.AdminStateUp,
+		OperatingStatus: m.OperatingStatus,
+		Backup:          m.Backup,
+		MonitorAddress:  m.MonitorAddress,
+		MonitorPort:     m.MonitorPort,
+		Tags:            cloneStringSlice(m.Tags),
+	}
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, len(values))
+	copy(out, values)
+	return out
 }

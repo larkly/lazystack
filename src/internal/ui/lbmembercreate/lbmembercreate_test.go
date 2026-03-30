@@ -149,3 +149,40 @@ func TestMakeAddressSetSkipsEmptyValues(t *testing.T) {
 		t.Fatal("expected 2001:db8::5 in set")
 	}
 }
+
+func TestParseTagsTrimsAndSkipsEmptyValues(t *testing.T) {
+	tags := parseTags(" blue, green ,, canary , ")
+
+	if len(tags) != 3 {
+		t.Fatalf("len(tags) = %d, want 3", len(tags))
+	}
+	if tags[0] != "blue" || tags[1] != "green" || tags[2] != "canary" {
+		t.Fatalf("tags = %#v, want [blue green canary]", tags)
+	}
+}
+
+func TestNewEditPreloadsExtendedMemberFields(t *testing.T) {
+	m := NewEdit(nil, "pool-1", "member-1", "web-01", 2, false, true, "10.0.0.50", 9000, []string{"blue", "canary"}, "pool-1")
+
+	if m.nameInput.Value() != "web-01" {
+		t.Fatalf("nameInput = %q, want web-01", m.nameInput.Value())
+	}
+	if m.weightInput.Value() != "2" {
+		t.Fatalf("weightInput = %q, want 2", m.weightInput.Value())
+	}
+	if m.adminStateUp {
+		t.Fatal("expected adminStateUp false")
+	}
+	if !m.backup {
+		t.Fatal("expected backup true")
+	}
+	if m.monitorAddr.Value() != "10.0.0.50" {
+		t.Fatalf("monitorAddr = %q, want 10.0.0.50", m.monitorAddr.Value())
+	}
+	if m.monitorPort.Value() != "9000" {
+		t.Fatalf("monitorPort = %q, want 9000", m.monitorPort.Value())
+	}
+	if m.tagsInput.Value() != "blue, canary" {
+		t.Fatalf("tagsInput = %q, want \"blue, canary\"", m.tagsInput.Value())
+	}
+}

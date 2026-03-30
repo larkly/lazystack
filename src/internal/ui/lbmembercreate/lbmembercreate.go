@@ -25,6 +25,11 @@ const (
 	fieldName
 	fieldPort
 	fieldWeight
+	fieldAdminState
+	fieldBackup
+	fieldMonitorAddr
+	fieldMonitorPort
+	fieldTags
 	fieldSubmit
 	fieldCancel
 	numFields
@@ -36,6 +41,8 @@ const (
 )
 
 var addressSourceOpts = []string{"IP", "Server"}
+var enabledDisabledOpts = []string{"Enabled", "Disabled"}
+var yesNoOpts = []string{"No", "Yes"}
 
 type memberCreatedMsg struct{}
 type memberCreateErrMsg struct{ err error }
@@ -62,6 +69,12 @@ type Model struct {
 	addrInput   textinput.Model
 	portInput   textinput.Model
 	weightInput textinput.Model
+	monitorAddr textinput.Model
+	monitorPort textinput.Model
+	tagsInput   textinput.Model
+
+	adminStateUp bool
+	backup       bool
 
 	addressSource    int
 	serverOptions    []memberServerOption
@@ -114,6 +127,24 @@ func New(client, computeClient *gophercloud.ServiceClient, poolID, poolName, lbV
 	wi.CharLimit = 4
 	wi.SetWidth(6)
 
+	mai := textinput.New()
+	mai.Prompt = ""
+	mai.Placeholder = "optional health-check IP"
+	mai.CharLimit = 45
+	mai.SetWidth(28)
+
+	mpi := textinput.New()
+	mpi.Prompt = ""
+	mpi.Placeholder = "optional health-check port"
+	mpi.CharLimit = 5
+	mpi.SetWidth(18)
+
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Placeholder = "comma,separated,labels"
+	ti.CharLimit = 256
+	ti.SetWidth(36)
+
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
@@ -128,6 +159,10 @@ func New(client, computeClient *gophercloud.ServiceClient, poolID, poolName, lbV
 		addrInput:      ai,
 		portInput:      pi,
 		weightInput:    wi,
+		monitorAddr:    mai,
+		monitorPort:    mpi,
+		tagsInput:      ti,
+		adminStateUp:   true,
 		spinner:        s,
 		serversLoading: computeClient != nil,
 		preferredIPVer: ipVersion(lbVIPAddress),
@@ -135,8 +170,8 @@ func New(client, computeClient *gophercloud.ServiceClient, poolID, poolName, lbV
 	}
 }
 
-// NewEdit creates an edit form for an existing member (name + weight only).
-func NewEdit(client *gophercloud.ServiceClient, poolID, memberID, currentName string, currentWeight int, poolName string) Model {
+// NewEdit creates an edit form for an existing member.
+func NewEdit(client *gophercloud.ServiceClient, poolID, memberID, currentName string, currentWeight int, currentAdminStateUp, currentBackup bool, currentMonitorAddress string, currentMonitorPort int, currentTags []string, poolName string) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "member name"
@@ -162,22 +197,50 @@ func NewEdit(client *gophercloud.ServiceClient, poolID, memberID, currentName st
 	wi.SetWidth(6)
 	wi.SetValue(strconv.Itoa(currentWeight))
 
+	mai := textinput.New()
+	mai.Prompt = ""
+	mai.Placeholder = "optional health-check IP"
+	mai.CharLimit = 45
+	mai.SetWidth(28)
+	mai.SetValue(currentMonitorAddress)
+
+	mpi := textinput.New()
+	mpi.Prompt = ""
+	mpi.Placeholder = "optional health-check port"
+	mpi.CharLimit = 5
+	mpi.SetWidth(18)
+	if currentMonitorPort > 0 {
+		mpi.SetValue(strconv.Itoa(currentMonitorPort))
+	}
+
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Placeholder = "comma,separated,labels"
+	ti.CharLimit = 256
+	ti.SetWidth(36)
+	ti.SetValue(strings.Join(currentTags, ", "))
+
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	return Model{
-		Active:      true,
-		client:      client,
-		poolID:      poolID,
-		poolName:    poolName,
-		editMode:    true,
-		memberID:    memberID,
-		nameInput:   ni,
-		addrInput:   ai,
-		portInput:   pi,
-		weightInput: wi,
-		spinner:     s,
-		focusField:  fieldName,
+		Active:       true,
+		client:       client,
+		poolID:       poolID,
+		poolName:     poolName,
+		editMode:     true,
+		memberID:     memberID,
+		nameInput:    ni,
+		addrInput:    ai,
+		portInput:    pi,
+		weightInput:  wi,
+		monitorAddr:  mai,
+		monitorPort:  mpi,
+		tagsInput:    ti,
+		adminStateUp: currentAdminStateUp,
+		backup:       currentBackup,
+		spinner:      s,
+		focusField:   fieldName,
 	}
 }
 
@@ -276,10 +339,14 @@ func (m *Model) advanceFocus(dir int) {
 
 func (m Model) isTextInput() bool {
 	if m.editMode {
-		return m.focusField == fieldName || m.focusField == fieldWeight
+		switch m.focusField {
+		case fieldName, fieldWeight, fieldMonitorAddr, fieldMonitorPort, fieldTags:
+			return true
+		}
+		return false
 	}
 	switch m.focusField {
-	case fieldName, fieldPort, fieldWeight:
+	case fieldName, fieldPort, fieldWeight, fieldMonitorAddr, fieldMonitorPort, fieldTags:
 		return true
 	case fieldAddr:
 		return m.usesManualIP()
@@ -327,6 +394,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldAddrSource:
 			m.addressSource = (m.addressSource + 1) % len(addressSourceOpts)
 			m.err = ""
+		case fieldAdminState:
+			m.adminStateUp = !m.adminStateUp
+		case fieldBackup:
+			m.backup = !m.backup
 		case fieldSubmit:
 			m.focusField = fieldCancel
 			m.updateFocus()
@@ -338,6 +409,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldAddrSource:
 			m.addressSource = (m.addressSource - 1 + len(addressSourceOpts)) % len(addressSourceOpts)
 			m.err = ""
+		case fieldAdminState:
+			m.adminStateUp = !m.adminStateUp
+		case fieldBackup:
+			m.backup = !m.backup
 		case fieldCancel:
 			m.focusField = fieldSubmit
 			m.updateFocus()
@@ -456,6 +531,9 @@ func (m *Model) updateFocus() {
 	m.addrInput.Blur()
 	m.portInput.Blur()
 	m.weightInput.Blur()
+	m.monitorAddr.Blur()
+	m.monitorPort.Blur()
+	m.tagsInput.Blur()
 	switch m.focusField {
 	case fieldName:
 		m.nameInput.Focus()
@@ -465,6 +543,12 @@ func (m *Model) updateFocus() {
 		m.portInput.Focus()
 	case fieldWeight:
 		m.weightInput.Focus()
+	case fieldMonitorAddr:
+		m.monitorAddr.Focus()
+	case fieldMonitorPort:
+		m.monitorPort.Focus()
+	case fieldTags:
+		m.tagsInput.Focus()
 	}
 }
 
@@ -479,6 +563,12 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.portInput, cmd = m.portInput.Update(msg)
 	case fieldWeight:
 		m.weightInput, cmd = m.weightInput.Update(msg)
+	case fieldMonitorAddr:
+		m.monitorAddr, cmd = m.monitorAddr.Update(msg)
+	case fieldMonitorPort:
+		m.monitorPort, cmd = m.monitorPort.Update(msg)
+	case fieldTags:
+		m.tagsInput, cmd = m.tagsInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -496,6 +586,29 @@ func (m Model) submit() (Model, tea.Cmd) {
 		}
 	}
 
+	monitorAddressRaw := strings.TrimSpace(m.monitorAddr.Value())
+	if monitorAddressRaw != "" && net.ParseIP(monitorAddressRaw) == nil {
+		m.err = "Monitor address must be a valid IPv4 or IPv6 address"
+		return m, nil
+	}
+
+	monitorPortRaw := strings.TrimSpace(m.monitorPort.Value())
+	var monitorPortValue int
+	var monitorPort *int
+	if monitorPortRaw != "" {
+		var err error
+		monitorPortValue, err = strconv.Atoi(monitorPortRaw)
+		if err != nil || monitorPortValue < 1 || monitorPortValue > 65535 {
+			m.err = "Monitor port must be a number between 1 and 65535"
+			return m, nil
+		}
+		monitorPort = &monitorPortValue
+	}
+
+	tags := parseTags(m.tagsInput.Value())
+	adminStateUp := m.adminStateUp
+	backup := m.backup
+
 	if m.editMode {
 		m.submitting = true
 		m.err = ""
@@ -503,7 +616,22 @@ func (m Model) submit() (Model, tea.Cmd) {
 		poolID := m.poolID
 		memberID := m.memberID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdateMember(context.Background(), client, poolID, memberID, &name, &weight)
+			opts := loadbalancer.MemberUpdateOpts{
+				Name:              &name,
+				Weight:            &weight,
+				AdminStateUp:      &adminStateUp,
+				Backup:            &backup,
+				MonitorAddressSet: true,
+				MonitorPortSet:    true,
+				Tags:              &tags,
+			}
+			if monitorAddressRaw != "" {
+				opts.MonitorAddress = &monitorAddressRaw
+			}
+			if monitorPort != nil {
+				opts.MonitorPort = monitorPort
+			}
+			err := loadbalancer.UpdateMember(context.Background(), client, poolID, memberID, opts)
 			if err != nil {
 				return memberCreateErrMsg{err: err}
 			}
@@ -543,7 +671,17 @@ func (m Model) submit() (Model, tea.Cmd) {
 	poolID := m.poolID
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		_, err := loadbalancer.CreateMember(context.Background(), client, poolID, name, addr, port, weight)
+		_, err := loadbalancer.CreateMember(context.Background(), client, poolID, loadbalancer.MemberCreateOpts{
+			Name:           name,
+			Address:        addr,
+			ProtocolPort:   port,
+			Weight:         weight,
+			AdminStateUp:   adminStateUp,
+			Backup:         backup,
+			MonitorAddress: monitorAddressRaw,
+			MonitorPort:    monitorPort,
+			Tags:           tags,
+		})
 		if err != nil {
 			return memberCreateErrMsg{err: err}
 		}
@@ -565,7 +703,7 @@ func (m Model) Hints() string {
 		}
 		return "↑↓ navigate • enter select • / filter • esc close"
 	}
-	return "tab/↑↓ navigate • enter open picker • ctrl+s submit • esc cancel"
+	return "tab/↑↓ navigate • ←→ toggle • enter open picker • ctrl+s submit • esc cancel"
 }
 
 // View renders the form.
@@ -605,6 +743,11 @@ func (m Model) View() string {
 		rows = append(rows, label("Port", fieldPort)+m.portInput.View())
 	}
 	rows = append(rows, label("Weight", fieldWeight)+m.weightInput.View())
+	rows = append(rows, label("State", fieldAdminState)+renderPicker(enabledDisabledOpts, enabledIndex(m.adminStateUp)))
+	rows = append(rows, label("Backup", fieldBackup)+renderPicker(yesNoOpts, yesNoIndex(m.backup)))
+	rows = append(rows, label("Mon Addr", fieldMonitorAddr)+m.monitorAddr.View())
+	rows = append(rows, label("Mon Port", fieldMonitorPort)+m.monitorPort.View())
+	rows = append(rows, label("Labels", fieldTags)+m.tagsInput.View())
 
 	if m.err != "" {
 		rows = append(rows, "")
@@ -866,6 +1009,33 @@ func makeAddressSet(addrs []string) map[string]struct{} {
 		set[addr] = struct{}{}
 	}
 	return set
+}
+
+func parseTags(value string) []string {
+	parts := strings.Split(value, ",")
+	tags := make([]string, 0, len(parts))
+	for _, part := range parts {
+		tag := strings.TrimSpace(part)
+		if tag == "" {
+			continue
+		}
+		tags = append(tags, tag)
+	}
+	return tags
+}
+
+func enabledIndex(v bool) int {
+	if v {
+		return 0
+	}
+	return 1
+}
+
+func yesNoIndex(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func (m Model) formWidth() int {

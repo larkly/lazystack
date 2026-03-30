@@ -517,7 +517,19 @@ func (m Model) openLBMemberEdit() (Model, tea.Cmd) {
 	if mem == nil || poolID == "" {
 		return m, nil
 	}
-	m.lbMemberCreate = lbmembercreate.NewEdit(m.client.LoadBalancer, poolID, mem.ID, mem.Name, mem.Weight, poolName)
+	m.lbMemberCreate = lbmembercreate.NewEdit(
+		m.client.LoadBalancer,
+		poolID,
+		mem.ID,
+		mem.Name,
+		mem.Weight,
+		mem.AdminStateUp,
+		mem.Backup,
+		mem.MonitorAddress,
+		mem.MonitorPort,
+		mem.Tags,
+		poolName,
+	)
 	m.lbMemberCreate.SetSize(m.width, m.height)
 	return m, m.lbMemberCreate.Init()
 }
