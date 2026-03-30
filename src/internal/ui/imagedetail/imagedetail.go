@@ -50,6 +50,7 @@ func New(client *gophercloud.ServiceClient, imageID string) Model {
 
 // Init fetches the image details.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[imagedetail] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchImage())
 }
 
@@ -78,20 +79,24 @@ func (m Model) ImageStatus() string {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case imageDetailLoadedMsg:
+		shared.Debugf("[imagedetail] imageDetailLoadedMsg")
 		m.loading = false
 		m.image = msg.image
 		m.err = ""
 		return m, nil
 
 	case imageDetailErrMsg:
+		shared.Debugf("[imagedetail] imageDetailErrMsg: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[imagedetail] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[imagedetail] tick fetching")
 		return m, m.fetchImage()
 
 	case spinner.TickMsg:
@@ -238,16 +243,20 @@ func (m Model) fetchImage() tea.Cmd {
 	}
 	id := m.imageID
 	return func() tea.Msg {
+		shared.Debugf("[imagedetail] fetchImage start")
 		img, err := image.GetImage(context.Background(), client, id)
 		if err != nil {
+			shared.Debugf("[imagedetail] fetchImage error: %v", err)
 			return imageDetailErrMsg{err: err}
 		}
+		shared.Debugf("[imagedetail] fetchImage done")
 		return imageDetailLoadedMsg{image: img}
 	}
 }
 
 // ForceRefresh triggers a manual reload of the image detail.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[imagedetail] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchImage())
 }

@@ -321,6 +321,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.idlePaused {
 			m.idlePaused = false
 			m.statusBar.Hint = ""
+			shared.Debugf("[app] resuming from idle, restarting tick")
 			return m, m.refreshTickCmd()
 		}
 
@@ -1127,11 +1128,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Idle timeout: swallow ticks when paused, or pause if idle too long
 		if _, ok := msg.(shared.TickMsg); ok {
 			if m.idlePaused {
+				shared.Debugf("[app] TickMsg: swallowed (idle paused)")
 				return m, nil
 			}
 			if m.idleTimeout > 0 && !m.lastActivity.IsZero() && time.Since(m.lastActivity) > m.idleTimeout {
 				m.idlePaused = true
 				m.statusBar.Hint = "⏸ Paused — press any key to resume"
+				shared.Debugf("[app] TickMsg: pausing due to idle timeout")
 				return m, nil
 			}
 		}

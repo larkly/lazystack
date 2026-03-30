@@ -82,6 +82,7 @@ func New(client *gophercloud.ServiceClient, lbID string) Model {
 
 // Init fetches the load balancer details.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[lbdetail] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchDetail())
 }
 
@@ -105,6 +106,7 @@ func (m Model) LBName() string {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case lbDetailLoadedMsg:
+		shared.Debugf("[lbdetail] lbDetailLoadedMsg: %d listeners, %d pools", len(msg.listeners), len(msg.pools))
 		m.loading = false
 		m.lb = msg.lb
 		m.listeners = msg.listeners
@@ -116,14 +118,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case lbDetailErrMsg:
+		shared.Debugf("[lbdetail] lbDetailErrMsg: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[lbdetail] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[lbdetail] tick fetching")
 		return m, m.fetchDetail()
 
 	case spinner.TickMsg:
@@ -992,10 +997,12 @@ func (m Model) fetchDetail() tea.Cmd {
 	client := m.client
 	id := m.lbID
 	return func() tea.Msg {
+		shared.Debugf("[lbdetail] fetchDetail start")
 		ctx := context.Background()
 
 		lb, err := loadbalancer.GetLoadBalancer(ctx, client, id)
 		if err != nil {
+			shared.Debugf("[lbdetail] fetchDetail error: %v", err)
 			return lbDetailErrMsg{err: err}
 		}
 
@@ -1026,6 +1033,7 @@ func (m Model) fetchDetail() tea.Cmd {
 			}
 		}
 
+		shared.Debugf("[lbdetail] fetchDetail done: %d listeners, %d pools", len(lstnrs), len(pls))
 		return lbDetailLoadedMsg{
 			lb:        lb,
 			listeners: lstnrs,
@@ -1038,6 +1046,7 @@ func (m Model) fetchDetail() tea.Cmd {
 
 // ForceRefresh triggers a manual reload of the load balancer detail.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[lbdetail] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchDetail())
 }

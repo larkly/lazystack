@@ -55,6 +55,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[floatingiplist] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchFIPs())
 }
 
@@ -71,6 +72,7 @@ func (m Model) SelectedFIP() *network.FloatingIP {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case fipsLoadedMsg:
+		shared.Debugf("[floatingiplist] loaded %d floating IPs", len(msg.fips))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.fips) {
 			cursorID = m.fips[m.cursor].ID
@@ -93,14 +95,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case fipsErrMsg:
+		shared.Debugf("[floatingiplist] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[floatingiplist] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[floatingiplist] tick fetching")
 		return m, m.fetchFIPs()
 
 	case spinner.TickMsg:
@@ -347,16 +352,20 @@ func fipStatusStyle(status string) lipgloss.Style {
 func (m Model) fetchFIPs() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
+		shared.Debugf("[floatingiplist] fetch start")
 		fips, err := network.ListFloatingIPs(context.Background(), client)
 		if err != nil {
+			shared.Debugf("[floatingiplist] fetch error: %v", err)
 			return fipsErrMsg{err: err}
 		}
+		shared.Debugf("[floatingiplist] fetch done, count=%d", len(fips))
 		return fipsLoadedMsg{fips: fips}
 	}
 }
 
 // ForceRefresh triggers a manual reload of the floating IP list.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[floatingiplist] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchFIPs())
 }

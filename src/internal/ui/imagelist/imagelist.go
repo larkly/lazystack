@@ -153,6 +153,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[imagelist] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchImages())
 }
 
@@ -169,6 +170,7 @@ func (m Model) SelectedImage() *image.Image {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case imagesLoadedMsg:
+		shared.Debugf("[imagelist] loaded %d images", len(msg.images))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.images) {
 			cursorID = m.images[m.cursor].ID
@@ -191,14 +193,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case imagesErrMsg:
+		shared.Debugf("[imagelist] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[imagelist] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[imagelist] tick fetching")
 		return m, m.fetchImages()
 
 	case spinner.TickMsg:
@@ -545,16 +550,20 @@ func (m Model) fetchImages() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
+		shared.Debugf("[imagelist] fetch start")
 		imgs, err := image.ListImages(context.Background(), client)
 		if err != nil {
+			shared.Debugf("[imagelist] fetch error: %v", err)
 			return imagesErrMsg{err: err}
 		}
+		shared.Debugf("[imagelist] fetch done, count=%d", len(imgs))
 		return imagesLoadedMsg{images: imgs}
 	}
 }
 
 // ForceRefresh triggers a manual reload of the image list.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[imagelist] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchImages())
 }

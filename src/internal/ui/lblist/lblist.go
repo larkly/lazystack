@@ -56,6 +56,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[lblist] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchLBs())
 }
 
@@ -63,6 +64,7 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case lbsLoadedMsg:
+		shared.Debugf("[lblist] loaded %d load balancers", len(msg.lbs))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.lbs) {
 			cursorID = m.lbs[m.cursor].ID
@@ -85,14 +87,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case lbsErrMsg:
+		shared.Debugf("[lblist] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[lblist] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[lblist] tick fetching")
 		return m, m.fetchLBs()
 
 	case spinner.TickMsg:
@@ -410,16 +415,20 @@ func (m Model) fetchLBs() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
+		shared.Debugf("[lblist] fetch start")
 		lbs, err := loadbalancer.ListLoadBalancers(context.Background(), client)
 		if err != nil {
+			shared.Debugf("[lblist] fetch error: %v", err)
 			return lbsErrMsg{err: err}
 		}
+		shared.Debugf("[lblist] fetch done, count=%d", len(lbs))
 		return lbsLoadedMsg{lbs: lbs}
 	}
 }
 
 // ForceRefresh triggers a manual reload of the load balancer list.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[lblist] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchLBs())
 }
