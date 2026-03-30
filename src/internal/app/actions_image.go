@@ -88,10 +88,13 @@ func (m Model) openImageDeactivateConfirm() (Model, tea.Cmd) {
 func (m Model) doDeactivateImage(id, name string) tea.Cmd {
 	imgClient := m.client.Image
 	return func() tea.Msg {
+		shared.Debugf("[action] deactivating image %s", name)
 		err := image.DeactivateImage(context.Background(), imgClient, id)
 		if err != nil {
+			shared.Debugf("[action] deactivate image %s failed: %s", name, err)
 			return shared.ResourceActionErrMsg{Action: "Deactivate image", Name: name, Err: err}
 		}
+		shared.Debugf("[action] deactivated image %s", name)
 		return shared.ResourceActionMsg{Action: "Deactivated image", Name: name}
 	}
 }
@@ -99,10 +102,13 @@ func (m Model) doDeactivateImage(id, name string) tea.Cmd {
 func (m Model) doReactivateImage(id, name string) tea.Cmd {
 	imgClient := m.client.Image
 	return func() tea.Msg {
+		shared.Debugf("[action] reactivating image %s", name)
 		err := image.ReactivateImage(context.Background(), imgClient, id)
 		if err != nil {
+			shared.Debugf("[action] reactivate image %s failed: %s", name, err)
 			return shared.ResourceActionErrMsg{Action: "Reactivate image", Name: name, Err: err}
 		}
+		shared.Debugf("[action] reactivated image %s", name)
 		return shared.ResourceActionMsg{Action: "Reactivated image", Name: name}
 	}
 }

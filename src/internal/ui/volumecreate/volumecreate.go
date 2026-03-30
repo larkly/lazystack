@@ -414,10 +414,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.err = ""
 	client := m.bsClient
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[volumecreate] creating volume %q (size=%dGB)", name, size)
 		vol, err := volume.CreateVolume(context.Background(), client, opts)
 		if err != nil {
+			shared.Debugf("[volumecreate] error creating volume %q: %v", name, err)
 			return volumeCreateErrMsg{err: err}
 		}
+		shared.Debugf("[volumecreate] created volume %q (id=%s)", name, vol.ID)
 		return volumeCreatedMsg{vol: vol}
 	})
 }

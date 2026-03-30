@@ -216,10 +216,13 @@ func (m Model) doRebuild(img image.Image) (Model, tea.Cmd) {
 	id := m.serverID
 	imageID := img.ID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[serverrebuild] rebuilding server %s (%s) with image %s", id, name, imageID)
 		err := compute.RebuildServer(context.Background(), client, id, imageID)
 		if err != nil {
+			shared.Debugf("[serverrebuild] error rebuilding server %s: %v", id, err)
 			return rebuildErrMsg{err: err}
 		}
+		shared.Debugf("[serverrebuild] rebuilt server %s (%s)", id, name)
 		return rebuildDoneMsg{name: name}
 	})
 }

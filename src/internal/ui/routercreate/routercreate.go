@@ -334,10 +334,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[routercreate] creating router %q", name)
 		_, err := network.CreateRouter(context.Background(), client, name, extNetworkID, adminUp)
 		if err != nil {
+			shared.Debugf("[routercreate] error creating router %q: %v", name, err)
 			return routerCreateErrMsg{err: err}
 		}
+		shared.Debugf("[routercreate] created router %q", name)
 		return routerCreatedMsg{}
 	})
 }

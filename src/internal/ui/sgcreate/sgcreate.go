@@ -275,27 +275,36 @@ func (m Model) submit() (Model, tea.Cmd) {
 	case ModeRename:
 		sgID := m.sgID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			shared.Debugf("[sgcreate] renaming security group %s to %q", sgID, name)
 			_, err := network.UpdateSecurityGroup(context.Background(), client, sgID, name, &desc)
 			if err != nil {
+				shared.Debugf("[sgcreate] error renaming security group %s: %v", sgID, err)
 				return sgCreateErrMsg{err: err}
 			}
+			shared.Debugf("[sgcreate] renamed security group %s to %q", sgID, name)
 			return sgCreatedMsg{}
 		})
 	case ModeClone:
 		srcID := m.srcSGID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			shared.Debugf("[sgcreate] cloning security group %s as %q", srcID, name)
 			_, err := network.CloneSecurityGroup(context.Background(), client, srcID, name, desc)
 			if err != nil {
+				shared.Debugf("[sgcreate] error cloning security group %s: %v", srcID, err)
 				return sgCreateErrMsg{err: err}
 			}
+			shared.Debugf("[sgcreate] cloned security group %s as %q", srcID, name)
 			return sgCreatedMsg{}
 		})
 	default:
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			shared.Debugf("[sgcreate] creating security group %q", name)
 			_, err := network.CreateSecurityGroup(context.Background(), client, name, desc)
 			if err != nil {
+				shared.Debugf("[sgcreate] error creating security group %q: %v", name, err)
 				return sgCreateErrMsg{err: err}
 			}
+			shared.Debugf("[sgcreate] created security group %q", name)
 			return sgCreatedMsg{}
 		})
 	}

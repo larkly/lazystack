@@ -221,10 +221,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[networkcreate] creating network %q", name)
 		_, err := network.CreateNetwork(context.Background(), client, name, adminUp)
 		if err != nil {
+			shared.Debugf("[networkcreate] error creating network %q: %v", name, err)
 			return netCreateErrMsg{err: err}
 		}
+		shared.Debugf("[networkcreate] created network %q", name)
 		return netCreatedMsg{}
 	})
 }

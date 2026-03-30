@@ -206,6 +206,7 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 	if len(m.serverIDs) > 0 {
 		ids := m.serverIDs
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			shared.Debugf("[serverresize] resizing %d servers to flavor %s", len(ids), flavorID)
 			var errs []string
 			for _, id := range ids {
 				err := compute.ResizeServer(context.Background(), client, id, flavorID)
@@ -214,8 +215,10 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 				}
 			}
 			if len(errs) > 0 {
+				shared.Debugf("[serverresize] error resizing servers: %s", strings.Join(errs, "; "))
 				return resizeErrMsg{err: fmt.Errorf("%s", strings.Join(errs, "; "))}
 			}
+			shared.Debugf("[serverresize] resized %d servers to flavor %s", len(ids), flavorID)
 			return resizeDoneMsg{name: name}
 		})
 	}
@@ -223,10 +226,13 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 	// Single resize
 	id := m.serverID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[serverresize] resizing server %s (%s) to flavor %s", id, name, flavorID)
 		err := compute.ResizeServer(context.Background(), client, id, flavorID)
 		if err != nil {
+			shared.Debugf("[serverresize] error resizing server %s: %v", id, err)
 			return resizeErrMsg{err: err}
 		}
+		shared.Debugf("[serverresize] resized server %s (%s)", id, name)
 		return resizeDoneMsg{name: name}
 	})
 }

@@ -564,6 +564,7 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		deleteVols := action.DeleteVolumes
 		volIDs := action.VolumeIDs
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting server %s", action.Name)
 			// Detach volumes before deleting the server
 			var volErrs []string
 			if deleteVols && bsClient != nil {
@@ -591,6 +592,7 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 
 			err := compute.DeleteServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] delete server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Delete", Name: action.Name, Err: err}
 			}
 
@@ -601,6 +603,7 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 					}
 				}
 			}
+			shared.Debugf("[action] deleted server %s", action.Name)
 			msg := shared.ServerActionMsg{Action: "Delete", Name: action.Name}
 			if len(volErrs) > 0 {
 				msg.Action = fmt.Sprintf("Delete (warning: %d volume error(s))", len(volErrs))
@@ -609,106 +612,145 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		}
 	case "soft reboot":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] rebooting server %s", action.Name)
 			err := compute.RebootServer(context.Background(), client, action.ServerID, servers.SoftReboot)
 			if err != nil {
+				shared.Debugf("[action] reboot server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Reboot", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] rebooted server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Reboot", Name: action.Name}
 		}
 	case "hard reboot":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] hard rebooting server %s", action.Name)
 			err := compute.RebootServer(context.Background(), client, action.ServerID, servers.HardReboot)
 			if err != nil {
+				shared.Debugf("[action] hard reboot server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Hard reboot", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] hard rebooted server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Hard reboot", Name: action.Name}
 		}
 	case "pause":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] pausing server %s", action.Name)
 			err := compute.PauseServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] pause server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Pause", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] paused server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Pause", Name: action.Name}
 		}
 	case "unpause":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] unpausing server %s", action.Name)
 			err := compute.UnpauseServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] unpause server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Unpause", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] unpaused server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Unpause", Name: action.Name}
 		}
 	case "suspend":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] suspending server %s", action.Name)
 			err := compute.SuspendServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] suspend server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Suspend", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] suspended server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Suspend", Name: action.Name}
 		}
 	case "resume":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] resuming server %s", action.Name)
 			err := compute.ResumeServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] resume server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Resume", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] resumed server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Resume", Name: action.Name}
 		}
 	case "shelve":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] shelving server %s", action.Name)
 			err := compute.ShelveServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] shelve server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Shelve", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] shelved server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Shelve", Name: action.Name}
 		}
 	case "unshelve":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] unshelving server %s", action.Name)
 			err := compute.UnshelveServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] unshelve server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Unshelve", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] unshelved server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Unshelve", Name: action.Name}
 		}
 	case "stop":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] stopping server %s", action.Name)
 			err := compute.StopServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] stop server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Stop", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] stopped server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Stop", Name: action.Name}
 		}
 	case "start":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] starting server %s", action.Name)
 			err := compute.StartServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] start server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Start", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] started server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Start", Name: action.Name}
 		}
 	case "lock":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] locking server %s", action.Name)
 			err := compute.LockServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] lock server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Lock", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] locked server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Lock", Name: action.Name}
 		}
 	case "unlock":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] unlocking server %s", action.Name)
 			err := compute.UnlockServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] unlock server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Unlock", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] unlocked server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Unlock", Name: action.Name}
 		}
 	case "rescue":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] rescuing server %s", action.Name)
 			adminPass, err := compute.RescueServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] rescue server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Rescue", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] rescued server %s", action.Name)
 			msg := shared.ServerActionMsg{Action: "Rescue", Name: action.Name}
 			if adminPass != "" {
 				msg.Action = fmt.Sprintf("Rescue (password: %s)", adminPass)
@@ -717,10 +759,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		}
 	case "unrescue":
 		return m, func() tea.Msg {
+			shared.Debugf("[action] unrescuing server %s", action.Name)
 			err := compute.UnrescueServer(context.Background(), client, action.ServerID)
 			if err != nil {
+				shared.Debugf("[action] unrescue server %s failed: %s", action.Name, err)
 				return shared.ServerActionErrMsg{Action: "Unrescue", Name: action.Name, Err: err}
 			}
+			shared.Debugf("[action] unrescued server %s", action.Name)
 			return shared.ServerActionMsg{Action: "Unrescue", Name: action.Name}
 		}
 	case "delete_volume":
@@ -728,10 +773,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting volume %s", name)
 			err := volume.DeleteVolume(context.Background(), bsClient, id)
 			if err != nil {
+				shared.Debugf("[action] delete volume %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Delete volume", Name: name, Err: err}
 			}
+			shared.Debugf("[action] deleted volume %s", name)
 			return shared.ResourceActionMsg{Action: "Deleted volume", Name: name}
 		}
 	case "detach_volume":
@@ -740,17 +788,22 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		name := action.Name
 		bsClient := m.client.BlockStorage
 		return m, func() tea.Msg {
+			shared.Debugf("[action] detaching volume %s", name)
 			vol, err := volume.GetVolume(context.Background(), bsClient, volID)
 			if err != nil {
+				shared.Debugf("[action] detach volume %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: err}
 			}
 			if vol.AttachedServerID == "" {
+				shared.Debugf("[action] detach volume %s failed: volume is not attached", name)
 				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: fmt.Errorf("volume is not attached")}
 			}
 			err = volume.DetachVolume(context.Background(), computeC, vol.AttachedServerID, volID)
 			if err != nil {
+				shared.Debugf("[action] detach volume %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: err}
 			}
+			shared.Debugf("[action] detached volume %s", name)
 			return shared.ResourceActionMsg{Action: "Detached volume", Name: name}
 		}
 	case "release_fip":
@@ -758,10 +811,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] releasing floating IP %s", name)
 			err := network.ReleaseFloatingIP(context.Background(), netClient, id)
 			if err != nil {
+				shared.Debugf("[action] release floating IP %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Release FIP", Name: name, Err: err}
 			}
+			shared.Debugf("[action] released floating IP %s", name)
 			return shared.ResourceActionMsg{Action: "Released", Name: name}
 		}
 	case "disassociate_fip":
@@ -769,10 +825,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] disassociating floating IP %s", name)
 			err := network.DisassociateFloatingIP(context.Background(), netClient, id)
 			if err != nil {
+				shared.Debugf("[action] disassociate floating IP %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Disassociate FIP", Name: name, Err: err}
 			}
+			shared.Debugf("[action] disassociated floating IP %s", name)
 			return shared.ResourceActionMsg{Action: "Disassociated", Name: name}
 		}
 	case "delete_router":
@@ -780,10 +839,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting router %s", name)
 			err := network.DeleteRouter(context.Background(), netClient, id)
 			if err != nil {
+				shared.Debugf("[action] delete router %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Delete router", Name: name, Err: err}
 			}
+			shared.Debugf("[action] deleted router %s", name)
 			return shared.ResourceActionMsg{Action: "Deleted router", Name: name}
 		}
 	case "remove_router_interface":
@@ -793,10 +855,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		// Get the selected subnet ID from the router view
 		subnetID := m.routerView.SelectedInterfaceSubnetID()
 		return m, func() tea.Msg {
+			shared.Debugf("[action] removing router interface from %s", name)
 			err := network.RemoveRouterInterface(context.Background(), netClient, routerID, subnetID)
 			if err != nil {
+				shared.Debugf("[action] remove router interface from %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Remove interface", Name: name, Err: err}
 			}
+			shared.Debugf("[action] removed router interface from %s", name)
 			return shared.ResourceActionMsg{Action: "Removed interface from", Name: name}
 		}
 	case "delete_network":
@@ -804,10 +869,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting network %s", name)
 			err := network.DeleteNetwork(context.Background(), netClient, id)
 			if err != nil {
+				shared.Debugf("[action] delete network %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Delete network", Name: name, Err: err}
 			}
+			shared.Debugf("[action] deleted network %s", name)
 			return shared.ResourceActionMsg{Action: "Deleted network", Name: name}
 		}
 	case "delete_subnet":
@@ -815,10 +883,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting subnet %s", name)
 			err := network.DeleteSubnet(context.Background(), netClient, id)
 			if err != nil {
+				shared.Debugf("[action] delete subnet %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Delete subnet", Name: name, Err: err}
 			}
+			shared.Debugf("[action] deleted subnet %s", name)
 			return shared.ResourceActionMsg{Action: "Deleted subnet", Name: name}
 		}
 	case "delete_sg":
@@ -826,10 +897,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting security group %s", name)
 			err := network.DeleteSecurityGroup(context.Background(), netClient, id)
 			if err != nil {
+				shared.Debugf("[action] delete security group %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Delete security group", Name: name, Err: err}
 			}
+			shared.Debugf("[action] deleted security group %s", name)
 			return shared.ResourceActionMsg{Action: "Deleted security group", Name: name}
 		}
 	case "delete_sg_rule":
@@ -837,10 +911,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting security group rule from %s", name)
 			err := network.DeleteSecurityGroupRule(context.Background(), netClient, id)
 			if err != nil {
+				shared.Debugf("[action] delete security group rule from %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Delete rule", Name: name, Err: err}
 			}
+			shared.Debugf("[action] deleted security group rule from %s", name)
 			return shared.ResourceActionMsg{Action: "Deleted rule from", Name: name}
 		}
 	case "delete_lb":
@@ -848,20 +925,26 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting load balancer %s", name)
 			err := loadbalancer.DeleteLoadBalancer(context.Background(), lbClient, id)
 			if err != nil {
+				shared.Debugf("[action] delete load balancer %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Delete LB", Name: name, Err: err}
 			}
+			shared.Debugf("[action] deleted load balancer %s", name)
 			return shared.ResourceActionMsg{Action: "Deleted LB", Name: name}
 		}
 	case "delete_keypair":
 		computeC := m.client.Compute
 		name := action.ServerID // keypair name is stored in ServerID
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting keypair %s", name)
 			err := compute.DeleteKeyPair(context.Background(), computeC, name)
 			if err != nil {
+				shared.Debugf("[action] delete keypair %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Delete keypair", Name: name, Err: err}
 			}
+			shared.Debugf("[action] deleted keypair %s", name)
 			return shared.ResourceActionMsg{Action: "Deleted keypair", Name: name}
 		}
 	case "delete_image":
@@ -869,10 +952,13 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		id := action.ServerID
 		name := action.Name
 		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting image %s", name)
 			err := image.DeleteImage(context.Background(), imgClient, id)
 			if err != nil {
+				shared.Debugf("[action] delete image %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Delete image", Name: name, Err: err}
 			}
+			shared.Debugf("[action] deleted image %s", name)
 			return shared.ResourceActionMsg{Action: "Deleted image", Name: name}
 		}
 	case "deactivate_image":

@@ -625,10 +625,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.err = ""
 	client := m.computeClient
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[servercreate] creating server %q", name)
 		srv, err := compute.CreateServerWithOpts(context.Background(), client, createOpts)
 		if err != nil {
+			shared.Debugf("[servercreate] error creating server %q: %v", name, err)
 			return serverCreateErrMsg{err: err}
 		}
+		shared.Debugf("[servercreate] created server %q (id=%s)", name, srv.ID)
 		return serverCreatedMsg{server: srv}
 	})
 }

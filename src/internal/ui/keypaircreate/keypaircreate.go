@@ -467,10 +467,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	if publicKey != "" {
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			shared.Debugf("[keypaircreate] importing keypair %q", name)
 			kp, err := compute.ImportKeyPair(context.Background(), client, name, publicKey)
 			if err != nil {
+				shared.Debugf("[keypaircreate] error importing keypair %q: %v", name, err)
 				return keypairCreateErrMsg{err: err}
 			}
+			shared.Debugf("[keypaircreate] imported keypair %q", name)
 			return keypairCreatedMsg{kp: kp}
 		})
 	}
@@ -478,10 +481,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 	algo := kt.algorithm
 	keySize := kt.keySize
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		shared.Debugf("[keypaircreate] generating keypair %q (algo=%s)", name, algo)
 		kp, err := compute.GenerateAndImportKeyPair(context.Background(), client, name, algo, keySize)
 		if err != nil {
+			shared.Debugf("[keypaircreate] error generating keypair %q: %v", name, err)
 			return keypairCreateErrMsg{err: err}
 		}
+		shared.Debugf("[keypaircreate] generated keypair %q", name)
 		return keypairCreatedMsg{kp: kp}
 	})
 }
