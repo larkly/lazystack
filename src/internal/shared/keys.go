@@ -181,8 +181,8 @@ var Keys = KeyMap{
 		key.WithHelp("ctrl+a", "attach"),
 	),
 	AssignFIP: key.NewBinding(
-		key.WithKeys("ctrl+b"),
-		key.WithHelp("ctrl+b", "assign floating IP"),
+		key.WithKeys("ctrl+u"),
+		key.WithHelp("ctrl+u", "assign floating IP"),
 	),
 	Detach: key.NewBinding(
 		key.WithKeys("ctrl+t"),

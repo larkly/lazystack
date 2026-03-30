@@ -162,7 +162,8 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+L` | Lock / unlock |
 | `Ctrl+W` | Rescue / unrescue |
 | `Ctrl+F` | Resize |
-| `Ctrl+A` | Assign floating IP |
+| `Ctrl+A` | Attach volume |
+| `Ctrl+U` | Assign floating IP |
 | `r` | Rename |
 | `Ctrl+G` | Rebuild with new image |
 | `Ctrl+S` | Create snapshot |
@@ -188,7 +189,8 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+W` | Rescue / unrescue |
 | `Ctrl+F` | Resize |
 | `Ctrl+Y` / `Ctrl+X` | Confirm / revert resize |
-| `Ctrl+A` | Assign floating IP |
+| `Ctrl+A` | Attach volume |
+| `Ctrl+U` | Assign floating IP |
 | `r` | Rename |
 | `Ctrl+G` | Rebuild with new image |
 | `Ctrl+S` | Create snapshot |

@@ -24,16 +24,16 @@ func TestServerDetailCtrlAOpensVolumePicker(t *testing.T) {
 	}
 }
 
-func TestServerDetailCtrlBOpensFIPPicker(t *testing.T) {
+func TestServerDetailCtrlUOpensFIPPicker(t *testing.T) {
 	m := newTestModel("dev", false)
 	m.client = &cloud.Client{}
 	m.view = viewServerDetail
 	m.serverDetail = testServerDetailWithServer("srv-1", "srv-1")
 
-	res, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'b', Mod: tea.ModCtrl}))
+	res, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'u', Mod: tea.ModCtrl}))
 	updated := res.(Model)
 	if !updated.fipPicker.Active {
-		t.Fatalf("fip picker should be active after ctrl+b on server detail")
+		t.Fatalf("fip picker should be active after ctrl+u on server detail")
 	}
 }
 
