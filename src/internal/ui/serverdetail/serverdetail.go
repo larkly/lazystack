@@ -244,6 +244,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case consoleLoadedMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] consoleLoadedMsg: %d chars", len(msg.output))
 		m.consoleLoading = false
 		m.consoleErr = ""
@@ -255,12 +258,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case consoleErrMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] consoleErrMsg: %v", msg.err)
 		m.consoleLoading = false
 		m.consoleErr = msg.err.Error()
 		return m, nil
 
 	case actionsLoadedMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] actionsLoadedMsg: %d actions", len(msg.actions))
 		m.actionsLoading = false
 		m.actionsErr = ""
@@ -268,12 +277,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case actionsErrMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] actionsErrMsg: %v", msg.err)
 		m.actionsLoading = false
 		m.actionsErr = msg.err.Error()
 		return m, nil
 
 	case interfacesLoadedMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] interfacesLoadedMsg: %d ports", len(msg.ports))
 		m.interfacesLoading = false
 		m.interfacesErr = ""
@@ -281,6 +296,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case interfacesErrMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] interfacesErrMsg: %v", msg.err)
 		m.interfacesLoading = false
 		m.interfacesErr = msg.err.Error()
