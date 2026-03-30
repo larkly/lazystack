@@ -3,10 +3,14 @@ package app
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/loadbalancer"
@@ -20,14 +24,83 @@ import (
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
-	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
+	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
 	"github.com/larkly/lazystack/internal/volume"
-	"github.com/gophercloud/gophercloud/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
-	"charm.land/bubbletea/v2"
 )
+
+func resolveToggleAction(toggleAction, status string, locked bool) string {
+	switch toggleAction {
+	case "pause/unpause":
+		if status == "PAUSED" {
+			return "unpause"
+		}
+		return "pause"
+	case "suspend/resume":
+		if status == "SUSPENDED" {
+			return "resume"
+		}
+		return "suspend"
+	case "shelve/unshelve":
+		if status == "SHELVED" || status == "SHELVED_OFFLOADED" {
+			return "unshelve"
+		}
+		return "shelve"
+	case "stop/start":
+		if status == "SHUTOFF" {
+			return "start"
+		}
+		return "stop"
+	case "lock/unlock":
+		if locked {
+			return "unlock"
+		}
+		return "lock"
+	case "rescue/unrescue":
+		if status == "RESCUE" {
+			return "unrescue"
+		}
+		return "rescue"
+	default:
+		return toggleAction
+	}
+}
+
+func countBulkActions(servers []modal.ServerRef, fallbackAction string) map[string]int {
+	counts := make(map[string]int)
+	for _, s := range servers {
+		act := s.Action
+		if act == "" {
+			act = fallbackAction
+		}
+		counts[act]++
+	}
+	return counts
+}
+
+func formatActionCounts(counts map[string]int) string {
+	ordered := []string{"start", "stop", "pause", "unpause", "suspend", "resume", "shelve", "unshelve", "lock", "unlock", "rescue", "unrescue"}
+	seen := make(map[string]bool, len(counts))
+	var parts []string
+	for _, act := range ordered {
+		if n, ok := counts[act]; ok {
+			parts = append(parts, fmt.Sprintf("%s:%d", act, n))
+			seen[act] = true
+		}
+	}
+	var extra []string
+	for act := range counts {
+		if !seen[act] {
+			extra = append(extra, act)
+		}
+	}
+	sort.Strings(extra)
+	for _, act := range extra {
+		parts = append(parts, fmt.Sprintf("%s:%d", act, counts[act]))
+	}
+	return strings.Join(parts, ", ")
+}
 
 func (m Model) isSelectedServerLocked() bool {
 	if m.view == viewServerList && m.serverList.SelectionCount() > 0 {
@@ -204,54 +277,25 @@ func (m Model) openRebootConfirm(action string) (Model, tea.Cmd) {
 func (m Model) openToggleConfirm(action string) (Model, tea.Cmd) {
 	if m.view == viewServerList && m.serverList.SelectionCount() > 0 {
 		servers := m.serverList.SelectedServers()
-		// For toggle actions, determine the action from the first server's status
-		actualAction := action
-		if len(servers) > 0 {
-			status := servers[0].Status
-			switch action {
-			case "pause/unpause":
-				if status == "PAUSED" {
-					actualAction = "unpause"
-				} else {
-					actualAction = "pause"
-				}
-			case "suspend/resume":
-				if status == "SUSPENDED" {
-					actualAction = "resume"
-				} else {
-					actualAction = "suspend"
-				}
-			case "shelve/unshelve":
-				if status == "SHELVED" || status == "SHELVED_OFFLOADED" {
-					actualAction = "unshelve"
-				} else {
-					actualAction = "shelve"
-				}
-			case "stop/start":
-				if status == "SHUTOFF" {
-					actualAction = "start"
-				} else {
-					actualAction = "stop"
-				}
-			case "lock/unlock":
-				if len(servers) > 0 && servers[0].Locked {
-					actualAction = "unlock"
-				} else {
-					actualAction = "lock"
-				}
-			case "rescue/unrescue":
-				if status == "RESCUE" {
-					actualAction = "unrescue"
-				} else {
-					actualAction = "rescue"
-				}
-			}
-		}
 		refs := make([]modal.ServerRef, len(servers))
 		for i, s := range servers {
-			refs[i] = modal.ServerRef{ID: s.ID, Name: s.Name}
+			refs[i] = modal.ServerRef{
+				ID:     s.ID,
+				Name:   s.Name,
+				Action: resolveToggleAction(action, s.Status, s.Locked),
+			}
 		}
-		m.confirm = modal.NewBulkConfirm(actualAction, refs)
+		counts := countBulkActions(refs, action)
+		bulkAction := action
+		if len(refs) > 0 {
+			bulkAction = refs[0].Action
+		}
+		m.confirm = modal.NewBulkConfirm(bulkAction, refs)
+		if len(counts) > 1 {
+			summary := formatActionCounts(counts)
+			m.confirm.Title = fmt.Sprintf("Confirm mixed %s", action)
+			m.confirm.Body = fmt.Sprintf("Apply %s to %d servers (%s)?", action, len(refs), summary)
+		}
 		m.confirm.SetSize(m.width, m.height)
 		m.activeModal = modalConfirm
 		return m, nil
@@ -271,56 +315,16 @@ func (m Model) openToggleConfirm(action string) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Determine the actual action based on current state
-	actualAction := action
-	switch action {
-	case "pause/unpause":
-		if status == "PAUSED" {
-			actualAction = "unpause"
-		} else {
-			actualAction = "pause"
+	var locked bool
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			locked = s.Locked
 		}
-	case "suspend/resume":
-		if status == "SUSPENDED" {
-			actualAction = "resume"
-		} else {
-			actualAction = "suspend"
-		}
-	case "shelve/unshelve":
-		if status == "SHELVED" || status == "SHELVED_OFFLOADED" {
-			actualAction = "unshelve"
-		} else {
-			actualAction = "shelve"
-		}
-	case "stop/start":
-		if status == "SHUTOFF" {
-			actualAction = "start"
-		} else {
-			actualAction = "stop"
-		}
-	case "lock/unlock":
-		// Lock status needs to be checked from the server object
-		var locked bool
-		switch m.view {
-		case viewServerList:
-			if s := m.serverList.SelectedServer(); s != nil {
-				locked = s.Locked
-			}
-		case viewServerDetail:
-			locked = m.serverDetail.ServerLocked()
-		}
-		if locked {
-			actualAction = "unlock"
-		} else {
-			actualAction = "lock"
-		}
-	case "rescue/unrescue":
-		if status == "RESCUE" {
-			actualAction = "unrescue"
-		} else {
-			actualAction = "rescue"
-		}
+	case viewServerDetail:
+		locked = m.serverDetail.ServerLocked()
 	}
+	actualAction := resolveToggleAction(action, status, locked)
 
 	m.confirm = modal.NewConfirm(actualAction, id, name)
 	m.confirm.SetSize(m.width, m.height)
@@ -1010,16 +1014,23 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal.ConfirmAction) tea.Cmd {
 	targets := action.Servers
 	act := action.Action
+	counts := countBulkActions(targets, act)
 	return func() tea.Msg {
 		var errs []string
 		var passwords []string
 		for _, s := range targets {
+			serverAction := s.Action
+			if serverAction == "" {
+				serverAction = act
+			}
 			var err error
-			switch act {
+			switch serverAction {
 			case "delete":
 				err = compute.DeleteServer(context.Background(), client, s.ID)
 			case "soft reboot":
 				err = compute.RebootServer(context.Background(), client, s.ID, servers.SoftReboot)
+			case "hard reboot":
+				err = compute.RebootServer(context.Background(), client, s.ID, servers.HardReboot)
 			case "pause":
 				err = compute.PauseServer(context.Background(), client, s.ID)
 			case "unpause":
@@ -1050,22 +1061,26 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 				err = compute.UnrescueServer(context.Background(), client, s.ID)
 			}
 			if err != nil {
-				errs = append(errs, fmt.Sprintf("%s: %v", s.Name, err))
+				errs = append(errs, fmt.Sprintf("%s (%s): %v", s.Name, serverAction, err))
 			}
+		}
+		label := act
+		if len(counts) > 1 {
+			label = fmt.Sprintf("mixed action (%s)", formatActionCounts(counts))
 		}
 		if len(errs) > 0 {
 			return shared.ServerActionErrMsg{
-				Action: act,
+				Action: label,
 				Name:   fmt.Sprintf("%d servers", len(targets)),
 				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
 			}
 		}
 		msg := shared.ServerActionMsg{
-			Action: act,
+			Action: label,
 			Name:   fmt.Sprintf("%d servers", len(targets)),
 		}
 		if len(passwords) > 0 {
-			msg.Action = fmt.Sprintf("Rescue (passwords: %s)", strings.Join(passwords, ", "))
+			msg.Action = fmt.Sprintf("%s (passwords: %s)", label, strings.Join(passwords, ", "))
 		}
 		return msg
 	}
