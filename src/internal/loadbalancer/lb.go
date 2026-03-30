@@ -28,9 +28,11 @@ type LoadBalancer struct {
 type Listener struct {
 	ID            string
 	Name          string
+	Description   string
 	Protocol      string
 	ProtocolPort  int
 	DefaultPoolID string
+	ConnLimit     int
 }
 
 // Pool is a simplified pool.
@@ -172,9 +174,11 @@ func ListListeners(ctx context.Context, client *gophercloud.ServiceClient, lbID 
 			result = append(result, Listener{
 				ID:            l.ID,
 				Name:          l.Name,
+				Description:   l.Description,
 				Protocol:      l.Protocol,
 				ProtocolPort:  l.ProtocolPort,
 				DefaultPoolID: l.DefaultPoolID,
+				ConnLimit:     l.ConnLimit,
 			})
 		}
 		return true, nil
@@ -248,9 +252,11 @@ func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID
 	return &Listener{
 		ID:            l.ID,
 		Name:          l.Name,
+		Description:   l.Description,
 		Protocol:      l.Protocol,
 		ProtocolPort:  l.ProtocolPort,
 		DefaultPoolID: l.DefaultPoolID,
+		ConnLimit:     l.ConnLimit,
 	}, nil
 }
 
@@ -264,9 +270,11 @@ func DeleteListener(ctx context.Context, client *gophercloud.ServiceClient, id s
 }
 
 // UpdateListener updates a listener's name.
-func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id string, name *string) error {
+func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string, connLimit *int) error {
 	opts := listeners.UpdateOpts{
-		Name: name,
+		Name:        name,
+		Description: description,
+		ConnLimit:   connLimit,
 	}
 	_, err := listeners.Update(ctx, client, id, opts).Extract()
 	if err != nil {

@@ -34,7 +34,7 @@ const (
 
 var (
 	protocolOpts = []string{"TCP", "HTTP", "HTTPS", "UDP", "PROXY"}
-	lbMethodOpts = []string{"ROUND_ROBIN", "LEAST_CONNECTIONS", "SOURCE_IP"}
+	lbMethodOpts = []string{"ROUND_ROBIN", "LEAST_CONNECTIONS", "SOURCE_IP", "SOURCE_IP_PORT"}
 	monTypeOpts  = []string{"NONE", "HTTP", "HTTPS", "TCP", "PING"}
 )
 
