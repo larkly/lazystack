@@ -943,6 +943,8 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 				err = compute.DeleteServer(context.Background(), client, s.ID)
 			case "soft reboot":
 				err = compute.RebootServer(context.Background(), client, s.ID, servers.SoftReboot)
+			case "hard reboot":
+				err = compute.RebootServer(context.Background(), client, s.ID, servers.HardReboot)
 			case "pause":
 				err = compute.PauseServer(context.Background(), client, s.ID)
 			case "unpause":
@@ -992,7 +994,7 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 			Name:   fmt.Sprintf("%d servers", len(targets)),
 		}
 		if len(passwords) > 0 {
-			msg.Action = fmt.Sprintf("Rescue (passwords: %s)", strings.Join(passwords, ", "))
+			msg.Action = fmt.Sprintf("%s (passwords: %s)", label, strings.Join(passwords, ", "))
 		}
 		return msg
 	}
