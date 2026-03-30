@@ -1109,7 +1109,11 @@ func (m Model) openSSH() (Model, tea.Cmd) {
 		return m, nil
 	}
 	keyPath := ssh.FindKeyPath(keyName)
-	m.sshPrompt = sshprompt.New(name, floatingIPs, ipv6, ipv4, keyPath)
+	ignoreHostKeysDefault := false
+	if cfg := m.configView.Cfg(); cfg != nil {
+		ignoreHostKeysDefault = cfg.General.IgnoreSSHHostKeys
+	}
+	m.sshPrompt = sshprompt.New(name, floatingIPs, ipv6, ipv4, keyPath, ignoreHostKeysDefault)
 	m.sshPrompt.SetSize(m.width, m.height)
 	return m, m.sshPrompt.Init()
 }

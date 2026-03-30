@@ -8,10 +8,11 @@ import (
 
 // Options holds SSH connection parameters.
 type Options struct {
-	User    string
-	IP      string
-	KeyPath string
-	Debug   bool
+	User           string
+	IP             string
+	KeyPath        string
+	Debug          bool
+	IgnoreHostKeys bool
 }
 
 // FindKeyPath looks for a private key matching the given key pair name
@@ -68,6 +69,12 @@ func BuildArgs(opts Options) []string {
 	if opts.Debug {
 		args = append(args, "-v")
 	}
+	if opts.IgnoreHostKeys {
+		args = append(args,
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "UserKnownHostsFile=/dev/null",
+		)
+	}
 	if opts.KeyPath != "" {
 		args = append(args, "-i", opts.KeyPath)
 	}
@@ -80,6 +87,12 @@ func BuildCommandString(opts Options) string {
 	var parts []string
 	parts = append(parts, "ssh")
 	parts = append(parts, baseArgs()...)
+	if opts.IgnoreHostKeys {
+		parts = append(parts,
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "UserKnownHostsFile=/dev/null",
+		)
+	}
 	if opts.KeyPath != "" {
 		parts = append(parts, "-i", opts.KeyPath)
 	}

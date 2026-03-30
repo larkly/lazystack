@@ -15,6 +15,9 @@ func TestDefaults(t *testing.T) {
 	if d.General.CheckForUpdates != true {
 		t.Error("CheckForUpdates should default to true")
 	}
+	if d.General.IgnoreSSHHostKeys {
+		t.Error("IgnoreSSHHostKeys should default to false")
+	}
 	if d.Colors.Primary != "#7D56F4" {
 		t.Errorf("Primary = %s, want #7D56F4", d.Colors.Primary)
 	}
@@ -136,5 +139,19 @@ func TestBoolExplicitFalse(t *testing.T) {
 	}
 	if loaded.General.CheckForUpdates {
 		t.Error("CheckForUpdates should be false when explicitly set to false")
+	}
+}
+
+func TestLoadIgnoreSSHHostKeysExplicitTrue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte("general:\n  ignore_ssh_host_keys: true\n"), 0o644)
+
+	loaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !loaded.General.IgnoreSSHHostKeys {
+		t.Error("IgnoreSSHHostKeys should be true when explicitly set")
 	}
 }
