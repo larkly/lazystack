@@ -7,15 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/network"
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/volume"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/volume"
 )
 
 type focusPane int
@@ -34,6 +34,15 @@ const (
 	narrowThreshold = 80
 	maxConsoleLines = 500
 )
+
+func shouldPollDetailAPIs(status string) bool {
+	switch status {
+	case "SHUTOFF", "SHELVED", "SHELVED_OFFLOADED":
+		return false
+	default:
+		return true
+	}
+}
 
 type serverDetailLoadedMsg struct {
 	server *compute.Server
@@ -71,7 +80,6 @@ type volumeInfoLoadedMsg struct {
 	volumes map[string]*volume.Volume
 }
 
-
 // Model is the server detail dashboard view.
 type Model struct {
 	client          *gophercloud.ServiceClient
@@ -98,10 +106,10 @@ type Model struct {
 	actionsLoading bool
 	actionsErr     string
 
-	interfaces       []network.Port
-	interfacesScroll int
+	interfaces        []network.Port
+	interfacesScroll  int
 	interfacesLoading bool
-	interfacesErr    string
+	interfacesErr     string
 
 	volumeInfo   map[string]*volume.Volume // volume ID → full volume data
 	volumeScroll int
@@ -143,6 +151,13 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, m.fetchInterfaces())
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m Model) canPollDetailAPIs() bool {
+	if m.server == nil {
+		return true
+	}
+	return shouldPollDetailAPIs(m.server.Status)
 }
 
 // ServerID returns the current server ID.
@@ -229,6 +244,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case consoleLoadedMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] consoleLoadedMsg: %d chars", len(msg.output))
 		m.consoleLoading = false
 		m.consoleErr = ""
@@ -240,12 +258,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case consoleErrMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] consoleErrMsg: %v", msg.err)
 		m.consoleLoading = false
 		m.consoleErr = msg.err.Error()
 		return m, nil
 
 	case actionsLoadedMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] actionsLoadedMsg: %d actions", len(msg.actions))
 		m.actionsLoading = false
 		m.actionsErr = ""
@@ -253,12 +277,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case actionsErrMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] actionsErrMsg: %v", msg.err)
 		m.actionsLoading = false
 		m.actionsErr = msg.err.Error()
 		return m, nil
 
 	case interfacesLoadedMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] interfacesLoadedMsg: %d ports", len(msg.ports))
 		m.interfacesLoading = false
 		m.interfacesErr = ""
@@ -266,6 +296,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case interfacesErrMsg:
+		if !m.canPollDetailAPIs() {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] interfacesErrMsg: %v", msg.err)
 		m.interfacesLoading = false
 		m.interfacesErr = msg.err.Error()
@@ -282,10 +315,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			shared.Debugf("[serverdetail] tick skipped (loading)")
 			return m, nil
 		}
-		shared.Debugf("[serverdetail] tick fetching")
-		cmds := []tea.Cmd{m.fetchServer(), m.fetchConsole(), m.fetchActions()}
-		if m.networkClient != nil {
-			cmds = append(cmds, m.fetchInterfaces())
+		cmds := []tea.Cmd{m.fetchServer()}
+		if m.canPollDetailAPIs() {
+			shared.Debugf("[serverdetail] tick fetching full detail")
+			cmds = append(cmds, m.fetchConsole(), m.fetchActions())
+			if m.networkClient != nil {
+				cmds = append(cmds, m.fetchInterfaces())
+			}
+		} else {
+			shared.Debugf("[serverdetail] tick idling detail APIs for status %s", m.server.Status)
+			m.consoleLoading = false
+			m.actionsLoading = false
+			m.interfacesLoading = false
+			m.consoleErr = ""
+			m.actionsErr = ""
+			m.interfacesErr = ""
 		}
 		return m, tea.Batch(cmds...)
 
@@ -690,7 +734,7 @@ func (m Model) panelTitle(pane focusPane) string {
 	case focusVolumes:
 		return titleStyle.Render("Volumes")
 	case focusConsole:
-		t := titleStyle.Render("Console Log")
+		t := titleStyle.Render("Console Log (L)")
 		if m.consoleLoading {
 			t += " " + m.spinner.View()
 		}
@@ -1301,17 +1345,26 @@ func (m Model) fetchVolumeInfo(attachments []compute.VolumeAttachment) tea.Cmd {
 	}
 }
 
-
 // ForceRefresh triggers a manual reload of all data sources.
 func (m *Model) ForceRefresh() tea.Cmd {
 	shared.Debugf("[serverdetail] ForceRefresh()")
 	m.loading = true
-	m.consoleLoading = true
-	m.actionsLoading = true
-	m.interfacesLoading = true
-	cmds := []tea.Cmd{m.spinner.Tick, m.fetchServer(), m.fetchConsole(), m.fetchActions()}
-	if m.networkClient != nil {
-		cmds = append(cmds, m.fetchInterfaces())
+	cmds := []tea.Cmd{m.spinner.Tick, m.fetchServer()}
+	if m.canPollDetailAPIs() {
+		m.consoleLoading = true
+		m.actionsLoading = true
+		m.interfacesLoading = m.networkClient != nil
+		cmds = append(cmds, m.fetchConsole(), m.fetchActions())
+		if m.networkClient != nil {
+			cmds = append(cmds, m.fetchInterfaces())
+		}
+	} else {
+		m.consoleLoading = false
+		m.actionsLoading = false
+		m.interfacesLoading = false
+		m.consoleErr = ""
+		m.actionsErr = ""
+		m.interfacesErr = ""
 	}
 	return tea.Batch(cmds...)
 }
