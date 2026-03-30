@@ -27,6 +27,9 @@ func TestDefaults(t *testing.T) {
 	if d.Keybindings["config"] != "ctrl+k" {
 		t.Errorf("config binding = %s, want ctrl+k", d.Keybindings["config"])
 	}
+	if d.Keybindings["assign_fip"] != "ctrl+b" {
+		t.Errorf("assign_fip binding = %s, want ctrl+b", d.Keybindings["assign_fip"])
+	}
 }
 
 func TestSaveAndLoad(t *testing.T) {

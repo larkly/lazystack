@@ -732,7 +732,7 @@ func (m Model) Hints() string {
 	if len(m.selected) > 0 {
 		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^o reboot • esc clear • ? help", len(m.selected))
 	}
-	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • ^o reboot • / filter • ? help"
+	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • ^o reboot • ^a attach volume • ^b assign FIP • / filter • ? help"
 }
 
 // SelectedServers returns all selected servers, or the cursor server if none selected.
