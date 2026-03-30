@@ -164,13 +164,16 @@ func DeleteNetwork(ctx context.Context, client *gophercloud.ServiceClient, id st
 
 // SubnetCreateOpts holds options for creating a subnet.
 type SubnetCreateOpts struct {
-	NetworkID    string
-	Name         string
-	CIDR         string
-	IPVersion    int
-	GatewayIP    string
-	EnableDHCP   bool
-	SubnetPoolID string
+	NetworkID       string
+	Name            string
+	CIDR            string
+	IPVersion       int
+	GatewayIP       string
+	EnableDHCP      bool
+	SubnetPoolID    string
+	PrefixLen       int
+	IPv6AddressMode string
+	IPv6RAMode      string
 }
 
 // CreateSubnet creates a new subnet.
@@ -187,6 +190,15 @@ func CreateSubnet(ctx context.Context, client *gophercloud.ServiceClient, opts S
 	}
 	if opts.SubnetPoolID != "" {
 		createOpts.SubnetPoolID = opts.SubnetPoolID
+	}
+	if opts.PrefixLen > 0 {
+		createOpts.Prefixlen = opts.PrefixLen
+	}
+	if opts.IPv6AddressMode != "" {
+		createOpts.IPv6AddressMode = opts.IPv6AddressMode
+	}
+	if opts.IPv6RAMode != "" {
+		createOpts.IPv6RAMode = opts.IPv6RAMode
 	}
 	r := subnets.Create(ctx, client, createOpts)
 	s, err := r.Extract()
