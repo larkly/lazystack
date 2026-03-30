@@ -438,7 +438,7 @@ func (m Model) openLBListenerEdit() (Model, tea.Cmd) {
 	if l == nil {
 		return m, nil
 	}
-	m.lbListenerCreate = lblistenercreate.NewEdit(m.client.LoadBalancer, l.ID, l.Name, m.lbDetail.LBName())
+	m.lbListenerCreate = lblistenercreate.NewEdit(m.client.LoadBalancer, l.ID, l.Name, l.Description, l.ConnLimit, m.lbDetail.LBName())
 	m.lbListenerCreate.SetSize(m.width, m.height)
 	return m, m.lbListenerCreate.Init()
 }

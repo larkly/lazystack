@@ -17,11 +17,13 @@ import (
 
 const (
 	fieldName     = 0
-	fieldProtocol = 1
-	fieldPort     = 2
-	fieldSubmit   = 3
-	fieldCancel   = 4
-	numFields     = 5
+	fieldProtocol  = 1
+	fieldPort      = 2
+	fieldDesc      = 3
+	fieldConnLimit = 4
+	fieldSubmit    = 5
+	fieldCancel    = 6
+	numFields      = 7
 )
 
 var protocolOpts = []string{"TCP", "HTTP", "HTTPS", "UDP"}
@@ -39,6 +41,8 @@ type Model struct {
 	nameInput        textinput.Model
 	selectedProtocol int
 	portInput        textinput.Model
+	descInput        textinput.Model
+	connLimitInput   textinput.Model
 
 	// Edit mode
 	editMode   bool
@@ -67,22 +71,36 @@ func New(client *gophercloud.ServiceClient, lbID, lbName string) Model {
 	pi.CharLimit = 5
 	pi.SetWidth(10)
 
+	di := textinput.New()
+	di.Prompt = ""
+	di.Placeholder = "description (optional)"
+	di.CharLimit = 255
+	di.SetWidth(30)
+
+	ci := textinput.New()
+	ci.Prompt = ""
+	ci.Placeholder = "unlimited"
+	ci.CharLimit = 7
+	ci.SetWidth(10)
+
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	return Model{
-		Active:  true,
-		client:  client,
-		lbID:    lbID,
-		lbName:  lbName,
-		nameInput: ni,
-		portInput: pi,
-		spinner:   s,
+		Active:         true,
+		client:         client,
+		lbID:           lbID,
+		lbName:         lbName,
+		nameInput:      ni,
+		portInput:      pi,
+		descInput:      di,
+		connLimitInput: ci,
+		spinner:        s,
 	}
 }
 
-// NewEdit creates an edit form for an existing listener (name only).
-func NewEdit(client *gophercloud.ServiceClient, listenerID, currentName, lbName string) Model {
+// NewEdit creates an edit form for an existing listener.
+func NewEdit(client *gophercloud.ServiceClient, listenerID, currentName, currentDesc string, currentConnLimit int, lbName string) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "listener name"
@@ -96,18 +114,36 @@ func NewEdit(client *gophercloud.ServiceClient, listenerID, currentName, lbName 
 	pi.CharLimit = 5
 	pi.SetWidth(10)
 
+	di := textinput.New()
+	di.Prompt = ""
+	di.Placeholder = "description (optional)"
+	di.CharLimit = 255
+	di.SetWidth(30)
+	di.SetValue(currentDesc)
+
+	ci := textinput.New()
+	ci.Prompt = ""
+	ci.Placeholder = "unlimited"
+	ci.CharLimit = 7
+	ci.SetWidth(10)
+	if currentConnLimit > 0 {
+		ci.SetValue(strconv.Itoa(currentConnLimit))
+	}
+
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	return Model{
-		Active:     true,
-		client:     client,
-		lbName:     lbName,
-		editMode:   true,
-		listenerID: listenerID,
-		nameInput:  ni,
-		portInput:  pi,
-		spinner:    s,
+		Active:         true,
+		client:         client,
+		lbName:         lbName,
+		editMode:       true,
+		listenerID:     listenerID,
+		nameInput:      ni,
+		portInput:      pi,
+		descInput:      di,
+		connLimitInput: ci,
+		spinner:        s,
 	}
 }
 
@@ -154,20 +190,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) isTextInput() bool {
-	return m.focusField == fieldName || (!m.editMode && m.focusField == fieldPort)
-}
-
-func (m Model) effectiveNumFields() int {
-	if m.editMode {
-		return 3 // name, submit, cancel
+	switch m.focusField {
+	case fieldName, fieldDesc, fieldConnLimit:
+		return true
+	case fieldPort:
+		return !m.editMode
 	}
-	return numFields
+	return false
 }
 
 func (m *Model) advanceFocus(dir int) {
 	for {
 		m.focusField = (m.focusField + dir + numFields) % numFields
-		// In edit mode, skip protocol and port
+		// In edit mode, skip protocol and port (not updatable)
 		if m.editMode && (m.focusField == fieldProtocol || m.focusField == fieldPort) {
 			continue
 		}
@@ -200,6 +235,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.nameInput, cmd = m.nameInput.Update(msg)
 			case fieldPort:
 				m.portInput, cmd = m.portInput.Update(msg)
+			case fieldDesc:
+				m.descInput, cmd = m.descInput.Update(msg)
+			case fieldConnLimit:
+				m.connLimitInput, cmd = m.connLimitInput.Update(msg)
 			}
 			return m, cmd
 		}
@@ -254,11 +293,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m *Model) updateFocus() {
 	m.nameInput.Blur()
 	m.portInput.Blur()
+	m.descInput.Blur()
+	m.connLimitInput.Blur()
 	switch m.focusField {
 	case fieldName:
 		m.nameInput.Focus()
 	case fieldPort:
 		m.portInput.Focus()
+	case fieldDesc:
+		m.descInput.Focus()
+	case fieldConnLimit:
+		m.connLimitInput.Focus()
 	}
 }
 
@@ -269,13 +314,24 @@ func (m Model) submit() (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	desc := strings.TrimSpace(m.descInput.Value())
+	var connLimit *int
+	if cl := strings.TrimSpace(m.connLimitInput.Value()); cl != "" {
+		v, err := strconv.Atoi(cl)
+		if err != nil || v < 1 {
+			m.err = "Connection limit must be a positive number"
+			return m, nil
+		}
+		connLimit = &v
+	}
+
 	if m.editMode {
 		m.submitting = true
 		m.err = ""
 		client := m.client
 		id := m.listenerID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdateListener(context.Background(), client, id, &name)
+			err := loadbalancer.UpdateListener(context.Background(), client, id, &name, &desc, connLimit)
 			if err != nil {
 				return listenerCreateErrMsg{err: err}
 			}
@@ -358,6 +414,20 @@ func (m Model) View() string {
 		}
 		rows = append(rows, label+m.portInput.View())
 	}
+
+	// Description
+	label = labelStyle.Render("Description")
+	if m.focusField == fieldDesc {
+		label = focusStyle.Bold(true).Width(12).Render("Description")
+	}
+	rows = append(rows, label+m.descInput.View())
+
+	// Connection Limit
+	label = labelStyle.Render("Conn Limit")
+	if m.focusField == fieldConnLimit {
+		label = focusStyle.Bold(true).Width(12).Render("Conn Limit")
+	}
+	rows = append(rows, label+m.connLimitInput.View())
 
 	// Error
 	if m.err != "" {
