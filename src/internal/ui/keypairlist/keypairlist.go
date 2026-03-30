@@ -54,6 +54,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[keypairlist] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchKeypairs())
 }
 
@@ -61,6 +62,7 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case keypairsLoadedMsg:
+		shared.Debugf("[keypairlist] loaded %d keypairs", len(msg.keypairs))
 		var cursorName string
 		if m.cursor >= 0 && m.cursor < len(m.pairs) {
 			cursorName = m.pairs[m.cursor].Name
@@ -83,14 +85,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case keypairsErrMsg:
+		shared.Debugf("[keypairlist] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[keypairlist] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[keypairlist] tick fetching")
 		return m, m.fetchKeypairs()
 
 	case spinner.TickMsg:
@@ -281,16 +286,20 @@ func (m Model) SelectedKeyPair() *compute.KeyPair {
 func (m Model) fetchKeypairs() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
+		shared.Debugf("[keypairlist] fetch start")
 		kps, err := compute.ListKeyPairs(context.Background(), client)
 		if err != nil {
+			shared.Debugf("[keypairlist] fetch error: %v", err)
 			return keypairsErrMsg{err: err}
 		}
+		shared.Debugf("[keypairlist] fetch done, count=%d", len(kps))
 		return keypairsLoadedMsg{keypairs: kps}
 	}
 }
 
 // ForceRefresh triggers a manual reload of the keypair list.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[keypairlist] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchKeypairs())
 }

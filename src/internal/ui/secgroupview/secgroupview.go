@@ -106,6 +106,7 @@ func (m *Model) SetComputeClient(client *gophercloud.ServiceClient) {
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[secgroupview] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchGroups())
 }
 
@@ -190,6 +191,7 @@ func (m Model) InRules() bool {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sgLoadedMsg:
+		shared.Debugf("[secgroupview] sgLoadedMsg: %d groups", len(msg.groups))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.groups) {
 			cursorID = m.groups[m.cursor].ID
@@ -223,11 +225,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case sgErrMsg:
+		shared.Debugf("[secgroupview] sgErrMsg: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case detailLoadedMsg:
+		shared.Debugf("[secgroupview] detailLoadedMsg: %d servers, %d ports", len(msg.servers), len(msg.ports))
 		// Only apply if this is still the selected SG
 		if sg := m.selectedSG(); sg != nil && sg.ID == msg.sgID {
 			m.detailLoading = false
@@ -240,6 +244,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case detailErrMsg:
+		shared.Debugf("[secgroupview] detailErrMsg: %v", msg.err)
 		if sg := m.selectedSG(); sg != nil && sg.ID == msg.sgID {
 			m.detailLoading = false
 			m.detailErr = msg.err.Error()
@@ -248,8 +253,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[secgroupview] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[secgroupview] tick fetching")
 		cmds := []tea.Cmd{m.fetchGroups()}
 		if sg := m.selectedSG(); sg != nil {
 			cmds = append(cmds, m.fetchDetail(sg.ID))
@@ -1190,6 +1197,7 @@ func (m Model) renderActionBar() string {
 
 // ForceRefresh triggers a manual reload.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[secgroupview] ForceRefresh()")
 	m.loading = true
 	cmds := []tea.Cmd{m.spinner.Tick, m.fetchGroups()}
 	if sg := m.selectedSG(); sg != nil {
@@ -1254,10 +1262,13 @@ func (m Model) Hints() string {
 func (m Model) fetchGroups() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
+		shared.Debugf("[secgroupview] fetchGroups start")
 		groups, err := network.ListSecurityGroups(context.Background(), client)
 		if err != nil {
+			shared.Debugf("[secgroupview] fetchGroups error: %v", err)
 			return sgErrMsg{err: err}
 		}
+		shared.Debugf("[secgroupview] fetchGroups done: %d groups", len(groups))
 		return sgLoadedMsg{groups: groups}
 	}
 }
@@ -1266,12 +1277,15 @@ func (m Model) fetchDetail(sgID string) tea.Cmd {
 	networkClient := m.networkClient
 	computeClient := m.computeClient
 	return func() tea.Msg {
+		shared.Debugf("[secgroupview] fetchDetail start")
 		if computeClient == nil {
+			shared.Debugf("[secgroupview] fetchDetail done (no compute client)")
 			return detailLoadedMsg{sgID: sgID}
 		}
 
 		fetchedPorts, err := network.ListPortsBySecurityGroup(context.Background(), networkClient, sgID)
 		if err != nil {
+			shared.Debugf("[secgroupview] fetchDetail error: %v", err)
 			return detailErrMsg{sgID: sgID, err: err}
 		}
 
@@ -1283,6 +1297,7 @@ func (m Model) fetchDetail(sgID string) tea.Cmd {
 		}
 
 		if len(deviceIDs) == 0 {
+			shared.Debugf("[secgroupview] fetchDetail done: 0 servers, %d ports", len(fetchedPorts))
 			return detailLoadedMsg{sgID: sgID, ports: fetchedPorts}
 		}
 
@@ -1315,6 +1330,7 @@ func (m Model) fetchDetail(sgID string) tea.Cmd {
 			return fetchedPorts[i].MACAddress < fetchedPorts[j].MACAddress
 		})
 
+		shared.Debugf("[secgroupview] fetchDetail done: %d servers, %d ports", len(refs), len(fetchedPorts))
 		return detailLoadedMsg{sgID: sgID, servers: refs, ports: fetchedPorts, serverNames: srvNames}
 	}
 }

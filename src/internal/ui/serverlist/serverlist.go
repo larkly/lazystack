@@ -83,6 +83,7 @@ func New(client, imageClient *gophercloud.ServiceClient, refreshInterval time.Du
 
 // Init starts the initial server fetch and auto-refresh ticker.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[serverlist] Init()")
 	return tea.Batch(
 		m.spinner.Tick,
 		m.fetchServers(),
@@ -105,6 +106,7 @@ func (m Model) SelectedServer() *compute.Server {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case serversLoadedMsg:
+		shared.Debugf("[serverlist] serversLoadedMsg: %d servers", len(msg.servers))
 		m.loading = false
 		m.servers = msg.servers
 		// Apply cached image names
@@ -136,14 +138,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case serversErrMsg:
+		shared.Debugf("[serverlist] serversErrMsg: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[serverlist] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[serverlist] tick fetching")
 		return m, m.fetchServers()
 
 	case shared.RefreshServersMsg:
@@ -674,10 +679,13 @@ func formatAge(created time.Time) string {
 func (m Model) fetchServers() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
+		shared.Debugf("[serverlist] fetchServers start")
 		servers, err := compute.ListServers(context.Background(), client)
 		if err != nil {
+			shared.Debugf("[serverlist] fetchServers error: %v", err)
 			return serversErrMsg{err: err}
 		}
+		shared.Debugf("[serverlist] fetchServers done: %d servers", len(servers))
 		return serversLoadedMsg{servers: servers}
 	}
 }
@@ -765,6 +773,7 @@ func (m Model) ServerNames() map[string]bool {
 
 // ForceRefresh triggers a manual reload of the server list.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[serverlist] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchServers())
 }

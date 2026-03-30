@@ -132,6 +132,7 @@ func New(client, networkClient, blockClient *gophercloud.ServiceClient, serverID
 
 // Init fetches all data sources.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[serverdetail] Init()")
 	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		m.fetchServer(),
@@ -197,6 +198,7 @@ func (m Model) ServerStatus() string {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case serverDetailLoadedMsg:
+		shared.Debugf("[serverdetail] serverDetailLoadedMsg")
 		m.loading = false
 		if m.pendingAction != "" && msg.server != nil {
 			if msg.server.Status != "VERIFY_RESIZE" {
@@ -221,11 +223,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case serverDetailErrMsg:
+		shared.Debugf("[serverdetail] serverDetailErrMsg: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case consoleLoadedMsg:
+		shared.Debugf("[serverdetail] consoleLoadedMsg: %d chars", len(msg.output))
 		m.consoleLoading = false
 		m.consoleErr = ""
 		m.consoleLines = strings.Split(msg.output, "\n")
@@ -236,28 +240,33 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case consoleErrMsg:
+		shared.Debugf("[serverdetail] consoleErrMsg: %v", msg.err)
 		m.consoleLoading = false
 		m.consoleErr = msg.err.Error()
 		return m, nil
 
 	case actionsLoadedMsg:
+		shared.Debugf("[serverdetail] actionsLoadedMsg: %d actions", len(msg.actions))
 		m.actionsLoading = false
 		m.actionsErr = ""
 		m.actions = msg.actions
 		return m, nil
 
 	case actionsErrMsg:
+		shared.Debugf("[serverdetail] actionsErrMsg: %v", msg.err)
 		m.actionsLoading = false
 		m.actionsErr = msg.err.Error()
 		return m, nil
 
 	case interfacesLoadedMsg:
+		shared.Debugf("[serverdetail] interfacesLoadedMsg: %d ports", len(msg.ports))
 		m.interfacesLoading = false
 		m.interfacesErr = ""
 		m.interfaces = msg.ports
 		return m, nil
 
 	case interfacesErrMsg:
+		shared.Debugf("[serverdetail] interfacesErrMsg: %v", msg.err)
 		m.interfacesLoading = false
 		m.interfacesErr = msg.err.Error()
 		return m, nil
@@ -270,8 +279,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[serverdetail] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[serverdetail] tick fetching")
 		cmds := []tea.Cmd{m.fetchServer(), m.fetchConsole(), m.fetchActions()}
 		if m.networkClient != nil {
 			cmds = append(cmds, m.fetchInterfaces())
@@ -1220,10 +1231,13 @@ func (m Model) fetchServer() tea.Cmd {
 	client := m.client
 	id := m.serverID
 	return func() tea.Msg {
+		shared.Debugf("[serverdetail] fetchServer start")
 		srv, err := compute.GetServer(context.Background(), client, id)
 		if err != nil {
+			shared.Debugf("[serverdetail] fetchServer error: %v", err)
 			return serverDetailErrMsg{err: err}
 		}
+		shared.Debugf("[serverdetail] fetchServer done")
 		return serverDetailLoadedMsg{server: srv}
 	}
 }
@@ -1232,10 +1246,13 @@ func (m Model) fetchConsole() tea.Cmd {
 	client := m.client
 	id := m.serverID
 	return func() tea.Msg {
+		shared.Debugf("[serverdetail] fetchConsole start")
 		output, err := compute.GetConsoleOutput(context.Background(), client, id, maxConsoleLines)
 		if err != nil {
+			shared.Debugf("[serverdetail] fetchConsole error: %v", err)
 			return consoleErrMsg{err: err}
 		}
+		shared.Debugf("[serverdetail] fetchConsole done: %d chars", len(output))
 		return consoleLoadedMsg{output: output}
 	}
 }
@@ -1244,10 +1261,13 @@ func (m Model) fetchActions() tea.Cmd {
 	client := m.client
 	id := m.serverID
 	return func() tea.Msg {
+		shared.Debugf("[serverdetail] fetchActions start")
 		actions, err := compute.ListActions(context.Background(), client, id)
 		if err != nil {
+			shared.Debugf("[serverdetail] fetchActions error: %v", err)
 			return actionsErrMsg{err: err}
 		}
+		shared.Debugf("[serverdetail] fetchActions done: %d actions", len(actions))
 		return actionsLoadedMsg{actions: actions}
 	}
 }
@@ -1256,10 +1276,13 @@ func (m Model) fetchInterfaces() tea.Cmd {
 	client := m.networkClient
 	id := m.serverID
 	return func() tea.Msg {
+		shared.Debugf("[serverdetail] fetchInterfaces start")
 		ports, err := network.ListPortsByDevice(context.Background(), client, id)
 		if err != nil {
+			shared.Debugf("[serverdetail] fetchInterfaces error: %v", err)
 			return interfacesErrMsg{err: err}
 		}
+		shared.Debugf("[serverdetail] fetchInterfaces done: %d ports", len(ports))
 		return interfacesLoadedMsg{ports: ports}
 	}
 }
@@ -1281,6 +1304,7 @@ func (m Model) fetchVolumeInfo(attachments []compute.VolumeAttachment) tea.Cmd {
 
 // ForceRefresh triggers a manual reload of all data sources.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[serverdetail] ForceRefresh()")
 	m.loading = true
 	m.consoleLoading = true
 	m.actionsLoading = true

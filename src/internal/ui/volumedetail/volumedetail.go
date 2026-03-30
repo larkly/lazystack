@@ -55,6 +55,7 @@ func New(client, computeClient *gophercloud.ServiceClient, volumeID string) Mode
 
 // Init fetches the volume details.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[volumedetail] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchVolume())
 }
 
@@ -78,6 +79,7 @@ func (m Model) SelectedVolumeName() string {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case volumeDetailLoadedMsg:
+		shared.Debugf("[volumedetail] loaded volume %s", m.volumeID)
 		m.loading = false
 		m.volume = msg.vol
 		m.serverName = msg.serverName
@@ -85,14 +87,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case volumeDetailErrMsg:
+		shared.Debugf("[volumedetail] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[volumedetail] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[volumedetail] tick fetching")
 		return m, m.fetchVolume()
 
 	case spinner.TickMsg:
@@ -268,8 +273,10 @@ func (m Model) fetchVolume() tea.Cmd {
 	computeClient := m.computeClient
 	id := m.volumeID
 	return func() tea.Msg {
+		shared.Debugf("[volumedetail] fetch start id=%s", id)
 		vol, err := volume.GetVolume(context.Background(), client, id)
 		if err != nil {
+			shared.Debugf("[volumedetail] fetch error: %v", err)
 			return volumeDetailErrMsg{err: err}
 		}
 		serverName := ""
@@ -279,12 +286,14 @@ func (m Model) fetchVolume() tea.Cmd {
 				serverName = srv.Name
 			}
 		}
+		shared.Debugf("[volumedetail] fetch done id=%s", id)
 		return volumeDetailLoadedMsg{vol: vol, serverName: serverName}
 	}
 }
 
 // ForceRefresh triggers a manual reload of the volume detail.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[volumedetail] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchVolume())
 }

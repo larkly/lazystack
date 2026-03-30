@@ -103,6 +103,7 @@ func (m *Model) SetComputeClient(client *gophercloud.ServiceClient) {
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[networkview] Init()")
 	return tea.Batch(m.spinner.Tick, m.fetchNetworks())
 }
 
@@ -190,6 +191,7 @@ func (m Model) networkSubnets() []network.Subnet {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case networksLoadedMsg:
+		shared.Debugf("[networkview] networksLoadedMsg: %d networks", len(msg.networks))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.networks) {
 			cursorID = m.networks[m.cursor].ID
@@ -221,11 +223,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case networksErrMsg:
+		shared.Debugf("[networkview] networksErrMsg: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case detailLoadedMsg:
+		shared.Debugf("[networkview] detailLoadedMsg: %d ports", len(msg.ports))
 		if n := m.selectedNetwork(); n != nil && n.ID == msg.netID {
 			m.detailLoading = false
 			m.detailErr = ""
@@ -237,6 +241,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case detailErrMsg:
+		shared.Debugf("[networkview] detailErrMsg: %v", msg.err)
 		if n := m.selectedNetwork(); n != nil && n.ID == msg.netID {
 			m.detailLoading = false
 			m.detailErr = msg.err.Error()
@@ -245,8 +250,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case shared.TickMsg:
 		if m.loading {
+			shared.Debugf("[networkview] tick skipped (loading)")
 			return m, nil
 		}
+		shared.Debugf("[networkview] tick fetching")
 		cmds := []tea.Cmd{m.fetchNetworks()}
 		if n := m.selectedNetwork(); n != nil {
 			cmds = append(cmds, m.fetchDetail(n.ID))
@@ -1149,6 +1156,7 @@ func (m Model) renderActionBar() string {
 
 // ForceRefresh triggers a manual reload.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[networkview] ForceRefresh()")
 	m.loading = true
 	cmds := []tea.Cmd{m.spinner.Tick, m.fetchNetworks()}
 	if n := m.selectedNetwork(); n != nil {
@@ -1210,8 +1218,10 @@ func (m Model) Hints() string {
 func (m Model) fetchNetworks() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
+		shared.Debugf("[networkview] fetchNetworks start")
 		nets, err := network.ListNetworks(context.Background(), client)
 		if err != nil {
+			shared.Debugf("[networkview] fetchNetworks error: %v", err)
 			return networksErrMsg{err: err}
 		}
 		subs, err := network.ListSubnets(context.Background(), client)
@@ -1230,6 +1240,7 @@ func (m Model) fetchNetworks() tea.Cmd {
 				extIDs[en.ID] = true
 			}
 		}
+		shared.Debugf("[networkview] fetchNetworks done: %d networks", len(nets))
 		return networksLoadedMsg{networks: nets, allSubnets: subMap, externalIDs: extIDs}
 	}
 }
@@ -1238,8 +1249,10 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 	networkClient := m.networkClient
 	computeClient := m.computeClient
 	return func() tea.Msg {
+		shared.Debugf("[networkview] fetchDetail start")
 		fetchedPorts, err := network.ListPorts(context.Background(), networkClient, netID)
 		if err != nil {
+			shared.Debugf("[networkview] fetchDetail error: %v", err)
 			return detailErrMsg{netID: netID, err: err}
 		}
 
@@ -1271,6 +1284,7 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 		}
 
 		if computeClient == nil {
+			shared.Debugf("[networkview] fetchDetail done: %d ports (no compute client)", len(fetchedPorts))
 			return detailLoadedMsg{netID: netID, ports: fetchedPorts, sgNames: sgNameMap}
 		}
 
@@ -1304,6 +1318,7 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 			}
 		}
 
+		shared.Debugf("[networkview] fetchDetail done: %d ports", len(fetchedPorts))
 		return detailLoadedMsg{netID: netID, ports: fetchedPorts, serverNames: srvNames, sgNames: sgNameMap}
 	}
 }
