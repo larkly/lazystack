@@ -3,16 +3,18 @@ package modal
 import (
 	"fmt"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // ServerRef identifies a server for an action.
 type ServerRef struct {
 	ID   string
 	Name string
+	// Action is optional per-server concrete action for bulk operations.
+	Action string
 }
 
 // ConfirmAction is the result of a confirmation dialog.
