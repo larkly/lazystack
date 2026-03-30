@@ -509,6 +509,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.view != viewServerCreate && m.view != viewVolumeCreate && m.view != viewKeypairCreate {
+			// Server list filter mode: esc should clear filter before global back-nav/tab handlers.
+			if m.view == viewServerList && m.serverList.IsFiltering() && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
+				return m.updateActiveView(msg)
+			}
+
 			switch {
 			case key.Matches(msg, shared.Keys.Quit) && m.view != viewCloudPicker:
 				return m, tea.Quit

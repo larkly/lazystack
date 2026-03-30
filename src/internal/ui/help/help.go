@@ -186,6 +186,7 @@ var allSections = []section{
 		name: "Routers",
 		binds: []string{
 			"↑/k ↓/j      navigate",
+			"tab/shift+tab cycle panes",
 			"enter         view detail (interfaces)",
 			"ctrl+n        create router",
 			"ctrl+d        delete router",

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/ui/serverlist"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 )
 
@@ -36,8 +37,40 @@ func TestServerDetailCtrlBOpensFIPPicker(t *testing.T) {
 	}
 }
 
+func TestServerListEscClearsFilterBeforeTabBackNav(t *testing.T) {
+	m := newTestModel("dev", false)
+	m.view = viewServerList
+	m.returnToView = viewServerDetail
+	m.serverDetail = testServerDetailWithServer("srv-1", "srv-1")
+	m.serverList = testServerListFiltering("abc")
+	if !m.serverList.IsFiltering() {
+		t.Fatalf("test setup failed: server list should be in filtering mode")
+	}
+
+	res, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	updated := res.(Model)
+
+	if updated.view != viewServerList {
+		t.Fatalf("view = %v, want server list (esc should clear filter, not back-nav)", updated.view)
+	}
+	if updated.serverList.IsFiltering() {
+		t.Fatalf("expected filtering mode to be off after esc")
+	}
+}
+
 func testServerDetailWithServer(id, name string) serverdetail.Model {
 	d := serverdetail.New(nil, nil, nil, id, 5*time.Second)
 	d.SetServer(&compute.Server{ID: id, Name: name})
 	return d
+}
+
+func testServerListFiltering(query string) serverlist.Model {
+	l := serverlist.New(nil, nil, 5*time.Second)
+	updated, _ := l.Update(tea.KeyPressMsg(tea.Key{Text: "/", Code: '/'}))
+	l = updated
+	for _, r := range query {
+		updated, _ = l.Update(tea.KeyPressMsg(tea.Key{Text: string(r), Code: r}))
+		l = updated
+	}
+	return l
 }
