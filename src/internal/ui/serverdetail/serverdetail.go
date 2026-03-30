@@ -71,7 +71,6 @@ type volumeInfoLoadedMsg struct {
 	volumes map[string]*volume.Volume
 }
 
-type detailTickMsg struct{}
 
 // Model is the server detail dashboard view.
 type Model struct {
@@ -216,15 +215,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 			if needFetch {
-				return m, tea.Batch(m.fetchVolumeInfo(msg.server.VolAttach), m.tickCmd())
+				return m, m.fetchVolumeInfo(msg.server.VolAttach)
 			}
 		}
-		return m, m.tickCmd()
+		return m, nil
 
 	case serverDetailErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
 	case consoleLoadedMsg:
 		m.consoleLoading = false
@@ -269,7 +268,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case detailTickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		cmds := []tea.Cmd{m.fetchServer(), m.fetchConsole(), m.fetchActions()}
 		if m.networkClient != nil {
 			cmds = append(cmds, m.fetchInterfaces())
@@ -1276,11 +1278,6 @@ func (m Model) fetchVolumeInfo(attachments []compute.VolumeAttachment) tea.Cmd {
 	}
 }
 
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return detailTickMsg{}
-	})
-}
 
 // ForceRefresh triggers a manual reload of all data sources.
 func (m *Model) ForceRefresh() tea.Cmd {

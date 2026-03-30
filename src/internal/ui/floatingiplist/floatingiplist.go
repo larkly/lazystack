@@ -18,7 +18,6 @@ import (
 
 type fipsLoadedMsg struct{ fips []network.FloatingIP }
 type fipsErrMsg struct{ err error }
-type tickMsg struct{}
 type sortClearMsg struct{}
 
 var fipSortColumns = []string{"floatingip", "status", "fixedip", "portid"}
@@ -91,14 +90,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.fips) {
 			m.cursor = max(0, len(m.fips)-1)
 		}
-		return m, m.tickCmd()
+		return m, nil
 
 	case fipsErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
-	case tickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		return m, m.fetchFIPs()
 
 	case spinner.TickMsg:
@@ -351,12 +353,6 @@ func (m Model) fetchFIPs() tea.Cmd {
 		}
 		return fipsLoadedMsg{fips: fips}
 	}
-}
-
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
 }
 
 // ForceRefresh triggers a manual reload of the floating IP list.

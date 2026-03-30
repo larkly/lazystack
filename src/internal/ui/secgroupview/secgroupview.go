@@ -42,7 +42,6 @@ type detailErrMsg struct {
 	sgID string
 	err  error
 }
-type tickMsg struct{}
 
 type serverRef struct {
 	ID     string
@@ -219,14 +218,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if sg := m.selectedSG(); sg != nil && sg.ID != m.lastDetailSGID {
 			m.lastDetailSGID = sg.ID
 			m.resetDetailState()
-			return m, tea.Batch(m.fetchDetail(sg.ID), m.tickCmd())
+			return m, m.fetchDetail(sg.ID)
 		}
-		return m, m.tickCmd()
+		return m, nil
 
 	case sgErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
 	case detailLoadedMsg:
 		// Only apply if this is still the selected SG
@@ -247,7 +246,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		cmds := []tea.Cmd{m.fetchGroups()}
 		if sg := m.selectedSG(); sg != nil {
 			cmds = append(cmds, m.fetchDetail(sg.ID))
@@ -1317,8 +1319,3 @@ func (m Model) fetchDetail(sgID string) tea.Cmd {
 	}
 }
 
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
-}

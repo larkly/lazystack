@@ -42,7 +42,6 @@ type detailErrMsg struct {
 	routerID string
 	err      error
 }
-type tickMsg struct{}
 
 // Model is the combined router selector + detail view.
 type Model struct {
@@ -203,19 +202,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.applyHighlightNames()
 		if r := m.selectedRouter(); r != nil && r.ID != m.lastDetailID {
-			shared.Debugf("[routerview] routersLoaded: new selection %s, fetching detail + starting tick", r.ID[:8])
+			shared.Debugf("[routerview] routersLoaded: new selection %s, fetching detail", r.ID[:8])
 			m.lastDetailID = r.ID
 			m.resetDetailState()
-			return m, tea.Batch(m.fetchDetail(r.ID), m.tickCmd())
+			return m, m.fetchDetail(r.ID)
 		}
-		shared.Debugf("[routerview] routersLoaded: starting tick")
-		return m, m.tickCmd()
+		return m, nil
 
 	case routersErrMsg:
 		shared.Debugf("[routerview] routersErrMsg: %s", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
 	case namesLoadedMsg:
 		shared.Debugf("[routerview] namesLoadedMsg: %d networks, %d subnets", len(msg.networkNames), len(msg.subnetToNet))
@@ -241,7 +239,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		shared.Debugf("[routerview] tickMsg: fetching routers")
 		return m, m.fetchRouters()
 
@@ -1162,8 +1163,3 @@ func (m Model) fetchDetail(routerID string) tea.Cmd {
 	}
 }
 
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
-}

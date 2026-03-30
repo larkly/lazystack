@@ -119,10 +119,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.applyFilter()
 		// Fetch any unknown image names
 		cmd := m.fetchMissingImageNames()
-		if cmd != nil {
-			return m, tea.Batch(cmd, m.tickCmd())
-		}
-		return m, m.tickCmd()
+		return m, cmd
 
 	case imageNamesMsg:
 		for id, name := range msg {
@@ -141,9 +138,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case serversErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
 	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		return m, m.fetchServers()
 
 	case shared.RefreshServersMsg:
@@ -715,11 +715,6 @@ func (m Model) fetchMissingImageNames() tea.Cmd {
 	}
 }
 
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return shared.TickMsg{}
-	})
-}
 
 // Hints returns context-sensitive key hints for the status bar.
 func (m Model) Hints() string {

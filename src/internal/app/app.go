@@ -321,7 +321,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.idlePaused {
 			m.idlePaused = false
 			m.statusBar.Hint = ""
-			return m, func() tea.Msg { return shared.TickMsg{} }
+			return m, m.refreshTickCmd()
 		}
 
 		if m.help.Visible {
@@ -849,7 +849,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = viewServerList
 		m.statusBar.CurrentView = "serverlist"
 		m.statusBar.Hint = m.serverList.Hints()
-		cmds := []tea.Cmd{m.serverList.Init()}
+		cmds := []tea.Cmd{m.serverList.Init(), m.refreshTickCmd()}
 		// Background-fetch accessible projects for project switching
 		if msg.ProviderClient != nil {
 			pc := msg.ProviderClient
@@ -1135,7 +1135,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		// Route to all views first so background ticks keep firing
+		// For tick messages, dispatch to views then chain the next tick.
+		// This is the ONLY place tick chaining happens — views don't manage ticks.
+		if _, isTick := msg.(shared.TickMsg); isTick {
+			shared.Debugf("[app] TickMsg: dispatching to views and chaining next tick")
+			m2, viewCmd := m.updateAllViews(msg)
+			m = m2
+			return m, tea.Batch(viewCmd, m.refreshTickCmd())
+		}
+
+		// Route to all views first so background messages keep flowing
 		m2, viewCmd := m.updateAllViews(msg)
 		m = m2
 		// Route to quota view for spinner/loaded messages

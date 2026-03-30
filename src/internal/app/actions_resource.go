@@ -37,7 +37,7 @@ func (m Model) openVolumeDetail() (Model, tea.Cmd) {
 	if v == nil {
 		return m, nil
 	}
-	m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, v.ID, m.refreshInterval)
+	m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, v.ID)
 	m.volumeDetail.SetSize(m.width, m.height)
 	m.view = viewVolumeDetail
 	m.statusBar.CurrentView = "volumedetail"
@@ -372,7 +372,7 @@ func (m Model) openLBDetail() (Model, tea.Cmd) {
 	if lb == nil {
 		return m, nil
 	}
-	m.lbDetail = lbdetail.New(m.client.LoadBalancer, lb.ID, m.refreshInterval)
+	m.lbDetail = lbdetail.New(m.client.LoadBalancer, lb.ID)
 	m.lbDetail.SetSize(m.width, m.height)
 	m.view = viewLBDetail
 	m.statusBar.CurrentView = "lbdetail"

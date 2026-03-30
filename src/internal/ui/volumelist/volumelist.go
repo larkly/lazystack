@@ -21,7 +21,6 @@ import (
 type volumesLoadedMsg struct{ volumes []volume.Volume }
 type volumesErrMsg struct{ err error }
 type serverNamesMsg map[string]string
-type tickMsg struct{}
 type sortClearMsg struct{}
 
 // Column defines a volume list column.
@@ -198,12 +197,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.cursor = max(0, len(m.volumes)-1)
 		}
 		m.applyHighlight()
-		return m, tea.Batch(m.fetchMissingServerNames(), m.tickCmd())
+		return m, m.fetchMissingServerNames()
 
 	case volumesErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
 	case serverNamesMsg:
 		for id, name := range msg {
@@ -211,7 +210,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		return m, m.fetchVolumes()
 
 	case spinner.TickMsg:
@@ -619,12 +621,6 @@ func (m Model) fetchMissingServerNames() tea.Cmd {
 		}
 		return result
 	}
-}
-
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
 }
 
 // ForceRefresh triggers a manual reload of the volume list.

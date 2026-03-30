@@ -1,12 +1,23 @@
 package app
 
 import (
+	"time"
+
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 	"charm.land/bubbletea/v2"
 )
+
+// refreshTickCmd returns a single tea.Tick that fires shared.TickMsg after
+// the refresh interval. This is the ONLY tick source in the app — views
+// must not create their own tick timers.
+func (m Model) refreshTickCmd() tea.Cmd {
+	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
+		return shared.TickMsg{}
+	})
+}
 
 func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
@@ -172,7 +183,7 @@ func (m Model) updateModal(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) handleDetailNavigation(msg shared.NavigateToDetailMsg) (Model, tea.Cmd) {
 	switch msg.Resource {
 	case "volume":
-		m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, msg.ID, m.refreshInterval)
+		m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, msg.ID)
 		m.volumeDetail.SetSize(m.width, m.height)
 		m.returnToView = m.view
 		m.view = viewVolumeDetail

@@ -45,7 +45,6 @@ type detailErrMsg struct {
 	netID string
 	err   error
 }
-type tickMsg struct{}
 
 // Model is the combined network selector + detail view.
 type Model struct {
@@ -217,14 +216,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if n := m.selectedNetwork(); n != nil && n.ID != m.lastDetailNetID {
 			m.lastDetailNetID = n.ID
 			m.resetDetailState()
-			return m, tea.Batch(m.fetchDetail(n.ID), m.tickCmd())
+			return m, m.fetchDetail(n.ID)
 		}
-		return m, m.tickCmd()
+		return m, nil
 
 	case networksErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
 	case detailLoadedMsg:
 		if n := m.selectedNetwork(); n != nil && n.ID == msg.netID {
@@ -244,7 +243,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		cmds := []tea.Cmd{m.fetchNetworks()}
 		if n := m.selectedNetwork(); n != nil {
 			cmds = append(cmds, m.fetchDetail(n.ID))
@@ -1306,8 +1308,3 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 	}
 }
 
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
-}
