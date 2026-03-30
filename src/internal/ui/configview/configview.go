@@ -192,7 +192,7 @@ func (m *Model) buildColorItems() []configItem {
 
 var reservedKeys = map[string]bool{
 	"ctrl+a": true,
-	"ctrl+b": true,
+	"ctrl+u": true,
 }
 
 func (m *Model) buildKeybindingItems() []configItem {
