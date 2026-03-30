@@ -102,6 +102,11 @@ func (m Model) SelectedServer() *compute.Server {
 	return nil
 }
 
+// IsFiltering reports whether the list is currently in filter input mode.
+func (m Model) IsFiltering() bool {
+	return m.filtering
+}
+
 // Update handles messages for the server list.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {

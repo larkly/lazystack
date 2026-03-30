@@ -264,6 +264,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Tab):
 			m.focus = (m.focus + 1) % focusPaneCount
 			return m, nil
+		case key.Matches(msg, shared.Keys.ShiftTab):
+			m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
+			return m, nil
 
 		case key.Matches(msg, shared.Keys.Up):
 			return m.moveUp()
@@ -1087,13 +1090,13 @@ func (m *Model) applyHighlightNames() {
 func (m Model) Hints() string {
 	switch m.focus {
 	case FocusInterfaces:
-		return "\u2191\u2193 navigate \u2022 ^a add interface \u2022 ^t remove \u2022 tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 ^a add interface \u2022 ^t remove \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
 	case focusRoutes:
-		return "\u2191\u2193 navigate \u2022 tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
 	case focusInfo:
-		return "tab focus \u2022 ^n new \u2022 ^d delete \u2022 R refresh \u2022 ? help"
+		return "tab/shift+tab focus \u2022 ^n new \u2022 ^d delete \u2022 R refresh \u2022 ? help"
 	default:
-		return "\u2191\u2193 navigate \u2022 ^n new \u2022 ^d delete \u2022 tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 ^n new \u2022 ^d delete \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
 	}
 }
 
@@ -1162,4 +1165,3 @@ func (m Model) fetchDetail(routerID string) tea.Cmd {
 		return detailLoadedMsg{routerID: routerID, interfaces: ifaces}
 	}
 }
-
