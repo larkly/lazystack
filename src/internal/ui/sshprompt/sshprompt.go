@@ -15,19 +15,21 @@ import (
 )
 
 const (
-	fieldHost    = 0
-	fieldUser    = 1
-	fieldKeyPath = 2
-	fieldDebug   = 3
-	numFields    = 4
+	fieldHost            = 0
+	fieldUser            = 1
+	fieldKeyPath         = 2
+	fieldDebug           = 3
+	fieldIgnoreHostKeys  = 4
+	numFields            = 5
 )
 
 // SSHConnectMsg is emitted when the user confirms the SSH username.
 type SSHConnectMsg struct {
-	User    string
-	IP      string
-	KeyPath string
-	Debug   bool
+	User           string
+	IP             string
+	KeyPath        string
+	Debug          bool
+	IgnoreHostKeys bool
 }
 
 // ipOption holds an IP address and its type label.
@@ -45,6 +47,7 @@ type Model struct {
 	userInput  textinput.Model
 	keyInput   textinput.Model
 	debug      bool
+	ignoreHostKeys bool
 	focusField int
 	err        string
 	width      int
@@ -62,7 +65,7 @@ type Model struct {
 }
 
 // New creates an SSH prompt modal for the given server.
-func New(serverName string, floatingIPs, ipv6, ipv4 []string, keyPath string) Model {
+func New(serverName string, floatingIPs, ipv6, ipv4 []string, keyPath string, ignoreHostKeysDefault bool) Model {
 	// Build IP options list with labels
 	var ips []ipOption
 	for _, ip := range floatingIPs {
@@ -103,6 +106,7 @@ func New(serverName string, floatingIPs, ipv6, ipv4 []string, keyPath string) Mo
 		ipIndex:      0,
 		userInput:    ui,
 		keyInput:     ki,
+		ignoreHostKeys: ignoreHostKeysDefault,
 		pickerFilter: pf,
 		pickerFiles:  listSSHKeys(),
 		focusField:   fieldHost,
@@ -240,8 +244,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// On debug checkbox field.
+	// On checkbox fields.
 	if key.Matches(msg, shared.Keys.Select) {
+		if m.focusField == fieldIgnoreHostKeys {
+			m.ignoreHostKeys = !m.ignoreHostKeys
+			return m, nil
+		}
 		m.debug = !m.debug
 	}
 	return m, nil
@@ -336,10 +344,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 	ip := m.selectedIP()
 	return m, func() tea.Msg {
 		return SSHConnectMsg{
-			User:    user,
-			IP:      ip,
-			KeyPath: strings.TrimSpace(m.keyInput.Value()),
-			Debug:   m.debug,
+			User:           user,
+			IP:             ip,
+			KeyPath:        strings.TrimSpace(m.keyInput.Value()),
+			Debug:          m.debug,
+			IgnoreHostKeys: m.ignoreHostKeys,
 		}
 	}
 }
@@ -413,7 +422,17 @@ func (m Model) View() string {
 	if m.debug {
 		check = "[x]"
 	}
-	body.WriteString(fmt.Sprintf("%s%s %s\n\n", prefix, check, muted.Render("verbose mode (-v)")))
+	body.WriteString(fmt.Sprintf("%s%s %s\n", prefix, check, muted.Render("verbose mode (-v)")))
+
+	prefix = "  "
+	if m.focusField == fieldIgnoreHostKeys {
+		prefix = cursor.Render("> ")
+	}
+	check = "[ ]"
+	if m.ignoreHostKeys {
+		check = "[x]"
+	}
+	body.WriteString(fmt.Sprintf("%s%s %s\n\n", prefix, check, muted.Render("ignore host keys (unsafe)")))
 
 	help := "tab: next  space: toggle  enter: connect  esc: cancel"
 	if m.ipPickerOpen {

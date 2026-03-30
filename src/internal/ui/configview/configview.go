@@ -133,6 +133,13 @@ func (m *Model) buildCategories() {
 						return nil
 					},
 				},
+				{label: "Ignore SSH host keys", key: "ignore_ssh_host_keys", kind: kindBool,
+					get: func() string { return boolStr(cfg.General.IgnoreSSHHostKeys) },
+					set: func(string) error {
+						cfg.General.IgnoreSSHHostKeys = !cfg.General.IgnoreSSHHostKeys
+						return nil
+					},
+				},
 			},
 		},
 		{

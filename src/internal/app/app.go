@@ -1061,10 +1061,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sshprompt.SSHConnectMsg:
 		m.sshPrompt.Active = false
 		args := ssh.BuildArgs(ssh.Options{
-			User:    msg.User,
-			IP:      msg.IP,
-			KeyPath: msg.KeyPath,
-			Debug:   msg.Debug,
+			User:           msg.User,
+			IP:             msg.IP,
+			KeyPath:        msg.KeyPath,
+			Debug:          msg.Debug,
+			IgnoreHostKeys: msg.IgnoreHostKeys,
 		})
 		c := exec.Command("ssh", args...)
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {

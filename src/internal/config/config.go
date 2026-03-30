@@ -23,6 +23,7 @@ type GeneralConfig struct {
 	PlainMode           bool `yaml:"plain_mode"`
 	CheckForUpdates     bool `yaml:"check_for_updates"`
 	AlwaysPickCloud     bool `yaml:"always_pick_cloud"`
+	IgnoreSSHHostKeys   bool `yaml:"ignore_ssh_host_keys"`
 	UpdateCheckInterval int  `yaml:"update_check_interval"`
 }
 
@@ -69,6 +70,7 @@ func Defaults() Config {
 			PlainMode:       false,
 			CheckForUpdates:     true,
 			AlwaysPickCloud:     false,
+			IgnoreSSHHostKeys:   false,
 			UpdateCheckInterval: 24,
 		},
 		Colors: ColorConfig{
@@ -159,6 +161,7 @@ type rawGeneral struct {
 	PlainMode           *bool `yaml:"plain_mode"`
 	CheckForUpdates     *bool `yaml:"check_for_updates"`
 	AlwaysPickCloud     *bool `yaml:"always_pick_cloud"`
+	IgnoreSSHHostKeys   *bool `yaml:"ignore_ssh_host_keys"`
 	UpdateCheckInterval *int  `yaml:"update_check_interval"`
 }
 
@@ -211,6 +214,11 @@ func LoadFrom(path string) (Config, error) {
 		file.General.AlwaysPickCloud = *raw.General.AlwaysPickCloud
 	} else {
 		file.General.AlwaysPickCloud = defaults.General.AlwaysPickCloud
+	}
+	if raw.General.IgnoreSSHHostKeys != nil {
+		file.General.IgnoreSSHHostKeys = *raw.General.IgnoreSSHHostKeys
+	} else {
+		file.General.IgnoreSSHHostKeys = defaults.General.IgnoreSSHHostKeys
 	}
 	if raw.General.UpdateCheckInterval != nil {
 		file.General.UpdateCheckInterval = *raw.General.UpdateCheckInterval
