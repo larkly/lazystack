@@ -16,7 +16,7 @@ func (m Model) openImageDetail() (Model, tea.Cmd) {
 	if img == nil {
 		return m, nil
 	}
-	m.imageDetail = imagedetail.New(m.client.Image, img.ID, m.refreshInterval)
+	m.imageDetail = imagedetail.New(m.client.Image, img.ID)
 	m.imageDetail.SetSize(m.width, m.height)
 	m.view = viewImageDetail
 	m.statusBar.CurrentView = "imagedetail"

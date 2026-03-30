@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
@@ -26,8 +25,6 @@ type volumeDetailErrMsg struct {
 	err error
 }
 
-type detailTickMsg struct{}
-
 // Model is the volume detail view.
 type Model struct {
 	client          *gophercloud.ServiceClient
@@ -36,25 +33,23 @@ type Model struct {
 	volume          *volume.Volume
 	serverName      string
 	loading         bool
-	spinner         spinner.Model
-	width           int
-	height          int
-	scroll          int
-	err             string
-	refreshInterval time.Duration
+	spinner       spinner.Model
+	width         int
+	height        int
+	scroll        int
+	err           string
 }
 
 // New creates a volume detail model.
-func New(client, computeClient *gophercloud.ServiceClient, volumeID string, refreshInterval time.Duration) Model {
+func New(client, computeClient *gophercloud.ServiceClient, volumeID string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	return Model{
-		client:          client,
-		computeClient:   computeClient,
-		volumeID:        volumeID,
-		loading:         true,
-		spinner:         s,
-		refreshInterval: refreshInterval,
+		client:        client,
+		computeClient: computeClient,
+		volumeID:      volumeID,
+		loading:       true,
+		spinner:       s,
 	}
 }
 
@@ -87,14 +82,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.volume = msg.vol
 		m.serverName = msg.serverName
 		m.err = ""
-		return m, m.tickCmd()
+		return m, nil
 
 	case volumeDetailErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
-	case detailTickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		return m, m.fetchVolume()
 
 	case spinner.TickMsg:
@@ -283,12 +281,6 @@ func (m Model) fetchVolume() tea.Cmd {
 		}
 		return volumeDetailLoadedMsg{vol: vol, serverName: serverName}
 	}
-}
-
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return detailTickMsg{}
-	})
 }
 
 // ForceRefresh triggers a manual reload of the volume detail.

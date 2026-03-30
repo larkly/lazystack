@@ -19,7 +19,6 @@ import (
 
 type imagesLoadedMsg struct{ images []image.Image }
 type imagesErrMsg struct{ err error }
-type tickMsg struct{}
 type sortClearMsg struct{}
 
 // Column defines an image list column.
@@ -189,14 +188,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.images) {
 			m.cursor = max(0, len(m.images)-1)
 		}
-		return m, m.tickCmd()
+		return m, nil
 
 	case imagesErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
-	case tickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		return m, m.fetchImages()
 
 	case spinner.TickMsg:
@@ -549,12 +551,6 @@ func (m Model) fetchImages() tea.Cmd {
 		}
 		return imagesLoadedMsg{images: imgs}
 	}
-}
-
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
 }
 
 // ForceRefresh triggers a manual reload of the image list.

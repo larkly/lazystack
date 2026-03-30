@@ -19,7 +19,6 @@ import (
 
 type lbsLoadedMsg struct{ lbs []loadbalancer.LoadBalancer }
 type lbsErrMsg struct{ err error }
-type tickMsg struct{}
 type sortClearMsg struct{}
 
 var lbSortColumns = []string{"name", "vipaddress", "provstatus", "operstatus"}
@@ -83,14 +82,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.lbs) {
 			m.cursor = max(0, len(m.lbs)-1)
 		}
-		return m, m.tickCmd()
+		return m, nil
 
 	case lbsErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
-	case tickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		return m, m.fetchLBs()
 
 	case spinner.TickMsg:
@@ -414,12 +416,6 @@ func (m Model) fetchLBs() tea.Cmd {
 		}
 		return lbsLoadedMsg{lbs: lbs}
 	}
-}
-
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
 }
 
 // ForceRefresh triggers a manual reload of the load balancer list.

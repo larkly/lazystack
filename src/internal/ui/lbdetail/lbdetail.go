@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
-	"time"
 
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/shared"
@@ -42,8 +41,6 @@ type lbDetailErrMsg struct {
 	err error
 }
 
-type detailTickMsg struct{}
-
 // Model is the load balancer detail view.
 type Model struct {
 	client          *gophercloud.ServiceClient
@@ -57,8 +54,7 @@ type Model struct {
 	spinner         spinner.Model
 	width           int
 	height          int
-	err             string
-	refreshInterval time.Duration
+	err string
 
 	// Pane focus and cursors
 	focus          focusPane
@@ -71,17 +67,16 @@ type Model struct {
 }
 
 // New creates a load balancer detail model.
-func New(client *gophercloud.ServiceClient, lbID string, refreshInterval time.Duration) Model {
+func New(client *gophercloud.ServiceClient, lbID string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	return Model{
-		client:          client,
-		lbID:            lbID,
-		loading:         true,
-		spinner:         s,
-		members:         make(map[string][]loadbalancer.Member),
-		monitors:        make(map[string]*loadbalancer.HealthMonitor),
-		refreshInterval: refreshInterval,
+		client:   client,
+		lbID:     lbID,
+		loading:  true,
+		spinner:  s,
+		members:  make(map[string][]loadbalancer.Member),
+		monitors: make(map[string]*loadbalancer.HealthMonitor),
 	}
 }
 
@@ -118,14 +113,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.monitors = msg.monitors
 		m.err = ""
 		m.clampCursors()
-		return m, m.tickCmd()
+		return m, nil
 
 	case lbDetailErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
-	case detailTickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		return m, m.fetchDetail()
 
 	case spinner.TickMsg:
@@ -1036,12 +1034,6 @@ func (m Model) fetchDetail() tea.Cmd {
 			monitors:  mons,
 		}
 	}
-}
-
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return detailTickMsg{}
-	})
 }
 
 // ForceRefresh triggers a manual reload of the load balancer detail.

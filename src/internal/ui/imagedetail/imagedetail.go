@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
@@ -23,33 +22,29 @@ type imageDetailErrMsg struct {
 	err error
 }
 
-type detailTickMsg struct{}
-
 // Model is the image detail view.
 type Model struct {
 	client          *gophercloud.ServiceClient
 	imageID         string
 	image           *image.Image
 	loading         bool
-	spinner         spinner.Model
-	width           int
-	height          int
-	scroll          int
-	err             string
-	refreshInterval time.Duration
+	spinner spinner.Model
+	width   int
+	height  int
+	scroll  int
+	err     string
 }
 
 // New creates an image detail model.
-func New(client *gophercloud.ServiceClient, imageID string, refreshInterval time.Duration) Model {
+func New(client *gophercloud.ServiceClient, imageID string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	return Model{
-		client:          client,
-		imageID:         imageID,
-		loading:         true,
-		spinner:         s,
-		refreshInterval: refreshInterval,
+		client:  client,
+		imageID: imageID,
+		loading: true,
+		spinner: s,
 	}
 }
 
@@ -86,14 +81,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.image = msg.image
 		m.err = ""
-		return m, m.tickCmd()
+		return m, nil
 
 	case imageDetailErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
-	case detailTickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		return m, m.fetchImage()
 
 	case spinner.TickMsg:
@@ -246,12 +244,6 @@ func (m Model) fetchImage() tea.Cmd {
 		}
 		return imageDetailLoadedMsg{image: img}
 	}
-}
-
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return detailTickMsg{}
-	})
 }
 
 // ForceRefresh triggers a manual reload of the image detail.

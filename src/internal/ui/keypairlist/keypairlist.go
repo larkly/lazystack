@@ -19,7 +19,6 @@ import (
 type keypairsLoadedMsg struct{ keypairs []compute.KeyPair }
 type keypairsErrMsg struct{ err error }
 type sortClearMsg struct{}
-type tickMsg struct{}
 
 var kpSortColumns = []string{"name", "type"}
 
@@ -81,14 +80,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.pairs) {
 			m.cursor = max(0, len(m.pairs)-1)
 		}
-		return m, m.tickCmd()
+		return m, nil
 
 	case keypairsErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		return m, m.tickCmd()
+		return m, nil
 
-	case tickMsg:
+	case shared.TickMsg:
+		if m.loading {
+			return m, nil
+		}
 		return m, m.fetchKeypairs()
 
 	case spinner.TickMsg:
@@ -285,12 +287,6 @@ func (m Model) fetchKeypairs() tea.Cmd {
 		}
 		return keypairsLoadedMsg{keypairs: kps}
 	}
-}
-
-func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
 }
 
 // ForceRefresh triggers a manual reload of the keypair list.
