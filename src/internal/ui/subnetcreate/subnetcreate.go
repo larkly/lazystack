@@ -540,8 +540,8 @@ func ipv6ModeValue(idx int) string {
 }
 
 func (m Model) renderModal(content string) string {
-	modalWidth := 60
-	if m.width > 0 && m.width < 70 {
+	modalWidth := 86
+	if m.width > 0 && m.width < 96 {
 		modalWidth = m.width - 6
 	}
 	box := shared.StyleModal.Width(modalWidth).Render(content)
