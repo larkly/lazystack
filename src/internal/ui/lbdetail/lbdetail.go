@@ -6,13 +6,13 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/loadbalancer"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/loadbalancer"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // FocusPane identifies a pane in the load balancer detail view.
@@ -44,18 +44,18 @@ type lbDetailErrMsg struct {
 
 // Model is the load balancer detail view.
 type Model struct {
-	client          *gophercloud.ServiceClient
-	lbID            string
-	lb              *loadbalancer.LoadBalancer
-	listeners       []loadbalancer.Listener
-	pools           []loadbalancer.Pool
-	members         map[string][]loadbalancer.Member
-	monitors        map[string]*loadbalancer.HealthMonitor
-	loading         bool
-	spinner         spinner.Model
-	width           int
-	height          int
-	err string
+	client    *gophercloud.ServiceClient
+	lbID      string
+	lb        *loadbalancer.LoadBalancer
+	listeners []loadbalancer.Listener
+	pools     []loadbalancer.Pool
+	members   map[string][]loadbalancer.Member
+	monitors  map[string]*loadbalancer.HealthMonitor
+	loading   bool
+	spinner   spinner.Model
+	width     int
+	height    int
+	err       string
 
 	// Pane focus and cursors
 	focus          FocusPane
@@ -171,7 +171,6 @@ func (m Model) SelectedMemberName() string {
 	return ""
 }
 
-
 // SelectedListener returns the full Listener struct for the cursor, or nil.
 func (m Model) SelectedListener() *loadbalancer.Listener {
 	if m.listenerCursor >= 0 && m.listenerCursor < len(m.listeners) {
@@ -198,6 +197,17 @@ func (m Model) SelectedMember() *loadbalancer.Member {
 		return &mem
 	}
 	return nil
+}
+
+// SelectedPoolMembers returns the members of the currently selected pool.
+func (m Model) SelectedPoolMembers() []loadbalancer.Member {
+	members := m.selectedPoolMembers()
+	if len(members) == 0 {
+		return nil
+	}
+	out := make([]loadbalancer.Member, len(members))
+	copy(out, members)
+	return out
 }
 
 // Update handles messages.
@@ -725,8 +735,6 @@ func (m Model) renderListenersContent(maxWidth, maxHeight int) string {
 		visibleLines = 1
 	}
 
-
-
 	var lines []string
 	lines = append(lines, headerLine)
 
@@ -958,8 +966,6 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 	if visibleLines < 1 {
 		visibleLines = 1
 	}
-
-
 
 	var lines []string
 	lines = append(lines, headerLine)

@@ -2,43 +2,79 @@ package lbmembercreate
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"strconv"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/loadbalancer"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/loadbalancer"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 const (
-	fieldName   = 0
-	fieldAddr   = 1
-	fieldPort   = 2
-	fieldWeight = 3
-	fieldSubmit = 4
-	fieldCancel = 5
-	numFields   = 6
+	fieldAddrSource = iota
+	fieldAddr
+	fieldServer
+	fieldName
+	fieldPort
+	fieldWeight
+	fieldSubmit
+	fieldCancel
+	numFields
 )
+
+const (
+	addressSourceIP = iota
+	addressSourceServer
+)
+
+var addressSourceOpts = []string{"IP", "Server"}
 
 type memberCreatedMsg struct{}
 type memberCreateErrMsg struct{ err error }
+type memberServersLoadedMsg struct{ servers []memberServerOption }
+type memberServersErrMsg struct{ err error }
+
+type memberServerOption struct {
+	id      string
+	name    string
+	address string
+	status  string
+}
 
 // Model is the member create form modal.
 type Model struct {
-	Active   bool
-	client   *gophercloud.ServiceClient
-	poolID   string
-	poolName string
+	Active        bool
+	client        *gophercloud.ServiceClient
+	computeClient *gophercloud.ServiceClient
+	poolID        string
+	poolName      string
+	excludedAddrs map[string]struct{}
 
 	nameInput   textinput.Model
 	addrInput   textinput.Model
 	portInput   textinput.Model
 	weightInput textinput.Model
+
+	addressSource    int
+	serverOptions    []memberServerOption
+	filteredServers  []memberServerOption
+	selectedServerID string
+	serversLoading   bool
+	preferredIPVer   int
+
+	serverPickerOpen bool
+	serverFilter     string
+	serverFiltering  bool
+	pickerCursor     int
+	pickerScroll     int
 
 	// Edit mode
 	editMode bool
@@ -53,13 +89,12 @@ type Model struct {
 }
 
 // New creates a member create form.
-func New(client *gophercloud.ServiceClient, poolID, poolName string) Model {
+func New(client, computeClient *gophercloud.ServiceClient, poolID, poolName, lbVIPAddress string, existingMemberAddrs []string) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "member name"
 	ni.CharLimit = 64
 	ni.SetWidth(30)
-	ni.Focus()
 
 	ai := textinput.New()
 	ai.Prompt = ""
@@ -83,15 +118,20 @@ func New(client *gophercloud.ServiceClient, poolID, poolName string) Model {
 	s.Spinner = spinner.Dot
 
 	return Model{
-		Active:      true,
-		client:      client,
-		poolID:      poolID,
-		poolName:    poolName,
-		nameInput:   ni,
-		addrInput:   ai,
-		portInput:   pi,
-		weightInput: wi,
-		spinner:     s,
+		Active:         true,
+		client:         client,
+		computeClient:  computeClient,
+		poolID:         poolID,
+		poolName:       poolName,
+		excludedAddrs:  makeAddressSet(existingMemberAddrs),
+		nameInput:      ni,
+		addrInput:      ai,
+		portInput:      pi,
+		weightInput:    wi,
+		spinner:        s,
+		serversLoading: computeClient != nil,
+		preferredIPVer: ipVersion(lbVIPAddress),
+		focusField:     fieldAddrSource,
 	}
 }
 
@@ -137,12 +177,16 @@ func NewEdit(client *gophercloud.ServiceClient, poolID, memberID, currentName st
 		portInput:   pi,
 		weightInput: wi,
 		spinner:     s,
+		focusField:  fieldName,
 	}
 }
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
-	return nil
+	if m.editMode || m.computeClient == nil {
+		return nil
+	}
+	return tea.Batch(m.spinner.Tick, m.fetchServers())
 }
 
 // Update handles messages.
@@ -158,35 +202,71 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: action, Name: m.poolName}
 		}
+
 	case memberCreateErrMsg:
 		m.submitting = false
 		m.err = msg.err.Error()
 		return m, nil
+
+	case memberServersLoadedMsg:
+		m.serversLoading = false
+		m.serverOptions = msg.servers
+		if m.selectedServerID == "" && len(m.serverOptions) > 0 {
+			m.selectedServerID = m.serverOptions[0].id
+		}
+		m.applyServerFilter()
+		return m, nil
+
+	case memberServersErrMsg:
+		m.serversLoading = false
+		m.err = msg.err.Error()
+		m.applyServerFilter()
+		return m, nil
+
 	case spinner.TickMsg:
-		if m.submitting {
+		if m.submitting || m.serversLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
 		}
 		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+
 	case tea.KeyMsg:
 		if m.submitting {
 			return m, nil
 		}
+		if m.serverPickerOpen {
+			return m.handleServerPickerKey(msg)
+		}
 		return m.handleKey(msg)
 	}
+
 	return m, nil
+}
+
+func (m Model) usesManualIP() bool {
+	return !m.editMode && m.addressSource == addressSourceIP
+}
+
+func (m Model) usesServerSelection() bool {
+	return !m.editMode && m.addressSource == addressSourceServer
 }
 
 func (m *Model) advanceFocus(dir int) {
 	for {
 		m.focusField = (m.focusField + dir + numFields) % numFields
-		// In edit mode, skip address and port
-		if m.editMode && (m.focusField == fieldAddr || m.focusField == fieldPort) {
+		if m.editMode && (m.focusField == fieldAddrSource || m.focusField == fieldAddr || m.focusField == fieldServer || m.focusField == fieldPort) {
+			continue
+		}
+		if m.usesManualIP() && m.focusField == fieldServer {
+			continue
+		}
+		if m.usesServerSelection() && m.focusField == fieldAddr {
 			continue
 		}
 		break
@@ -198,7 +278,13 @@ func (m Model) isTextInput() bool {
 	if m.editMode {
 		return m.focusField == fieldName || m.focusField == fieldWeight
 	}
-	return m.focusField <= fieldWeight
+	switch m.focusField {
+	case fieldName, fieldPort, fieldWeight:
+		return true
+	case fieldAddr:
+		return m.usesManualIP()
+	}
+	return false
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -227,35 +313,139 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Back):
 		m.Active = false
 		return m, nil
+
 	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
 		m.advanceFocus(1)
 		return m, nil
+
 	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
 		m.advanceFocus(-1)
 		return m, nil
+
 	case key.Matches(msg, shared.Keys.Right):
-		if m.focusField == fieldSubmit {
+		switch m.focusField {
+		case fieldAddrSource:
+			m.addressSource = (m.addressSource + 1) % len(addressSourceOpts)
+			m.err = ""
+		case fieldSubmit:
 			m.focusField = fieldCancel
+			m.updateFocus()
 		}
 		return m, nil
+
 	case key.Matches(msg, shared.Keys.Left):
-		if m.focusField == fieldCancel {
+		switch m.focusField {
+		case fieldAddrSource:
+			m.addressSource = (m.addressSource - 1 + len(addressSourceOpts)) % len(addressSourceOpts)
+			m.err = ""
+		case fieldCancel:
 			m.focusField = fieldSubmit
+			m.updateFocus()
 		}
 		return m, nil
+
+	case keyText(msg) == "/":
+		if m.focusField == fieldServer && m.usesServerSelection() {
+			m.openServerPicker()
+			m.serverFiltering = true
+			m.serverFilter = ""
+			m.applyServerFilter()
+			return m, nil
+		}
+
 	case key.Matches(msg, shared.Keys.Enter):
 		switch m.focusField {
+		case fieldServer:
+			m.openServerPicker()
+			return m, nil
 		case fieldSubmit:
 			return m.submit()
 		case fieldCancel:
 			m.Active = false
 			return m, nil
+		default:
+			m.advanceFocus(1)
+			return m, nil
 		}
-		return m, nil
 	}
 
 	if msg.String() == "ctrl+s" {
 		return m.submit()
+	}
+
+	return m, nil
+}
+
+func (m Model) handleServerPickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.serverFiltering {
+		switch {
+		case key.Matches(msg, shared.Keys.Back):
+			m.serverFiltering = false
+			m.serverFilter = ""
+			m.applyServerFilter()
+			return m, nil
+		case key.Matches(msg, shared.Keys.Enter):
+			m.serverFiltering = false
+			return m, nil
+		default:
+			s := keyText(msg)
+			switch s {
+			case "backspace":
+				if len(m.serverFilter) > 0 {
+					m.serverFilter = m.serverFilter[:len(m.serverFilter)-1]
+					m.applyServerFilter()
+				}
+				return m, nil
+			case "esc":
+				m.serverFiltering = false
+				m.serverFilter = ""
+				m.applyServerFilter()
+				return m, nil
+			}
+			if len(s) == 1 && s[0] >= 32 && s[0] < 127 {
+				m.serverFilter += s
+				m.applyServerFilter()
+				return m, nil
+			}
+		}
+	}
+
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
+		m.serverPickerOpen = false
+		return m, nil
+
+	case key.Matches(msg, shared.Keys.Up):
+		if m.pickerCursor > 0 {
+			m.pickerCursor--
+			m.ensurePickerVisible()
+		}
+		return m, nil
+
+	case key.Matches(msg, shared.Keys.Down):
+		if m.pickerCursor < len(m.filteredServers)-1 {
+			m.pickerCursor++
+			m.ensurePickerVisible()
+		}
+		return m, nil
+
+	case keyText(msg) == "/":
+		m.serverFiltering = true
+		if m.serverFilter == "" {
+			m.applyServerFilter()
+		}
+		return m, nil
+
+	case key.Matches(msg, shared.Keys.Enter):
+		if len(m.filteredServers) == 0 {
+			return m, nil
+		}
+		m.selectServer(m.filteredServers[m.pickerCursor])
+		m.serverPickerOpen = false
+		m.serverFiltering = false
+		m.focusField = fieldName
+		m.updateFocus()
+		return m, nil
 	}
 
 	return m, nil
@@ -321,10 +511,24 @@ func (m Model) submit() (Model, tea.Cmd) {
 		})
 	}
 
-	addr := strings.TrimSpace(m.addrInput.Value())
-	if addr == "" {
-		m.err = "Address is required"
-		return m, nil
+	var addr string
+	if m.usesManualIP() {
+		addr = strings.TrimSpace(m.addrInput.Value())
+		if addr == "" {
+			m.err = "Address is required"
+			return m, nil
+		}
+		if net.ParseIP(addr) == nil {
+			m.err = "Address must be a valid IPv4 or IPv6 address"
+			return m, nil
+		}
+	} else {
+		selected, ok := m.selectedServer()
+		if !ok {
+			m.err = "Select a server first"
+			return m, nil
+		}
+		addr = selected.address
 	}
 
 	port, err := strconv.Atoi(strings.TrimSpace(m.portInput.Value()))
@@ -355,11 +559,21 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints.
 func (m Model) Hints() string {
-	return "tab/↑↓ navigate • ctrl+s submit • esc cancel"
+	if m.serverPickerOpen {
+		if m.serverFiltering {
+			return "type to filter • backspace delete • enter done • esc clear"
+		}
+		return "↑↓ navigate • enter select • / filter • esc close"
+	}
+	return "tab/↑↓ navigate • enter open picker • ctrl+s submit • esc cancel"
 }
 
 // View renders the form.
 func (m Model) View() string {
+	if m.serverPickerOpen {
+		return m.serverPickerView()
+	}
+
 	titleText := "Add Member to " + m.poolName
 	if m.editMode {
 		titleText = "Edit Member"
@@ -378,9 +592,16 @@ func (m Model) View() string {
 
 	var rows []string
 
+	if !m.editMode {
+		rows = append(rows, label("Source", fieldAddrSource)+renderPicker(addressSourceOpts, m.addressSource))
+		if m.usesManualIP() {
+			rows = append(rows, label("Address", fieldAddr)+m.addrInput.View())
+		} else {
+			rows = append(rows, label("Server", fieldServer)+m.selectedServerView())
+		}
+	}
 	rows = append(rows, label("Name", fieldName)+m.nameInput.View())
 	if !m.editMode {
-		rows = append(rows, label("Address", fieldAddr)+m.addrInput.View())
 		rows = append(rows, label("Port", fieldPort)+m.portInput.View())
 	}
 	rows = append(rows, label("Weight", fieldWeight)+m.weightInput.View())
@@ -411,6 +632,283 @@ func (m Model) View() string {
 	}
 
 	content := title + "\n\n" + strings.Join(rows, "\n")
-	box := shared.StyleModal.Width(50).Render(content)
+	box := shared.StyleModal.Width(m.formWidth()).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) serverPickerView() string {
+	title := shared.StyleModalTitle.Render("Select Member Server")
+	pickerWidth := m.pickerWidth()
+	contentWidth := pickerWidth - 4
+
+	var body string
+	switch {
+	case m.serversLoading:
+		body = m.spinner.View() + " Loading matching servers..."
+	case m.err != "" && len(m.serverOptions) == 0:
+		body = lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.err)
+	case len(m.filteredServers) == 0:
+		body = shared.StyleHelp.Render("No matching servers found")
+	default:
+		var lines []string
+		start := m.pickerScroll
+		end := start + m.pickerListHeight()
+		if end > len(m.filteredServers) {
+			end = len(m.filteredServers)
+		}
+		for i := start; i < end; i++ {
+			srv := m.filteredServers[i]
+			cursor := "  "
+			if i == m.pickerCursor {
+				cursor = "▸ "
+			}
+			style := lipgloss.NewStyle().Foreground(shared.ColorFg)
+			if i == m.pickerCursor {
+				style = style.Foreground(shared.ColorHighlight).Bold(true)
+			}
+			statusStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+			if srv.status == "ACTIVE" {
+				statusStyle = statusStyle.Foreground(shared.ColorSuccess)
+			}
+			statusText := shared.StatusIcon(srv.status) + srv.status
+			statusWidth := minInt(14, maxInt(10, contentWidth/6))
+			addressWidth := minInt(44, maxInt(20, contentWidth/2))
+			nameWidth := maxInt(12, contentWidth-lipgloss.Width(cursor)-statusWidth-addressWidth-6)
+			line := fmt.Sprintf(
+				"%s%-*s  %-*s  %s",
+				cursor,
+				nameWidth,
+				truncateString(srv.name, nameWidth),
+				addressWidth,
+				truncateString(srv.address, addressWidth),
+				statusStyle.Render(truncateString(statusText, statusWidth)),
+			)
+			lines = append(lines, style.Render(line))
+		}
+		body = strings.Join(lines, "\n")
+	}
+
+	filterLine := "Filter: "
+	if m.serverFilter != "" {
+		filterLine += m.serverFilter
+	}
+	if m.serverFiltering {
+		filterLine = shared.StyleHelp.Render(filterLine)
+	}
+
+	content := title + "\n\n" + body + "\n\n" + truncateString(filterLine, contentWidth) + "\n\n" + shared.StyleHelp.Render("↑↓ navigate • enter select • / filter • esc close")
+	box := shared.StyleModal.Width(pickerWidth).Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func renderPicker(opts []string, selected int) string {
+	var parts []string
+	for i, o := range opts {
+		if i == selected {
+			parts = append(parts, lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true).Render("["+o+"]"))
+		} else {
+			parts = append(parts, lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(" "+o+" "))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func (m Model) selectedServerView() string {
+	if m.serversLoading {
+		return m.spinner.View() + " Loading matching servers..."
+	}
+	selected, ok := m.selectedServer()
+	if !ok {
+		return lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("Press enter to choose server")
+	}
+	return truncateString(fmt.Sprintf("%s (%s)", selected.name, selected.address), maxInt(24, m.formWidth()-18))
+}
+
+func (m Model) selectedServer() (memberServerOption, bool) {
+	for _, srv := range m.serverOptions {
+		if srv.id == m.selectedServerID {
+			return srv, true
+		}
+	}
+	return memberServerOption{}, false
+}
+
+func (m *Model) openServerPicker() {
+	m.serverPickerOpen = true
+	m.serverFiltering = false
+	m.applyServerFilter()
+}
+
+func (m *Model) selectServer(srv memberServerOption) {
+	m.selectedServerID = srv.id
+	if strings.TrimSpace(m.nameInput.Value()) == "" {
+		m.nameInput.SetValue(srv.name)
+	}
+}
+
+func (m *Model) applyServerFilter() {
+	m.filteredServers = nil
+	query := strings.ToLower(strings.TrimSpace(m.serverFilter))
+	for _, srv := range m.serverOptions {
+		if query == "" ||
+			strings.Contains(strings.ToLower(srv.name), query) ||
+			strings.Contains(strings.ToLower(srv.id), query) ||
+			strings.Contains(strings.ToLower(srv.address), query) {
+			m.filteredServers = append(m.filteredServers, srv)
+		}
+	}
+
+	m.pickerCursor = 0
+	m.pickerScroll = 0
+	for i, srv := range m.filteredServers {
+		if srv.id == m.selectedServerID {
+			m.pickerCursor = i
+			m.ensurePickerVisible()
+			return
+		}
+	}
+}
+
+func (m *Model) ensurePickerVisible() {
+	height := m.pickerListHeight()
+	if m.pickerCursor < m.pickerScroll {
+		m.pickerScroll = m.pickerCursor
+	}
+	if m.pickerCursor >= m.pickerScroll+height {
+		m.pickerScroll = m.pickerCursor - height + 1
+	}
+}
+
+func (m Model) pickerListHeight() int {
+	h := m.height - 12
+	if h < 4 {
+		h = 4
+	}
+	return h
+}
+
+func (m Model) fetchServers() tea.Cmd {
+	client := m.computeClient
+	preferredVersion := m.preferredIPVer
+	return func() tea.Msg {
+		servers, err := compute.ListServers(context.Background(), client)
+		if err != nil {
+			return memberServersErrMsg{err: err}
+		}
+		var options []memberServerOption
+		for _, srv := range servers {
+			if srv.Status != "ACTIVE" && srv.Status != "SHUTOFF" {
+				continue
+			}
+			addr := preferredMemberAddress(srv, preferredVersion)
+			if addr == "" {
+				continue
+			}
+			if _, exists := m.excludedAddrs[addr]; exists {
+				continue
+			}
+			name := strings.TrimSpace(srv.Name)
+			if name == "" {
+				name = srv.ID
+			}
+			options = append(options, memberServerOption{
+				id:      srv.ID,
+				name:    name,
+				address: addr,
+				status:  srv.Status,
+			})
+		}
+		return memberServersLoadedMsg{servers: options}
+	}
+}
+
+func preferredMemberAddress(srv compute.Server, preferredVersion int) string {
+	switch preferredVersion {
+	case 4:
+		if len(srv.IPv4) > 0 {
+			return srv.IPv4[0]
+		}
+		return ""
+	case 6:
+		if len(srv.IPv6) > 0 {
+			return srv.IPv6[0]
+		}
+		return ""
+	default:
+		if len(srv.IPv4) > 0 {
+			return srv.IPv4[0]
+		}
+		if len(srv.IPv6) > 0 {
+			return srv.IPv6[0]
+		}
+		return ""
+	}
+}
+
+func ipVersion(addr string) int {
+	ip := net.ParseIP(strings.TrimSpace(addr))
+	if ip == nil {
+		return 0
+	}
+	if ip.To4() != nil {
+		return 4
+	}
+	return 6
+}
+
+func makeAddressSet(addrs []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(addrs))
+	for _, addr := range addrs {
+		addr = strings.TrimSpace(addr)
+		if addr == "" {
+			continue
+		}
+		set[addr] = struct{}{}
+	}
+	return set
+}
+
+func (m Model) formWidth() int {
+	if m.width <= 0 {
+		return 60
+	}
+	return maxInt(48, minInt(72, m.width-6))
+}
+
+func (m Model) pickerWidth() int {
+	if m.width <= 0 {
+		return 96
+	}
+	return maxInt(56, minInt(110, m.width-4))
+}
+
+func truncateString(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if len(s) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	return s[:width-1] + "…"
+}
+
+func keyText(msg tea.KeyMsg) string {
+	return msg.String()
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

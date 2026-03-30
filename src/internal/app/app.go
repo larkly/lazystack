@@ -6,60 +6,60 @@ import (
 	"os/exec"
 	"time"
 
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/selfupdate"
-	"github.com/larkly/lazystack/internal/ssh"
-	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/config"
+	"github.com/larkly/lazystack/internal/selfupdate"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ssh"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/cloneprogress"
-	"github.com/larkly/lazystack/internal/ui/configview"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
+	"github.com/larkly/lazystack/internal/ui/configview"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
+	"github.com/larkly/lazystack/internal/ui/consoleurl"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/help"
+	"github.com/larkly/lazystack/internal/ui/imagedetail"
+	"github.com/larkly/lazystack/internal/ui/imagelist"
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/lbcreate"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
-	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
 	"github.com/larkly/lazystack/internal/ui/lblist"
+	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
 	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
 	"github.com/larkly/lazystack/internal/ui/lbpoolcreate"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/networkcreate"
-	"github.com/larkly/lazystack/internal/ui/routercreate"
-	"github.com/larkly/lazystack/internal/ui/routerview"
-	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/networkview"
-	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/projectpicker"
 	"github.com/larkly/lazystack/internal/ui/quotaview"
+	"github.com/larkly/lazystack/internal/ui/routercreate"
+	"github.com/larkly/lazystack/internal/ui/routerview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
+	"github.com/larkly/lazystack/internal/ui/serverdetail"
+	"github.com/larkly/lazystack/internal/ui/serverlist"
+	"github.com/larkly/lazystack/internal/ui/serverpicker"
+	"github.com/larkly/lazystack/internal/ui/serverrebuild"
+	"github.com/larkly/lazystack/internal/ui/serverrename"
+	"github.com/larkly/lazystack/internal/ui/serverresize"
+	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
-	"github.com/larkly/lazystack/internal/ui/serverpicker"
-	"github.com/larkly/lazystack/internal/ui/volumepicker"
-	"github.com/larkly/lazystack/internal/ui/serverdetail"
-	"github.com/larkly/lazystack/internal/ui/serverrename"
-	"github.com/larkly/lazystack/internal/ui/serverrebuild"
-	"github.com/larkly/lazystack/internal/ui/serversnapshot"
-	"github.com/larkly/lazystack/internal/ui/serverlist"
-	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
-	"github.com/larkly/lazystack/internal/ui/consoleurl"
 	"github.com/larkly/lazystack/internal/ui/statusbar"
+	"github.com/larkly/lazystack/internal/ui/subnetcreate"
+	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
-	"github.com/larkly/lazystack/internal/ui/imagedetail"
-	"github.com/larkly/lazystack/internal/ui/imagelist"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
-	"charm.land/bubbles/v2/key"
-	"charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/ui/volumepicker"
 )
 
 type activeView int
@@ -91,8 +91,8 @@ type modalType int
 
 // UpdateAvailableMsg is sent when a newer version is found.
 type UpdateAvailableMsg struct {
-	Latest      string
-	DownloadURL string
+	Latest       string
+	DownloadURL  string
 	ChecksumsURL string
 }
 
@@ -112,77 +112,77 @@ const (
 
 // Model is the root application model.
 type Model struct {
-	view         activeView
-	width        int
-	height       int
-	client       *cloud.Client
-	cloudPicker  cloudpicker.Model
-	serverList   serverlist.Model
-	serverDetail serverdetail.Model
-	serverCreate servercreate.Model
-	consoleLog    consolelog.Model
-	actionLog     actionlog.Model
-	serverRename    serverrename.Model
-	serverRebuild   serverrebuild.Model
-	serverSnapshot  serversnapshot.Model
-	serverResize    serverresize.Model
-	sshPrompt       sshprompt.Model
-	consoleURL      consoleurl.Model
-	fipPicker     fippicker.Model
-	serverPicker  serverpicker.Model
-	volumePicker  volumepicker.Model
-	sgCreate       sgcreate.Model
-	networkCreate  networkcreate.Model
-	subnetCreate   subnetcreate.Model
-	routerView     routerview.Model
-	routerCreate   routercreate.Model
-	subnetPicker   subnetpicker.Model
-	sgRuleCreate  sgrulecreate.Model
-	projectPicker projectpicker.Model
-	volumeList    volumelist.Model
-	volumeDetail  volumedetail.Model
-	volumeCreate  volumecreate.Model
-	floatingIPList floatingiplist.Model
-	secGroupView  secgroupview.Model
-	keypairList    keypairlist.Model
-	keypairCreate  keypaircreate.Model
-	keypairDetail  keypairdetail.Model
-	imageList      imagelist.Model
-	imageDetail    imagedetail.Model
-	networkView        networkview.Model
-	lbList             lblist.Model
-	lbDetail           lbdetail.Model
-	lbCreate           lbcreate.Model
-	lbListenerCreate   lblistenercreate.Model
-	lbPoolCreate       lbpoolcreate.Model
-	lbMemberCreate     lbmembercreate.Model
-	cloneProgress  cloneprogress.Model
-	statusBar      statusbar.Model
-	tabs      []TabDef
-	activeTab int
-	tabInited []bool
-	help         help.Model
-	quotaView    quotaview.Model
-	configView   configview.Model
-	confirm      modal.ConfirmModel
-	errModal     modal.ErrorModel
-	activeModal  modalType
-	projects         []shared.ProjectInfo
-	currentProjectID string
-	cloudName        string
-	autoCloud        string
-	previousView    activeView
-	returnToView    activeView // for cross-resource navigation back-nav
-	refreshInterval time.Duration
-	minWidth        int
-	minHeight    int
-	tooSmall     bool
-	restart        bool
-	version        string
-	checkUpdate    bool
-	idleTimeout    time.Duration
-	lastActivity   time.Time
-	idlePaused     bool
+	view                activeView
+	width               int
+	height              int
+	client              *cloud.Client
+	cloudPicker         cloudpicker.Model
+	serverList          serverlist.Model
+	serverDetail        serverdetail.Model
+	serverCreate        servercreate.Model
+	consoleLog          consolelog.Model
+	actionLog           actionlog.Model
+	serverRename        serverrename.Model
+	serverRebuild       serverrebuild.Model
+	serverSnapshot      serversnapshot.Model
+	serverResize        serverresize.Model
+	sshPrompt           sshprompt.Model
+	consoleURL          consoleurl.Model
+	fipPicker           fippicker.Model
+	serverPicker        serverpicker.Model
+	volumePicker        volumepicker.Model
+	sgCreate            sgcreate.Model
+	networkCreate       networkcreate.Model
+	subnetCreate        subnetcreate.Model
+	routerView          routerview.Model
+	routerCreate        routercreate.Model
+	subnetPicker        subnetpicker.Model
+	sgRuleCreate        sgrulecreate.Model
+	projectPicker       projectpicker.Model
+	volumeList          volumelist.Model
+	volumeDetail        volumedetail.Model
+	volumeCreate        volumecreate.Model
+	floatingIPList      floatingiplist.Model
+	secGroupView        secgroupview.Model
+	keypairList         keypairlist.Model
+	keypairCreate       keypaircreate.Model
+	keypairDetail       keypairdetail.Model
+	imageList           imagelist.Model
+	imageDetail         imagedetail.Model
+	networkView         networkview.Model
+	lbList              lblist.Model
+	lbDetail            lbdetail.Model
+	lbCreate            lbcreate.Model
+	lbListenerCreate    lblistenercreate.Model
+	lbPoolCreate        lbpoolcreate.Model
+	lbMemberCreate      lbmembercreate.Model
+	cloneProgress       cloneprogress.Model
+	statusBar           statusbar.Model
+	tabs                []TabDef
+	activeTab           int
+	tabInited           []bool
+	help                help.Model
+	quotaView           quotaview.Model
+	configView          configview.Model
+	confirm             modal.ConfirmModel
+	errModal            modal.ErrorModel
+	activeModal         modalType
+	projects            []shared.ProjectInfo
+	currentProjectID    string
+	cloudName           string
+	autoCloud           string
+	previousView        activeView
+	returnToView        activeView // for cross-resource navigation back-nav
+	refreshInterval     time.Duration
+	minWidth            int
+	minHeight           int
+	tooSmall            bool
+	restart             bool
+	version             string
+	checkUpdate         bool
+	idleTimeout         time.Duration
+	lastActivity        time.Time
+	idlePaused          bool
 	latestVersion       string
 	downloadURL         string
 	checksumsURL        string
@@ -201,9 +201,9 @@ type Options struct {
 	RefreshInterval time.Duration
 	IdleTimeout     time.Duration
 	Version         string
-	CheckUpdate bool
-	Plain       bool
-	Config      *config.Config
+	CheckUpdate     bool
+	Plain           bool
+	Config          *config.Config
 }
 
 // New creates the root model.
@@ -1133,10 +1133,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = viewKeypairList
 			m.statusBar.CurrentView = "keypairlist"
 		}
-		// Router detail is now inline in routerview — no ESC handler needed
 		if m.view == viewLBDetail {
-			m.view = viewLBList
-			m.statusBar.CurrentView = "lblist"
+			m.statusBar.CurrentView = "lbdetail"
+			return m, m.lbDetail.ForceRefresh()
 		}
 		if m.view == viewImageDetail {
 			m.view = viewImageList

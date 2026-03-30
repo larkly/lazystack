@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
-	"github.com/larkly/lazystack/internal/ui/networkcreate"
-	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/lbcreate"
 	"github.com/larkly/lazystack/internal/ui/lbdetail"
@@ -16,15 +15,16 @@ import (
 	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
 	"github.com/larkly/lazystack/internal/ui/lbpoolcreate"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/networkcreate"
 	"github.com/larkly/lazystack/internal/ui/routercreate"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
-	"github.com/larkly/lazystack/internal/ui/subnetpicker"
-	"github.com/larkly/lazystack/internal/ui/volumepicker"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
+	"github.com/larkly/lazystack/internal/ui/subnetcreate"
+	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
-	"charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/ui/volumepicker"
 )
 
 func (m Model) openVolumeCreate() (Model, tea.Cmd) {
@@ -528,7 +528,16 @@ func (m Model) openLBMemberCreate() (Model, tea.Cmd) {
 	if poolID == "" {
 		return m, nil
 	}
-	m.lbMemberCreate = lbmembercreate.New(m.client.LoadBalancer, poolID, poolName)
+	lbVIPAddress := ""
+	if lb := m.lbDetail.LB(); lb != nil {
+		lbVIPAddress = lb.VipAddress
+	}
+	existingMembers := m.lbDetail.SelectedPoolMembers()
+	existingMemberAddrs := make([]string, 0, len(existingMembers))
+	for _, member := range existingMembers {
+		existingMemberAddrs = append(existingMemberAddrs, member.Address)
+	}
+	m.lbMemberCreate = lbmembercreate.New(m.client.LoadBalancer, m.client.Compute, poolID, poolName, lbVIPAddress, existingMemberAddrs)
 	m.lbMemberCreate.SetSize(m.width, m.height)
 	return m, m.lbMemberCreate.Init()
 }

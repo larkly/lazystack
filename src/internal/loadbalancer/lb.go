@@ -283,7 +283,8 @@ func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id s
 	return nil
 }
 
-// CreatePool creates a pool on a load balancer, optionally with a health monitor.
+// CreatePool creates a pool on a load balancer and, when requested, creates its
+// health monitor as a follow-up operation.
 func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol, lbMethod string, mon *monitors.CreateOpts) (*Pool, error) {
 	opts := pools.CreateOpts{
 		LoadbalancerID: lbID,
@@ -291,20 +292,34 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 		Protocol:       pools.Protocol(protocol),
 		LBMethod:       pools.LBMethod(lbMethod),
 	}
-	if mon != nil {
-		opts.Monitor = mon
-	}
 	p, err := pools.Create(ctx, client, opts).Extract()
 	if err != nil {
 		return nil, fmt.Errorf("creating pool: %w", err)
 	}
-	return &Pool{
+	result := &Pool{
 		ID:        p.ID,
 		Name:      p.Name,
 		Protocol:  p.Protocol,
 		LBMethod:  p.LBMethod,
 		MonitorID: p.MonitorID,
-	}, nil
+	}
+	if mon == nil {
+		return result, nil
+	}
+
+	monOpts := *mon
+	monOpts.PoolID = p.ID
+
+	createdMon, err := monitors.Create(ctx, client, monOpts).Extract()
+	if err != nil {
+		if deleteErr := DeletePool(ctx, client, p.ID); deleteErr != nil {
+			return nil, fmt.Errorf("creating health monitor for pool %s: %w (cleanup failed: %v)", p.ID, err, deleteErr)
+		}
+		return nil, fmt.Errorf("creating health monitor for pool %s: %w", p.ID, err)
+	}
+
+	result.MonitorID = createdMon.ID
+	return result, nil
 }
 
 // DeletePool deletes a pool.
