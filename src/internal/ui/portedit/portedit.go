@@ -121,14 +121,11 @@ func New(client *gophercloud.ServiceClient, port network.Port) Model {
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
 	client := m.client
-	portSGs := m.port.SecurityGroups
 	return tea.Batch(textinput.Blink, m.spinner.Tick, func() tea.Msg {
 		sgs, err := network.ListSecurityGroups(context.Background(), client)
 		if err != nil {
 			return sgLoadErrMsg{err: err}
 		}
-		// Pre-select the port's current security groups
-		_ = portSGs
 		return sgLoadedMsg{sgs: sgs}
 	})
 }
@@ -295,12 +292,12 @@ func (m Model) updateSGPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.sgPickerCursor > 0 {
 			m.sgPickerCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		if m.sgPickerCursor < len(filtered)-1 {
 			m.sgPickerCursor++
 		}
@@ -411,7 +408,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	for _, idx := range indices {
 		sgIDs = append(sgIDs, m.secGroups[idx].ID)
 	}
-	if !stringSliceEqual(sgIDs, m.port.SecurityGroups) {
+	if !stringSetEqual(sgIDs, m.port.SecurityGroups) {
 		opts.SecurityGroups = &sgIDs
 	}
 
@@ -472,15 +469,19 @@ func addressPairsEqual(a, b []network.AddressPair) bool {
 	return true
 }
 
-func stringSliceEqual(a, b []string) bool {
+func stringSetEqual(a, b []string) bool {
 	if len(a) == 0 && len(b) == 0 {
 		return true
 	}
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	set := make(map[string]bool, len(a))
+	for _, s := range a {
+		set[s] = true
+	}
+	for _, s := range b {
+		if !set[s] {
 			return false
 		}
 	}

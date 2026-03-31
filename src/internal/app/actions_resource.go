@@ -385,7 +385,11 @@ func (m Model) openPortDeleteConfirm() (Model, tea.Cmd) {
 	}
 	m.confirm = modal.NewConfirm("delete_port", p.ID, name)
 	m.confirm.Title = "Delete Port"
-	m.confirm.Body = fmt.Sprintf("Delete port %q?", name)
+	if p.DeviceOwner != "" {
+		m.confirm.Body = fmt.Sprintf("Port %q is in use by %s. Delete anyway?", name, p.DeviceOwner)
+	} else {
+		m.confirm.Body = fmt.Sprintf("Delete port %q?", name)
+	}
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil

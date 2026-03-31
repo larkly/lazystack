@@ -280,12 +280,12 @@ func (m Model) updateSGPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.sgPickerCursor > 0 {
 			m.sgPickerCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		if m.sgPickerCursor < len(filtered)-1 {
 			m.sgPickerCursor++
 		}
@@ -388,15 +388,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 		opts.FixedIPs = fips
 	}
 
-	// Collect selected security groups
+	// Collect selected security groups (empty slice = no SGs, nil = server default)
 	indices := m.sortedSGIndices()
-	if len(indices) > 0 {
-		sgIDs := make([]string, len(indices))
-		for i, idx := range indices {
-			sgIDs[i] = m.secGroups[idx].ID
-		}
-		opts.SecurityGroups = sgIDs
+	sgIDs := make([]string, 0, len(indices))
+	for _, idx := range indices {
+		sgIDs = append(sgIDs, m.secGroups[idx].ID)
 	}
+	opts.SecurityGroups = sgIDs
 
 	// Parse allowed address pairs
 	apRaw := strings.TrimSpace(m.allowPairInput.Value())
