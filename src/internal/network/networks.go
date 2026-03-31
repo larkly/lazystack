@@ -33,12 +33,20 @@ type Subnet struct {
 	EnableDHCP      bool
 	IPv6AddressMode string
 	AllocationPools []AllocationPool
+	HostRoutes      []HostRoute
+	DNSNameservers  []string
 }
 
 // AllocationPool is a DHCP allocation pool range.
 type AllocationPool struct {
 	Start string
 	End   string
+}
+
+// HostRoute is a static route distributed via DHCP.
+type HostRoute struct {
+	DestinationCIDR string
+	NextHop         string
 }
 
 // SubnetPool is a simplified representation of a Neutron subnet pool.
@@ -95,11 +103,18 @@ func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subn
 				IPVersion:       s.IPVersion,
 				EnableDHCP:      s.EnableDHCP,
 				IPv6AddressMode: s.IPv6AddressMode,
+				DNSNameservers:  s.DNSNameservers,
 			}
 			for _, pool := range s.AllocationPools {
 				sub.AllocationPools = append(sub.AllocationPools, AllocationPool{
 					Start: pool.Start,
 					End:   pool.End,
+				})
+			}
+			for _, route := range s.HostRoutes {
+				sub.HostRoutes = append(sub.HostRoutes, HostRoute{
+					DestinationCIDR: route.DestinationCIDR,
+					NextHop:         route.NextHop,
 				})
 			}
 			result = append(result, sub)
@@ -230,6 +245,58 @@ func DeleteSubnet(ctx context.Context, client *gophercloud.ServiceClient, id str
 	r := subnets.Delete(ctx, client, id)
 	if r.Err != nil {
 		return fmt.Errorf("deleting subnet %s: %w", id, r.Err)
+	}
+	return nil
+}
+
+// SubnetUpdateOpts holds options for updating a subnet.
+type SubnetUpdateOpts struct {
+	Name           *string
+	EnableDHCP     *bool
+	GatewayIP      *string
+	DNSNameservers *[]string
+	HostRoutes     *[]HostRoute
+	AllocationPools []AllocationPool
+}
+
+// UpdateSubnet updates a subnet.
+func UpdateSubnet(ctx context.Context, client *gophercloud.ServiceClient, id string, opts SubnetUpdateOpts) error {
+	updateOpts := subnets.UpdateOpts{}
+	if opts.Name != nil {
+		updateOpts.Name = opts.Name
+	}
+	if opts.EnableDHCP != nil {
+		updateOpts.EnableDHCP = opts.EnableDHCP
+	}
+	if opts.GatewayIP != nil {
+		updateOpts.GatewayIP = opts.GatewayIP
+	}
+	if opts.DNSNameservers != nil {
+		updateOpts.DNSNameservers = opts.DNSNameservers
+	}
+	if opts.HostRoutes != nil {
+		routes := make([]subnets.HostRoute, len(*opts.HostRoutes))
+		for i, r := range *opts.HostRoutes {
+			routes[i] = subnets.HostRoute{
+				DestinationCIDR: r.DestinationCIDR,
+				NextHop:         r.NextHop,
+			}
+		}
+		updateOpts.HostRoutes = &routes
+	}
+	if opts.AllocationPools != nil {
+		pools := make([]subnets.AllocationPool, len(opts.AllocationPools))
+		for i, p := range opts.AllocationPools {
+			pools[i] = subnets.AllocationPool{
+				Start: p.Start,
+				End:   p.End,
+			}
+		}
+		updateOpts.AllocationPools = pools
+	}
+	_, err := subnets.Update(ctx, client, id, updateOpts).Extract()
+	if err != nil {
+		return fmt.Errorf("updating subnet %s: %w", id, err)
 	}
 	return nil
 }

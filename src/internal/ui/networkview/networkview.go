@@ -162,6 +162,18 @@ func (m Model) SelectedSubnetName() string {
 	return name
 }
 
+// SelectedSubnet returns the full Subnet object for the currently selected subnet.
+func (m Model) SelectedSubnet() *network.Subnet {
+	if m.focus != FocusSubnets {
+		return nil
+	}
+	subs := m.networkSubnets()
+	if m.subnetCursor < 0 || m.subnetCursor >= len(subs) {
+		return nil
+	}
+	return &subs[m.subnetCursor]
+}
+
 // FocusedPane returns the currently focused pane.
 func (m Model) FocusedPane() focusPane {
 	return m.focus
@@ -881,12 +893,17 @@ func (m Model) renderSubnetsContent(maxWidth, maxHeight int) string {
 		}
 		lines = append(lines, line)
 
-		// Show allocation pools for the selected subnet
-		if selected && len(s.AllocationPools) > 0 {
-			poolStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+		// Show details for the selected subnet
+		if selected {
+			detailStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
 			for _, pool := range s.AllocationPools {
-				poolLine := fmt.Sprintf("      pool: %s \u2192 %s", pool.Start, pool.End)
-				lines = append(lines, poolStyle.Render(poolLine))
+				lines = append(lines, detailStyle.Render(fmt.Sprintf("      pool: %s \u2192 %s", pool.Start, pool.End)))
+			}
+			if len(s.DNSNameservers) > 0 {
+				lines = append(lines, detailStyle.Render("      dns:  "+strings.Join(s.DNSNameservers, ", ")))
+			}
+			for _, r := range s.HostRoutes {
+				lines = append(lines, detailStyle.Render(fmt.Sprintf("      route: %s \u2192 %s", r.DestinationCIDR, r.NextHop)))
 			}
 		}
 	}
@@ -1119,6 +1136,7 @@ func (m Model) renderActionBar() string {
 	case FocusSubnets:
 		buttons = append(buttons, btn("^n", "New Subnet"))
 		if m.SelectedSubnetID() != "" {
+			buttons = append(buttons, btn("enter", "Edit Subnet"))
 			buttons = append(buttons, btn("^d", "Delete Subnet"))
 		}
 	case focusPorts:
@@ -1203,7 +1221,7 @@ func (m *Model) applyHighlightNames() {
 func (m Model) Hints() string {
 	switch m.focus {
 	case FocusSubnets:
-		return "\u2191\u2193 navigate \u2022 ^n add subnet \u2022 ^d delete \u2022 tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 enter edit \u2022 ^n add subnet \u2022 ^d delete \u2022 tab focus \u2022 R refresh \u2022 ? help"
 	case focusPorts:
 		return "\u2191\u2193 navigate \u2022 tab focus \u2022 R refresh \u2022 ? help"
 	case focusInfo:
