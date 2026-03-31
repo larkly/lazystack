@@ -150,6 +150,17 @@ func AddRouterInterface(ctx context.Context, client *gophercloud.ServiceClient, 
 	return nil
 }
 
+// AddRouterInterfaceByPort attaches a pre-created port to a router.
+func AddRouterInterfaceByPort(ctx context.Context, client *gophercloud.ServiceClient, routerID, portID string) error {
+	_, err := routers.AddInterface(ctx, client, routerID, routers.AddInterfaceOpts{
+		PortID: portID,
+	}).Extract()
+	if err != nil {
+		return fmt.Errorf("adding port interface to router %s: %w", routerID, err)
+	}
+	return nil
+}
+
 // RemoveRouterInterface detaches a subnet from a router.
 func RemoveRouterInterface(ctx context.Context, client *gophercloud.ServiceClient, routerID, subnetID string) error {
 	_, err := routers.RemoveInterface(ctx, client, routerID, routers.RemoveInterfaceOpts{

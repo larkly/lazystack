@@ -101,6 +101,47 @@ func ListPortsBySecurityGroup(ctx context.Context, client *gophercloud.ServiceCl
 	return result, nil
 }
 
+// CreatePort creates a port with a single fixed IP on the given subnet.
+func CreatePort(ctx context.Context, client *gophercloud.ServiceClient, networkID, subnetID, ipAddress string) (*Port, error) {
+	opts := ports.CreateOpts{
+		NetworkID: networkID,
+		FixedIPs: []ports.IP{{
+			SubnetID:  subnetID,
+			IPAddress: ipAddress,
+		}},
+	}
+	p, err := ports.Create(ctx, client, opts).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating port on network %s: %w", networkID, err)
+	}
+	port := &Port{
+		ID:           p.ID,
+		Name:         p.Name,
+		Status:       p.Status,
+		MACAddress:   p.MACAddress,
+		DeviceOwner:  p.DeviceOwner,
+		DeviceID:     p.DeviceID,
+		NetworkID:    p.NetworkID,
+		AdminStateUp: p.AdminStateUp,
+	}
+	for _, ip := range p.FixedIPs {
+		port.FixedIPs = append(port.FixedIPs, FixedIP{
+			SubnetID:  ip.SubnetID,
+			IPAddress: ip.IPAddress,
+		})
+	}
+	return port, nil
+}
+
+// DeletePort deletes a port by ID.
+func DeletePort(ctx context.Context, client *gophercloud.ServiceClient, portID string) error {
+	r := ports.Delete(ctx, client, portID)
+	if r.Err != nil {
+		return fmt.Errorf("deleting port %s: %w", portID, r.Err)
+	}
+	return nil
+}
+
 // ListPorts fetches all ports for a given network.
 func ListPorts(ctx context.Context, client *gophercloud.ServiceClient, networkID string) ([]Port, error) {
 	var result []Port
