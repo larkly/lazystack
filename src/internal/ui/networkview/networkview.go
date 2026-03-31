@@ -930,6 +930,9 @@ func (m Model) renderSubnetsContent(maxWidth, maxHeight int) string {
 		// Show details for the selected subnet
 		if selected {
 			detailStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+			if s.IPv6AddressMode != "" {
+				lines = append(lines, detailStyle.Render("      mode: "+s.IPv6AddressMode))
+			}
 			for _, pool := range s.AllocationPools {
 				lines = append(lines, detailStyle.Render(fmt.Sprintf("      pool: %s \u2192 %s", pool.Start, pool.End)))
 			}
