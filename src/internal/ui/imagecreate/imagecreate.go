@@ -368,12 +368,17 @@ func (m *Model) updateFocus() {
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
+	path := strings.TrimSpace(m.pathInput.Value())
+	// Auto-fill name from filename if empty
 	name := strings.TrimSpace(m.nameInput.Value())
+	if name == "" && path != "" {
+		name = baseImageName(filepath.Base(path))
+		m.nameInput.SetValue(name)
+	}
 	if name == "" {
 		m.err = "Name is required"
 		return m, nil
 	}
-	path := strings.TrimSpace(m.pathInput.Value())
 	if path == "" {
 		if m.source == 0 {
 			m.err = "File path is required"
@@ -502,14 +507,31 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// File selected
 		m.pathInput.SetValue(entry.path)
 		m.pickerOpen = false
-		// Auto-detect disk format from extension
 		m.autoDetectDiskFormat(entry.name)
-		// Advance focus past path
+		// Auto-fill name if empty
+		if strings.TrimSpace(m.nameInput.Value()) == "" {
+			m.nameInput.SetValue(baseImageName(entry.name))
+		}
 		m.focusField = fieldDiskFormat
 		m.updateFocus()
 		return m, nil
 	}
 	return m, nil
+}
+
+// baseImageName strips image and compression extensions from a filename.
+// e.g. "ubuntu-24.04.qcow2.gz" → "ubuntu-24.04"
+func baseImageName(filename string) string {
+	name := filename
+	// Strip compression extension
+	for _, ext := range []string{".gz", ".bz2", ".xz"} {
+		name = strings.TrimSuffix(name, ext)
+	}
+	// Strip image format extension
+	for _, ext := range []string{".qcow2", ".raw", ".vmdk", ".vdi", ".iso", ".img", ".ami"} {
+		name = strings.TrimSuffix(name, ext)
+	}
+	return name
 }
 
 func (m *Model) autoDetectDiskFormat(filename string) {
