@@ -241,11 +241,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
 		m.focusField = (m.focusField + 1) % numFields
+		if m.ipVersion == 0 && m.focusField >= fieldPrefixLen && m.focusField <= fieldIPv6RA {
+			m.focusField = fieldSubmit
+		}
 		m.updateFocus()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
 		m.focusField = (m.focusField - 1 + numFields) % numFields
+		if m.ipVersion == 0 && m.focusField >= fieldPrefixLen && m.focusField <= fieldIPv6RA {
+			m.focusField = fieldDHCP
+		}
 		m.updateFocus()
 		return m, nil
 
