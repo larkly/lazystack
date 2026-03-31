@@ -93,6 +93,34 @@ func AddFixedIPToPort(ctx context.Context, client *gophercloud.ServiceClient, po
 	return nil
 }
 
+// RemoveFixedIPFromPort removes a single fixed IP (by subnet ID) from a port,
+// keeping all other fixed IPs intact.
+func RemoveFixedIPFromPort(ctx context.Context, client *gophercloud.ServiceClient, portID, subnetID string) error {
+	// Fetch current port to get existing fixed IPs.
+	p, err := ports.Get(ctx, client, portID).Extract()
+	if err != nil {
+		return fmt.Errorf("getting port %s: %w", portID, err)
+	}
+
+	var remaining []ports.IP
+	for _, ip := range p.FixedIPs {
+		if ip.SubnetID != subnetID {
+			remaining = append(remaining, ports.IP{
+				SubnetID:  ip.SubnetID,
+				IPAddress: ip.IPAddress,
+			})
+		}
+	}
+
+	_, err = ports.Update(ctx, client, portID, ports.UpdateOpts{
+		FixedIPs: remaining,
+	}).Extract()
+	if err != nil {
+		return fmt.Errorf("removing fixed IP from port %s: %w", portID, err)
+	}
+	return nil
+}
+
 // ListPortsByDevice fetches all ports attached to a given device (e.g. server).
 func ListPortsByDevice(ctx context.Context, client *gophercloud.ServiceClient, deviceID string) ([]Port, error) {
 	var result []Port

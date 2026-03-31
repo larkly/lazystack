@@ -856,16 +856,33 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		netClient := m.client.Network
 		routerID := action.ServerID
 		name := action.Name
-		// Get the selected subnet ID from the router view
-		subnetID := m.routerView.SelectedInterfaceSubnetID()
+		iface := m.routerView.SelectedInterface()
+		if iface == nil {
+			return m, nil
+		}
+		subnetID := iface.SubnetID
+		portID := iface.PortID
+		portIPCount := m.routerView.InterfacesOnPort(portID)
 		return m, func() tea.Msg {
-			shared.Debugf("[action] removing router interface from %s", name)
-			err := network.RemoveRouterInterface(context.Background(), netClient, routerID, subnetID)
-			if err != nil {
-				shared.Debugf("[action] remove router interface from %s failed: %s", name, err)
-				return shared.ResourceActionErrMsg{Action: "Remove interface", Name: name, Err: err}
+			ctx := context.Background()
+			if portIPCount > 1 {
+				// Multi-IP port: remove just this fixed IP, keep the port.
+				shared.Debugf("[action] removing fixed IP (subnet %s) from port %s on router %s", subnetID, portID, name)
+				err := network.RemoveFixedIPFromPort(ctx, netClient, portID, subnetID)
+				if err != nil {
+					shared.Debugf("[action] remove fixed IP from port %s failed: %s", portID, err)
+					return shared.ResourceActionErrMsg{Action: "Remove interface", Name: name, Err: err}
+				}
+			} else {
+				// Single-IP port: detach the whole interface.
+				shared.Debugf("[action] removing router interface from %s", name)
+				err := network.RemoveRouterInterface(ctx, netClient, routerID, subnetID)
+				if err != nil {
+					shared.Debugf("[action] remove router interface from %s failed: %s", name, err)
+					return shared.ResourceActionErrMsg{Action: "Remove interface", Name: name, Err: err}
+				}
 			}
-			shared.Debugf("[action] removed router interface from %s", name)
+			shared.Debugf("[action] removed interface (subnet %s) from %s", subnetID, name)
 			return shared.ResourceActionMsg{Action: "Removed interface from", Name: name}
 		}
 	case "delete_network":
