@@ -101,14 +101,16 @@ func ListPortsBySecurityGroup(ctx context.Context, client *gophercloud.ServiceCl
 	return result, nil
 }
 
-// CreatePort creates a port with a single fixed IP on the given subnet.
+// CreatePort creates a port on the given subnet. If ipAddress is empty,
+// Neutron allocates automatically (required for SLAAC/DHCPv6 subnets).
 func CreatePort(ctx context.Context, client *gophercloud.ServiceClient, networkID, subnetID, ipAddress string) (*Port, error) {
+	fixedIP := ports.IP{SubnetID: subnetID}
+	if ipAddress != "" {
+		fixedIP.IPAddress = ipAddress
+	}
 	opts := ports.CreateOpts{
 		NetworkID: networkID,
-		FixedIPs: []ports.IP{{
-			SubnetID:  subnetID,
-			IPAddress: ipAddress,
-		}},
+		FixedIPs:  []ports.IP{fixedIP},
 	}
 	p, err := ports.Create(ctx, client, opts).Extract()
 	if err != nil {
