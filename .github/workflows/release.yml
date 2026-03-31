@@ -15,6 +15,9 @@ permissions:
 
 env:
   VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+  # For workflow_dispatch, checkout main (tag doesn't exist yet).
+  # For tag push, checkout the tag itself.
+  CHECKOUT_REF: ${{ github.event.inputs.tag && 'main' || github.ref }}
 
 jobs:
   build:
@@ -33,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.VERSION }}
+          ref: ${{ env.CHECKOUT_REF }}
 
       - uses: actions/setup-go@v5
         with:
@@ -68,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.VERSION }}
+          ref: ${{ env.CHECKOUT_REF }}
 
       - name: Download linux binary
         uses: actions/download-artifact@v4
