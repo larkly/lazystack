@@ -57,6 +57,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
 	"github.com/larkly/lazystack/internal/ui/statusbar"
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
+	"github.com/larkly/lazystack/internal/ui/subnetedit"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
@@ -136,6 +137,7 @@ type Model struct {
 	sgCreate            sgcreate.Model
 	networkCreate       networkcreate.Model
 	subnetCreate        subnetcreate.Model
+	subnetEdit          subnetedit.Model
 	routerView          routerview.Model
 	routerCreate        routercreate.Model
 	subnetPicker        subnetpicker.Model
@@ -317,6 +319,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sgRuleCreate.SetSize(m.width, m.height)
 		m.networkCreate.SetSize(m.width, m.height)
 		m.subnetCreate.SetSize(m.width, m.height)
+		m.subnetEdit.SetSize(m.width, m.height)
 		m.routerCreate.SetSize(m.width, m.height)
 		m.subnetPicker.SetSize(m.width, m.height)
 		m.projectPicker.SetSize(m.width, m.height)
@@ -459,6 +462,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.subnetCreate.Active {
 			var cmd tea.Cmd
 			m.subnetCreate, cmd = m.subnetCreate.Update(msg)
+			return m, cmd
+		}
+
+		// Subnet edit modal intercepts all keys when active
+		if m.subnetEdit.Active {
+			var cmd tea.Cmd
+			m.subnetEdit, cmd = m.subnetEdit.Update(msg)
 			return m, cmd
 		}
 
@@ -774,6 +784,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.openSubnetCreate()
 				}
 				return m.openNetworkCreate()
+			}
+			if key.Matches(msg, shared.Keys.Enter) && m.networkView.InSubnets() {
+				return m.openSubnetEdit()
 			}
 		}
 
@@ -1378,6 +1391,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.subnetCreate.Active {
 			var cmd tea.Cmd
 			m.subnetCreate, cmd = m.subnetCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.subnetEdit.Active {
+			var cmd tea.Cmd
+			m.subnetEdit, cmd = m.subnetEdit.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.sgCreate.Active {

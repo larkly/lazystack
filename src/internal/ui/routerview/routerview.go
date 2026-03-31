@@ -244,7 +244,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[routerview] tickMsg: fetching routers")
-		return m, m.fetchRouters()
+		cmds := []tea.Cmd{m.fetchRouters()}
+		if r := m.selectedRouter(); r != nil {
+			cmds = append(cmds, m.fetchDetail(r.ID))
+		}
+		return m, tea.Batch(cmds...)
 
 	case spinner.TickMsg:
 		if m.loading || m.detailLoading {

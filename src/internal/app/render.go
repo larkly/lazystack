@@ -109,6 +109,9 @@ func (m Model) viewContent() string {
 	if m.subnetCreate.Active {
 		return m.subnetCreate.View()
 	}
+	if m.subnetEdit.Active {
+		return m.subnetEdit.View()
+	}
 	if m.sgCreate.Active {
 		return m.sgCreate.View()
 	}

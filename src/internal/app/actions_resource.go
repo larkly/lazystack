@@ -24,6 +24,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
+	"github.com/larkly/lazystack/internal/ui/subnetedit"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
@@ -320,6 +321,16 @@ func (m Model) openSubnetCreate() (Model, tea.Cmd) {
 	m.subnetCreate = subnetcreate.New(m.client.Network, netID, netName)
 	m.subnetCreate.SetSize(m.width, m.height)
 	return m, m.subnetCreate.Init()
+}
+
+func (m Model) openSubnetEdit() (Model, tea.Cmd) {
+	sub := m.networkView.SelectedSubnet()
+	if sub == nil {
+		return m, nil
+	}
+	m.subnetEdit = subnetedit.New(m.client.Network, *sub)
+	m.subnetEdit.SetSize(m.width, m.height)
+	return m, m.subnetEdit.Init()
 }
 
 func (m Model) openSubnetDeleteConfirm() (Model, tea.Cmd) {
