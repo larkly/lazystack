@@ -3,6 +3,7 @@ package portedit
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/larkly/lazystack/internal/network"
@@ -30,28 +31,36 @@ var toggleOpts = []string{"Enabled", "Disabled"}
 
 type portUpdatedMsg struct{ name string }
 type portUpdateErrMsg struct{ err error }
+type sgLoadedMsg struct{ sgs []network.SecurityGroup }
+type sgLoadErrMsg struct{ err error }
 
 // Model is the port edit modal.
 type Model struct {
 	Active         bool
 	client         *gophercloud.ServiceClient
 	port           network.Port
-	sgNames        map[string]string // SG ID → name
+	secGroups      []network.SecurityGroup
+	selectedSGs    map[int]bool
 	nameInput      textinput.Model
 	allowPairInput textinput.Model
-	sgInput        textinput.Model
 	adminState     int // 0=Enabled, 1=Disabled
 	portSecurity   int // 0=Enabled, 1=Disabled
 	focusField     int
 	submitting     bool
+	loadingSGs     bool
 	spinner        spinner.Model
 	err            string
 	width          int
 	height         int
+
+	// Inline SG picker state
+	sgPickerOpen   bool
+	sgPickerCursor int
+	sgPickerFilter textinput.Model
 }
 
 // New creates a port edit modal.
-func New(client *gophercloud.ServiceClient, port network.Port, sgNames map[string]string) Model {
+func New(client *gophercloud.ServiceClient, port network.Port) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "port name"
@@ -76,21 +85,11 @@ func New(client *gophercloud.ServiceClient, port network.Port, sgNames map[strin
 	ai.SetWidth(40)
 	ai.SetValue(strings.Join(apStrs, "; "))
 
-	// Format security groups as names
-	var sgStrs []string
-	for _, sgID := range port.SecurityGroups {
-		if name, ok := sgNames[sgID]; ok {
-			sgStrs = append(sgStrs, name)
-		} else {
-			sgStrs = append(sgStrs, sgID)
-		}
-	}
-	si := textinput.New()
-	si.Prompt = ""
-	si.Placeholder = "security group names (comma-separated)"
-	si.CharLimit = 500
-	si.SetWidth(40)
-	si.SetValue(strings.Join(sgStrs, ", "))
+	pf := textinput.New()
+	pf.Prompt = "  🔍 "
+	pf.Placeholder = "filter..."
+	pf.CharLimit = 50
+	pf.SetWidth(30)
 
 	admin := 0
 	if !port.AdminStateUp {
@@ -108,24 +107,52 @@ func New(client *gophercloud.ServiceClient, port network.Port, sgNames map[strin
 		Active:         true,
 		client:         client,
 		port:           port,
-		sgNames:        sgNames,
+		selectedSGs:    make(map[int]bool),
 		nameInput:      ni,
 		allowPairInput: ai,
-		sgInput:        si,
+		sgPickerFilter: pf,
 		adminState:     admin,
 		portSecurity:   ps,
+		loadingSGs:     true,
 		spinner:        s,
 	}
 }
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
-	return textinput.Blink
+	client := m.client
+	portSGs := m.port.SecurityGroups
+	return tea.Batch(textinput.Blink, m.spinner.Tick, func() tea.Msg {
+		sgs, err := network.ListSecurityGroups(context.Background(), client)
+		if err != nil {
+			return sgLoadErrMsg{err: err}
+		}
+		// Pre-select the port's current security groups
+		_ = portSGs
+		return sgLoadedMsg{sgs: sgs}
+	})
 }
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case sgLoadedMsg:
+		m.loadingSGs = false
+		m.secGroups = msg.sgs
+		// Pre-select the port's current security groups
+		for _, portSGID := range m.port.SecurityGroups {
+			for i, sg := range m.secGroups {
+				if sg.ID == portSGID {
+					m.selectedSGs[i] = true
+					break
+				}
+			}
+		}
+		return m, nil
+	case sgLoadErrMsg:
+		m.loadingSGs = false
+		m.err = "Failed to load security groups: " + msg.err.Error()
+		return m, nil
 	case portUpdatedMsg:
 		m.submitting = false
 		m.Active = false
@@ -137,7 +164,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.err = msg.err.Error()
 		return m, nil
 	case spinner.TickMsg:
-		if m.submitting {
+		if m.submitting || m.loadingSGs {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -151,6 +178,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.submitting {
 			return m, nil
 		}
+		if m.sgPickerOpen {
+			return m.updateSGPicker(msg)
+		}
 		return m.handleKey(msg)
 	}
 	return m, nil
@@ -158,7 +188,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) isTextInput() bool {
 	switch m.focusField {
-	case fieldName, fieldAllowPairs, fieldSecGroups:
+	case fieldName, fieldAllowPairs:
 		return true
 	}
 	return false
@@ -218,6 +248,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	case key.Matches(msg, shared.Keys.Enter):
 		switch m.focusField {
+		case fieldSecGroups:
+			m.sgPickerOpen = true
+			m.sgPickerCursor = 0
+			m.sgPickerFilter.SetValue("")
+			m.sgPickerFilter.Focus()
+			return m, nil
 		case fieldAdmin, fieldPortSec:
 			m.focusField++
 			m.updateFocus()
@@ -235,6 +271,66 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m.routeToInput(msg)
 }
 
+func (m Model) updateSGPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
+	filtered := m.filteredSGs()
+
+	switch msg.String() {
+	case "esc":
+		m.sgPickerOpen = false
+		m.sgPickerFilter.Blur()
+		return m, nil
+	case "enter":
+		m.sgPickerOpen = false
+		m.sgPickerFilter.Blur()
+		m.focusField++
+		m.updateFocus()
+		return m, nil
+	case " ":
+		if len(filtered) > 0 && m.sgPickerCursor < len(filtered) {
+			idx := filtered[m.sgPickerCursor].id
+			if m.selectedSGs[idx] {
+				delete(m.selectedSGs, idx)
+			} else {
+				m.selectedSGs[idx] = true
+			}
+		}
+		return m, nil
+	case "up", "k":
+		if m.sgPickerCursor > 0 {
+			m.sgPickerCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.sgPickerCursor < len(filtered)-1 {
+			m.sgPickerCursor++
+		}
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.sgPickerFilter, cmd = m.sgPickerFilter.Update(msg)
+	m.sgPickerCursor = 0
+	return m, cmd
+}
+
+type sgItem struct {
+	id   int
+	name string
+	desc string
+}
+
+func (m Model) filteredSGs() []sgItem {
+	q := strings.ToLower(m.sgPickerFilter.Value())
+	var items []sgItem
+	for i, sg := range m.secGroups {
+		if q == "" || strings.Contains(strings.ToLower(sg.Name), q) ||
+			strings.Contains(strings.ToLower(sg.Description), q) {
+			items = append(items, sgItem{id: i, name: sg.Name, desc: sg.Description})
+		}
+	}
+	return items
+}
+
 func (m Model) routeToInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focusField {
@@ -242,8 +338,6 @@ func (m Model) routeToInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.nameInput, cmd = m.nameInput.Update(msg)
 	case fieldAllowPairs:
 		m.allowPairInput, cmd = m.allowPairInput.Update(msg)
-	case fieldSecGroups:
-		m.sgInput, cmd = m.sgInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -251,15 +345,35 @@ func (m Model) routeToInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m *Model) updateFocus() {
 	m.nameInput.Blur()
 	m.allowPairInput.Blur()
-	m.sgInput.Blur()
 	switch m.focusField {
 	case fieldName:
 		m.nameInput.Focus()
 	case fieldAllowPairs:
 		m.allowPairInput.Focus()
-	case fieldSecGroups:
-		m.sgInput.Focus()
 	}
+}
+
+func (m Model) sortedSGIndices() []int {
+	indices := make([]int, 0, len(m.selectedSGs))
+	for idx := range m.selectedSGs {
+		if idx < len(m.secGroups) {
+			indices = append(indices, idx)
+		}
+	}
+	sort.Ints(indices)
+	return indices
+}
+
+func (m Model) sgDisplayValue() string {
+	indices := m.sortedSGIndices()
+	if len(indices) == 0 {
+		return lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("none selected")
+	}
+	var names []string
+	for _, idx := range indices {
+		names = append(names, m.secGroups[idx].Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
@@ -291,12 +405,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 		opts.AllowedAddressPairs = &pairs
 	}
 
-	// Parse security groups - resolve names to IDs
-	sgRaw := strings.TrimSpace(m.sgInput.Value())
-	sgIDs, err := m.resolveSecurityGroups(sgRaw)
-	if err != nil {
-		m.err = err.Error()
-		return m, nil
+	// Collect selected security group IDs
+	indices := m.sortedSGIndices()
+	var sgIDs []string
+	for _, idx := range indices {
+		sgIDs = append(sgIDs, m.secGroups[idx].ID)
 	}
 	if !stringSliceEqual(sgIDs, m.port.SecurityGroups) {
 		opts.SecurityGroups = &sgIDs
@@ -321,31 +434,6 @@ func (m Model) submit() (Model, tea.Cmd) {
 		shared.Debugf("[portedit] updated port %s", portID)
 		return portUpdatedMsg{name: displayName}
 	})
-}
-
-func (m Model) resolveSecurityGroups(raw string) ([]string, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	// Build reverse map: name → ID
-	nameToID := make(map[string]string)
-	for id, name := range m.sgNames {
-		nameToID[name] = id
-	}
-	var ids []string
-	for _, part := range strings.Split(raw, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if id, ok := nameToID[part]; ok {
-			ids = append(ids, id)
-		} else {
-			// Assume it's an ID
-			ids = append(ids, part)
-		}
-	}
-	return ids, nil
 }
 
 func parseAddressPairs(raw string) ([]network.AddressPair, error) {
@@ -401,7 +489,6 @@ func stringSliceEqual(a, b []string) bool {
 
 // View renders the modal.
 func (m Model) View() string {
-	// Show port IPs and MAC in title area
 	var subtitleParts []string
 	for _, ip := range m.port.FixedIPs {
 		subtitleParts = append(subtitleParts, ip.IPAddress)
@@ -428,15 +515,21 @@ func (m Model) View() string {
 		value   string
 		focused bool
 	}
+
+	sgValue := m.sgDisplayValue()
+	if m.loadingSGs {
+		sgValue = m.spinner.View() + " Loading..."
+	}
+
 	fields := []field{
 		{"Name", m.nameInput.View(), m.focusField == fieldName},
 		{"Allow Pairs", m.allowPairInput.View(), m.focusField == fieldAllowPairs},
-		{"Sec Groups", m.sgInput.View(), m.focusField == fieldSecGroups},
+		{"Sec Groups", sgValue, m.focusField == fieldSecGroups},
 		{"Admin State", cycleDisplay(toggleOpts, m.adminState), m.focusField == fieldAdmin},
 		{"Port Security", cycleDisplay(toggleOpts, m.portSecurity), m.focusField == fieldPortSec},
 	}
 
-	for _, f := range fields {
+	for i, f := range fields {
 		cursor := "  "
 		if f.focused {
 			cursor = "▸ "
@@ -447,6 +540,11 @@ func (m Model) View() string {
 			style = style.Foreground(shared.ColorHighlight)
 		}
 		body.WriteString(fmt.Sprintf("%s%s %s\n", cursor, label, style.Render(f.value)))
+
+		// Show inline SG picker
+		if i == 2 && m.sgPickerOpen {
+			body.WriteString(m.renderSGPicker())
+		}
 	}
 
 	body.WriteString("\n")
@@ -460,12 +558,58 @@ func (m Model) View() string {
 	}
 	body.WriteString("  " + submitStyle.Render("[ctrl+s] Submit") + "  " + cancelStyle.Render("[esc] Cancel") + "\n")
 	body.WriteString("\n")
-	body.WriteString(shared.StyleHelp.Render("  tab/↑↓ fields • ←→ cycle • ctrl+s submit • esc cancel"))
-	body.WriteString("\n")
-	body.WriteString(shared.StyleHelp.Render("  allow pairs: ip;ip,mac (semicolons between entries)"))
+	if m.sgPickerOpen {
+		body.WriteString(shared.StyleHelp.Render("  ↑↓ navigate • space toggle • enter confirm • esc close • type to filter"))
+	} else {
+		body.WriteString(shared.StyleHelp.Render("  tab/↑↓ fields • ←→ cycle • ctrl+s submit • esc cancel"))
+		body.WriteString("\n")
+		body.WriteString(shared.StyleHelp.Render("  allow pairs: ip;ip,mac (semicolons between entries)"))
+	}
 
 	content := title + "\n\n" + body.String()
 	return m.renderModal(content)
+}
+
+func (m Model) renderSGPicker() string {
+	var b strings.Builder
+	filtered := m.filteredSGs()
+
+	b.WriteString("      " + m.sgPickerFilter.View() + "\n")
+
+	maxShow := 8
+	if len(filtered) < maxShow {
+		maxShow = len(filtered)
+	}
+
+	start := 0
+	if m.sgPickerCursor >= maxShow {
+		start = m.sgPickerCursor - maxShow + 1
+	}
+	end := start + maxShow
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+
+	for i := start; i < end; i++ {
+		item := filtered[i]
+		cursor := "  "
+		style := lipgloss.NewStyle().Foreground(shared.ColorFg)
+		if i == m.sgPickerCursor {
+			cursor = "▸ "
+			style = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
+		}
+		check := "○ "
+		if m.selectedSGs[item.id] {
+			check = "● "
+		}
+		desc := ""
+		if item.desc != "" {
+			desc = shared.StyleHelp.Render(" " + item.desc)
+		}
+		b.WriteString(fmt.Sprintf("      %s%s%s%s\n", cursor, check, style.Render(item.name), desc))
+	}
+
+	return b.String()
 }
 
 func cycleDisplay(options []string, selected int) string {

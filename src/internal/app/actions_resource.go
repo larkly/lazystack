@@ -359,13 +359,7 @@ func (m Model) openPortCreate() (Model, tea.Cmd) {
 		return m, nil
 	}
 	subs := m.networkView.NetworkSubnets()
-	// Fetch security groups synchronously is not ideal; pass empty and let user type IDs/names.
-	// We build a list from the sgNames map which has SGs from current ports.
-	var sgs []network.SecurityGroup
-	for id, name := range m.networkView.SGNames() {
-		sgs = append(sgs, network.SecurityGroup{ID: id, Name: name})
-	}
-	m.portCreate = portcreate.New(m.client.Network, netID, netName, subs, sgs)
+	m.portCreate = portcreate.New(m.client.Network, netID, netName, subs)
 	m.portCreate.SetSize(m.width, m.height)
 	return m, m.portCreate.Init()
 }
@@ -375,7 +369,7 @@ func (m Model) openPortEdit() (Model, tea.Cmd) {
 	if p == nil {
 		return m, nil
 	}
-	m.portEdit = portedit.New(m.client.Network, *p, m.networkView.SGNames())
+	m.portEdit = portedit.New(m.client.Network, *p)
 	m.portEdit.SetSize(m.width, m.height)
 	return m, m.portEdit.Init()
 }
