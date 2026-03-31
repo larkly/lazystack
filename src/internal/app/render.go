@@ -45,10 +45,8 @@ func (m Model) viewName() string {
 		return "routerview"
 	case viewLBView:
 		return "lbview"
-	case viewImageList:
-		return "imagelist"
-	case viewImageDetail:
-		return "imagedetail"
+	case viewImageView:
+		return "imageview"
 	}
 	return ""
 }
@@ -121,6 +119,15 @@ func (m Model) viewContent() string {
 	}
 	if m.sgRuleCreate.Active {
 		return m.sgRuleCreate.View()
+	}
+	if m.imageEdit.Active {
+		return m.imageEdit.View()
+	}
+	if m.imageCreate.Active {
+		return m.imageCreate.View()
+	}
+	if m.imageDownload.Active {
+		return m.imageDownload.View()
 	}
 	if m.lbCreate.Active {
 		return m.lbCreate.View()
@@ -202,10 +209,8 @@ func (m Model) viewContent() string {
 		content = m.routerView.View()
 	case viewLBView:
 		content = m.lbView.View()
-	case viewImageList:
-		content = m.imageList.View()
-	case viewImageDetail:
-		content = m.imageDetail.View()
+	case viewImageView:
+		content = m.imageView.View()
 	}
 
 	// Add tab bar for top-level views
