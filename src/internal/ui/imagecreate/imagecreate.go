@@ -519,19 +519,9 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// baseImageName strips image and compression extensions from a filename.
-// e.g. "ubuntu-24.04.qcow2.gz" → "ubuntu-24.04"
+// baseImageName returns the filename as the default image name.
 func baseImageName(filename string) string {
-	name := filename
-	// Strip compression extension
-	for _, ext := range []string{".gz", ".bz2", ".xz"} {
-		name = strings.TrimSuffix(name, ext)
-	}
-	// Strip image format extension
-	for _, ext := range []string{".qcow2", ".raw", ".vmdk", ".vdi", ".iso", ".img", ".ami"} {
-		name = strings.TrimSuffix(name, ext)
-	}
-	return name
+	return filename
 }
 
 func (m *Model) autoDetectDiskFormat(filename string) {
