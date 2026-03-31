@@ -143,6 +143,16 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Enter):
 		if len(m.subnets) > 0 && m.cursor < len(m.subnets) {
 			m.selectedSubnet = m.subnets[m.cursor]
+
+			// SLAAC/DHCPv6 subnets don't allow explicit IP allocation;
+			// submit immediately with auto-allocation.
+			if m.selectedSubnet.IPv6AddressMode != "" {
+				m.phase = phaseConfirm
+				m.submitting = true
+				m.err = ""
+				return m, tea.Batch(m.spinner.Tick, m.submitAutoIP())
+			}
+
 			m.phase = phaseConfirm
 			m.focusField = confirmIP
 			m.err = ""
@@ -286,6 +296,36 @@ func (m Model) submitInterface() (Model, tea.Cmd) {
 		shared.Debugf("[subnetpicker] added interface (port %s, ip %s) to router %s", port.ID, ipStr, routerName)
 		return interfaceAddedMsg{routerName: routerName}
 	})
+}
+
+// submitAutoIP creates a port with Neutron-allocated IP (for SLAAC/DHCPv6 subnets).
+func (m Model) submitAutoIP() tea.Cmd {
+	client := m.client
+	routerID := m.routerID
+	routerName := m.routerName
+	sub := m.selectedSubnet
+
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		shared.Debugf("[subnetpicker] creating port (subnet %s, auto IP) for router %s (%s)", sub.ID, routerID, routerName)
+		port, err := network.CreatePort(ctx, client, sub.NetworkID, sub.ID, "")
+		if err != nil {
+			shared.Debugf("[subnetpicker] error creating port for router %s: %v", routerID, err)
+			return interfaceAddErrMsg{err: err}
+		}
+
+		shared.Debugf("[subnetpicker] adding port %s to router %s (%s)", port.ID, routerID, routerName)
+		err = network.AddRouterInterfaceByPort(ctx, client, routerID, port.ID)
+		if err != nil {
+			shared.Debugf("[subnetpicker] error adding port to router %s, cleaning up port %s: %v", routerID, port.ID, err)
+			_ = network.DeletePort(ctx, client, port.ID)
+			return interfaceAddErrMsg{err: err}
+		}
+
+		shared.Debugf("[subnetpicker] added interface (port %s, auto IP) to router %s", port.ID, routerName)
+		return interfaceAddedMsg{routerName: routerName}
+	}
 }
 
 func (m *Model) ensureVisible() {

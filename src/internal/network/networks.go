@@ -31,6 +31,7 @@ type Subnet struct {
 	GatewayIP       string
 	IPVersion       int
 	EnableDHCP      bool
+	IPv6AddressMode string
 	AllocationPools []AllocationPool
 }
 
@@ -86,13 +87,14 @@ func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subn
 		}
 		for _, s := range extracted {
 			sub := Subnet{
-				ID:         s.ID,
-				Name:       s.Name,
-				NetworkID:  s.NetworkID,
-				CIDR:       s.CIDR,
-				GatewayIP:  s.GatewayIP,
-				IPVersion:  s.IPVersion,
-				EnableDHCP: s.EnableDHCP,
+				ID:              s.ID,
+				Name:            s.Name,
+				NetworkID:       s.NetworkID,
+				CIDR:            s.CIDR,
+				GatewayIP:       s.GatewayIP,
+				IPVersion:       s.IPVersion,
+				EnableDHCP:      s.EnableDHCP,
+				IPv6AddressMode: s.IPv6AddressMode,
 			}
 			for _, pool := range s.AllocationPools {
 				sub.AllocationPools = append(sub.AllocationPools, AllocationPool{
