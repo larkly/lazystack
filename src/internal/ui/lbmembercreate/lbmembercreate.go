@@ -93,6 +93,8 @@ type Model struct {
 	editMode bool
 	memberID string
 
+	weight0Confirmed bool
+
 	focusField int
 	submitting bool
 	spinner    spinner.Model
@@ -563,6 +565,7 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.portInput, cmd = m.portInput.Update(msg)
 	case fieldWeight:
 		m.weightInput, cmd = m.weightInput.Update(msg)
+		m.weight0Confirmed = false
 	case fieldMonitorAddr:
 		m.monitorAddr, cmd = m.monitorAddr.Update(msg)
 	case fieldMonitorPort:
@@ -584,6 +587,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 			m.err = "Weight must be a number between 0 and 256"
 			return m, nil
 		}
+	}
+	if weight == 0 && !m.weight0Confirmed {
+		m.err = "Weight 0 disables all traffic to this member. Submit again to confirm."
+		m.weight0Confirmed = true
+		return m, nil
 	}
 
 	monitorAddressRaw := strings.TrimSpace(m.monitorAddr.Value())

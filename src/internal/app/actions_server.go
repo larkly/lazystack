@@ -990,6 +990,42 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			return shared.ResourceActionMsg{Action: "Deleted member", Name: name}
 		}
+	case "delete_lb_members_bulk":
+		lbClient := m.client.LoadBalancer
+		poolID := action.ServerID
+		lbID := ""
+		if lb := m.lbDetail.LB(); lb != nil {
+			lbID = lb.ID
+		}
+		ids := m.lbDetail.SelectedMemberIDs()
+		count := len(ids)
+		m.lbDetail.ClearMemberSelection()
+		return m, func() tea.Msg {
+			ctx := context.Background()
+			var failed int
+			for i, memberID := range ids {
+				if i > 0 && lbID != "" {
+					if err := loadbalancer.WaitForActive(ctx, lbClient, lbID, 60*time.Second); err != nil {
+						shared.Debugf("[action] bulk delete wait failed: %s", err)
+						failed += len(ids) - i
+						break
+					}
+				}
+				shared.Debugf("[action] bulk deleting member %s from pool %s (%d/%d)", memberID, poolID, i+1, count)
+				if err := loadbalancer.DeleteMember(ctx, lbClient, poolID, memberID); err != nil {
+					shared.Debugf("[action] bulk delete member %s failed: %s", memberID, err)
+					failed++
+				}
+			}
+			if failed > 0 {
+				return shared.ResourceActionErrMsg{
+					Action: "Bulk delete",
+					Name:   fmt.Sprintf("%d of %d members", failed, count),
+					Err:    fmt.Errorf("%d members failed to delete", failed),
+				}
+			}
+			return shared.ResourceActionMsg{Action: fmt.Sprintf("Deleted %d members from", count), Name: "pool"}
+		}
 	case "delete_keypair":
 		computeC := m.client.Compute
 		name := action.ServerID // keypair name is stored in ServerID

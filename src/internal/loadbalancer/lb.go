@@ -3,6 +3,8 @@ package loadbalancer
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
@@ -587,4 +589,28 @@ func DeleteHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient,
 		return fmt.Errorf("deleting health monitor %s: %w", id, r.Err)
 	}
 	return nil
+}
+
+// WaitForActive polls the LB until its provisioning status is ACTIVE or the
+// context is cancelled. Returns nil once ACTIVE, error on timeout/failure.
+func WaitForActive(ctx context.Context, client *gophercloud.ServiceClient, lbID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		lb, err := loadbalancers.Get(ctx, client, lbID).Extract()
+		if err != nil {
+			return fmt.Errorf("polling LB %s: %w", lbID, err)
+		}
+		if lb.ProvisioningStatus == "ACTIVE" {
+			return nil
+		}
+		if strings.HasPrefix(lb.ProvisioningStatus, "ERROR") {
+			return fmt.Errorf("LB %s entered %s", lbID, lb.ProvisioningStatus)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return fmt.Errorf("timed out waiting for LB %s to become ACTIVE", lbID)
 }

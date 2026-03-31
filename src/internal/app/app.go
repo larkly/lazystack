@@ -853,6 +853,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+			// Bulk member selection: space toggles, x toggles all
+			if key.Matches(msg, shared.Keys.Select) && pane == lbdetail.FocusMembers {
+				m.lbDetail.ToggleMemberSelection()
+				return m, nil
+			}
+			if msg.String() == "x" && pane == lbdetail.FocusMembers {
+				m.lbDetail.ToggleAllMemberSelection()
+				return m, nil
+			}
+
+			// Drain member: 'w' key on members pane
+			if msg.String() == "w" && pane == lbdetail.FocusMembers {
+				if m.lbDetail.SelectedMemberCount() > 0 {
+					return m.drainLBMembersBulk()
+				}
+				if mem := m.lbDetail.SelectedMember(); mem != nil && mem.Weight > 0 {
+					return m.drainLBMember()
+				}
+			}
+
 			switch {
 			case key.Matches(msg, shared.Keys.Delete):
 				switch pane {
@@ -870,6 +890,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m.openLBDeleteConfirm()
 				case lbdetail.FocusMembers:
+					if m.lbDetail.SelectedMemberCount() > 0 {
+						return m.openLBBulkMemberDeleteConfirm()
+					}
 					if m.lbDetail.SelectedMemberID() != "" {
 						return m.openLBMemberDeleteConfirm()
 					}

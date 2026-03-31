@@ -2,6 +2,7 @@ package lbcreate
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/larkly/lazystack/internal/loadbalancer"
@@ -46,7 +47,10 @@ type Model struct {
 	selectedSubnet int
 	pickerOpen     bool
 	pickerCursor   int
-	subnetsLoading bool
+	subnetsLoading  bool
+	subnetFilter    string
+	subnetFiltering bool
+	filteredSubnets []network.Subnet
 
 	// Edit mode
 	editMode bool
@@ -170,6 +174,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case subnetsLoadedMsg:
 		m.subnetsLoading = false
 		m.subnets = msg.subnets
+		m.applySubnetFilter()
 		return m, nil
 	case subnetsFetchErrMsg:
 		m.subnetsLoading = false
@@ -269,6 +274,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch m.currentField() {
 		case fieldSubnet:
 			m.pickerOpen = true
+			m.subnetFilter = ""
+			m.subnetFiltering = false
+			m.applySubnetFilter()
 			m.pickerCursor = m.selectedSubnet
 			return m, nil
 		case fieldSubmit:
@@ -301,6 +309,39 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.subnetFiltering {
+		switch {
+		case key.Matches(msg, shared.Keys.Back):
+			m.subnetFiltering = false
+			m.subnetFilter = ""
+			m.applySubnetFilter()
+			return m, nil
+		case key.Matches(msg, shared.Keys.Enter):
+			m.subnetFiltering = false
+			return m, nil
+		default:
+			s := keyText(msg)
+			switch s {
+			case "backspace":
+				if len(m.subnetFilter) > 0 {
+					m.subnetFilter = m.subnetFilter[:len(m.subnetFilter)-1]
+					m.applySubnetFilter()
+				}
+				return m, nil
+			case "esc":
+				m.subnetFiltering = false
+				m.subnetFilter = ""
+				m.applySubnetFilter()
+				return m, nil
+			}
+			if len(s) == 1 && s[0] >= 32 && s[0] < 127 {
+				m.subnetFilter += s
+				m.applySubnetFilter()
+				return m, nil
+			}
+		}
+	}
+
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		m.pickerOpen = false
@@ -311,13 +352,28 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(msg, shared.Keys.Down):
-		if m.pickerCursor < len(m.subnets)-1 {
+		if m.pickerCursor < len(m.filteredSubnets)-1 {
 			m.pickerCursor++
 		}
 		return m, nil
+	case keyText(msg) == "/":
+		m.subnetFiltering = true
+		m.subnetFilter = ""
+		m.applySubnetFilter()
+		return m, nil
 	case key.Matches(msg, shared.Keys.Enter):
-		m.selectedSubnet = m.pickerCursor
+		if len(m.filteredSubnets) == 0 {
+			return m, nil
+		}
+		selected := m.filteredSubnets[m.pickerCursor]
+		for i, s := range m.subnets {
+			if s.ID == selected.ID {
+				m.selectedSubnet = i
+				break
+			}
+		}
 		m.pickerOpen = false
+		m.subnetFiltering = false
 		m.focusField = (m.focusField + 1) % m.fieldCount()
 		m.updateFocus()
 		return m, nil
@@ -387,7 +443,10 @@ func (m *Model) SetSize(w, h int) {
 // Hints returns key hints.
 func (m Model) Hints() string {
 	if m.pickerOpen {
-		return "↑↓ navigate • enter select • esc cancel"
+		if m.subnetFiltering {
+			return "type to filter • backspace delete • enter done • esc clear"
+		}
+		return "↑↓ navigate • enter select • / filter • esc cancel"
 	}
 	return "tab/↑↓ navigate • enter open picker • ctrl+s submit • esc cancel"
 }
@@ -481,8 +540,15 @@ func (m Model) renderPicker() string {
 	}
 
 	var lines []string
+
+	if m.subnetFilter != "" || m.subnetFiltering {
+		filterLine := "/ " + m.subnetFilter
+		countInfo := fmt.Sprintf(" (%d of %d)", len(m.filteredSubnets), len(m.subnets))
+		lines = append(lines, shared.StyleHelp.Render(filterLine+countInfo))
+	}
+
 	lines = append(lines, title)
-	for i, s := range m.subnets {
+	for i, s := range m.filteredSubnets {
 		if i < start {
 			continue
 		}
@@ -500,4 +566,21 @@ func (m Model) renderPicker() string {
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) applySubnetFilter() {
+	m.filteredSubnets = nil
+	query := strings.ToLower(strings.TrimSpace(m.subnetFilter))
+	for _, s := range m.subnets {
+		if query == "" ||
+			strings.Contains(strings.ToLower(s.Name), query) ||
+			strings.Contains(strings.ToLower(s.CIDR), query) {
+			m.filteredSubnets = append(m.filteredSubnets, s)
+		}
+	}
+	m.pickerCursor = 0
+}
+
+func keyText(msg tea.KeyMsg) string {
+	return msg.String()
 }
