@@ -69,12 +69,9 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewRouterView:
 		m.routerView, cmd = m.routerView.Update(msg)
 		m.statusBar.Hint = m.routerView.Hints()
-	case viewLBList:
-		m.lbList, cmd = m.lbList.Update(msg)
-		m.statusBar.Hint = m.lbList.Hints()
-	case viewLBDetail:
-		m.lbDetail, cmd = m.lbDetail.Update(msg)
-		m.statusBar.Hint = m.lbDetail.Hints()
+	case viewLBView:
+		m.lbView, cmd = m.lbView.Update(msg)
+		m.statusBar.Hint = m.lbView.Hints()
 	case viewImageList:
 		m.imageList, cmd = m.imageList.Update(msg)
 		m.statusBar.Hint = m.imageList.Hints()
@@ -120,7 +117,7 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 			m.routerView, cmd = m.routerView.Update(msg)
 			cmds = append(cmds, cmd)
 		case "loadbalancers":
-			m.lbList, cmd = m.lbList.Update(msg)
+			m.lbView, cmd = m.lbView.Update(msg)
 			cmds = append(cmds, cmd)
 		case "images":
 			m.imageList, cmd = m.imageList.Update(msg)
@@ -136,10 +133,7 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 	case viewVolumeDetail:
 		m.volumeDetail, cmd = m.volumeDetail.Update(msg)
 		cmds = append(cmds, cmd)
-	case viewLBDetail:
-		m.lbDetail, cmd = m.lbDetail.Update(msg)
-		cmds = append(cmds, cmd)
-	// viewRouterView is a tab view, not a sub-view — handled above
+	// viewRouterView and viewLBView are tab views, not sub-views — handled above
 	case viewImageDetail:
 		m.imageDetail, cmd = m.imageDetail.Update(msg)
 		cmds = append(cmds, cmd)
@@ -313,10 +307,10 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		return m.openKeypairCreate()
 
 	case "lblist":
-		m.view = viewLBList
-		m.statusBar.CurrentView = "lblist"
-		m.statusBar.Hint = m.lbList.Hints()
-		return m, m.lbList.Init()
+		m.view = viewLBView
+		m.statusBar.CurrentView = "lbview"
+		m.statusBar.Hint = m.lbView.Hints()
+		return m, m.lbView.ForceRefresh()
 
 	case "imagelist":
 		m.view = viewImageList
@@ -366,10 +360,8 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.networkView.ForceRefresh()
 	case viewRouterView:
 		return m, m.routerView.ForceRefresh()
-	case viewLBList:
-		return m, m.lbList.ForceRefresh()
-	case viewLBDetail:
-		return m, m.lbDetail.ForceRefresh()
+	case viewLBView:
+		return m, m.lbView.ForceRefresh()
 	case viewImageList:
 		return m, m.imageList.ForceRefresh()
 	case viewImageDetail:

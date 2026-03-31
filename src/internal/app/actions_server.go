@@ -1025,12 +1025,12 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		lbClient := m.client.LoadBalancer
 		poolID := action.ServerID
 		lbID := ""
-		if lb := m.lbDetail.LB(); lb != nil {
+		if lb := m.lbView.LB(); lb != nil {
 			lbID = lb.ID
 		}
-		ids := m.lbDetail.SelectedMemberIDs()
+		ids := m.lbView.SelectedMemberIDs()
 		count := len(ids)
-		m.lbDetail.ClearMemberSelection()
+		m.lbView.ClearMemberSelection()
 		return m, func() tea.Msg {
 			ctx := context.Background()
 			var failed int

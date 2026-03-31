@@ -141,12 +141,12 @@ func (m ConfirmModel) View() string {
 	}
 
 	// Buttons
-	confirmStyle := lipgloss.NewStyle().Padding(0, 2).Background(shared.ColorMuted).Foreground(shared.ColorFg)
-	cancelStyle := lipgloss.NewStyle().Padding(0, 2).Background(shared.ColorMuted).Foreground(shared.ColorFg)
+	confirmStyle := shared.StyleButton
+	cancelStyle := shared.StyleButton
 	if m.focused == 0 {
-		confirmStyle = confirmStyle.Background(shared.ColorSuccess).Foreground(shared.ColorBg).Bold(true)
+		confirmStyle = shared.StyleButtonSubmit
 	} else {
-		cancelStyle = cancelStyle.Background(shared.ColorError).Foreground(shared.ColorBg).Bold(true)
+		cancelStyle = shared.StyleButtonCancel
 	}
 	buttons := confirmStyle.Render("[y] Confirm") + "  " + cancelStyle.Render("[n] Cancel")
 

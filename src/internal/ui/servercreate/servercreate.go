@@ -707,13 +707,13 @@ func (m Model) View() string {
 	b.WriteString("\n")
 
 	// Buttons
-	submitStyle := lipgloss.NewStyle().Padding(0, 2).Background(shared.ColorMuted).Foreground(shared.ColorFg)
-	cancelStyle := lipgloss.NewStyle().Padding(0, 2).Background(shared.ColorMuted).Foreground(shared.ColorFg)
+	submitStyle := shared.StyleButton
+	cancelStyle := shared.StyleButton
 	if m.focusField == fieldSubmit {
-		submitStyle = submitStyle.Background(shared.ColorSuccess).Foreground(shared.ColorBg).Bold(true)
+		submitStyle = shared.StyleButtonSubmit
 	}
 	if m.focusField == fieldCancel {
-		cancelStyle = cancelStyle.Background(shared.ColorError).Foreground(shared.ColorBg).Bold(true)
+		cancelStyle = shared.StyleButtonCancel
 	}
 	b.WriteString("  " + submitStyle.Render("[ctrl+s] Submit") + "  " + cancelStyle.Render("[esc] Cancel") + "\n")
 	b.WriteString("\n")

@@ -1,13 +1,16 @@
-package lbdetail
+package lbview
 
 import (
 	"context"
 	"fmt"
 	"image/color"
+	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
@@ -15,47 +18,66 @@ import (
 	"github.com/larkly/lazystack/internal/shared"
 )
 
-// FocusPane identifies a pane in the load balancer detail view.
+// FocusPane identifies a pane in the load balancer view.
 type FocusPane int
 
 const (
-	FocusInfo FocusPane = iota
+	FocusSelector FocusPane = iota
+	FocusInfo
 	FocusListeners
 	FocusPools
 	FocusMembers
 )
 
-const FocusPaneCount = 4
+const focusPaneCount = 5
 const narrowThreshold = 80
 
-var selectedRowStyle = lipgloss.NewStyle().Background(lipgloss.Color("#073642")).Bold(true)
+var (
+	selectedRowStyle = lipgloss.NewStyle().Background(lipgloss.Color("#073642")).Bold(true)
+	sortColumns      = []string{"name", "vipaddress", "provstatus", "operstatus"}
+)
 
-type lbDetailLoadedMsg struct {
-	lb        *loadbalancer.LoadBalancer
-	listeners []loadbalancer.Listener
-	pools     []loadbalancer.Pool
-	members   map[string][]loadbalancer.Member
-	monitors  map[string]*loadbalancer.HealthMonitor
-}
-
-type lbDetailErrMsg struct {
-	err error
-}
-
-// Model is the load balancer detail view.
-type Model struct {
-	client    *gophercloud.ServiceClient
+// Messages
+type lbsLoadedMsg struct{ lbs []loadbalancer.LoadBalancer }
+type lbsErrMsg struct{ err error }
+type detailLoadedMsg struct {
 	lbID      string
-	lb        *loadbalancer.LoadBalancer
 	listeners []loadbalancer.Listener
 	pools     []loadbalancer.Pool
 	members   map[string][]loadbalancer.Member
 	monitors  map[string]*loadbalancer.HealthMonitor
-	loading   bool
-	spinner   spinner.Model
-	width     int
-	height    int
-	err       string
+}
+type detailErrMsg struct {
+	lbID string
+	err  error
+}
+type sortClearMsg struct{}
+
+// Model is the combined load balancer selector + detail view.
+type Model struct {
+	client *gophercloud.ServiceClient
+
+	// Selector state
+	lbs            []loadbalancer.LoadBalancer
+	cursor         int
+	selectorScroll int
+	sortCol        int
+	sortAsc        bool
+	sortHighlight  bool
+	sortClearAt    time.Time
+
+	// Search/filter
+	searchActive bool
+	searchInput  textinput.Model
+	searchFilter string
+
+	// Detail state for selected LB
+	listeners    []loadbalancer.Listener
+	pools        []loadbalancer.Pool
+	members      map[string][]loadbalancer.Member
+	monitors     map[string]*loadbalancer.HealthMonitor
+	lastDetailID string
+	detailErr    string
 
 	// Pane focus and cursors
 	focus          FocusPane
@@ -68,56 +90,88 @@ type Model struct {
 
 	// Bulk member selection
 	selectedMembers map[string]bool
+
+	// UI state
+	width           int
+	height          int
+	loading         bool
+	detailLoading   bool
+	spinner         spinner.Model
+	err             string
+	refreshInterval time.Duration
 }
 
-// New creates a load balancer detail model.
-func New(client *gophercloud.ServiceClient, lbID string) Model {
+// New creates a load balancer view model.
+func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
+
+	ti := textinput.New()
+	ti.Prompt = "/"
+	ti.CharLimit = 64
+
 	return Model{
-		client:   client,
-		lbID:     lbID,
-		loading:  true,
-		spinner:  s,
+		client:          client,
+		loading:         true,
+		spinner:         s,
+		searchInput:     ti,
 		members:         make(map[string][]loadbalancer.Member),
-		monitors:         make(map[string]*loadbalancer.HealthMonitor),
+		monitors:        make(map[string]*loadbalancer.HealthMonitor),
 		selectedMembers: make(map[string]bool),
+		refreshInterval: refreshInterval,
+		sortAsc:         true,
 	}
 }
 
-// Init fetches the load balancer details.
+// Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
-	shared.Debugf("[lbdetail] Init()")
-	return tea.Batch(m.spinner.Tick, m.fetchDetail())
+	shared.Debugf("[lbview] Init()")
+	return tea.Batch(m.spinner.Tick, m.fetchLBs())
 }
 
-// LBID returns the current load balancer ID.
-func (m Model) LBID() string {
-	return m.lbID
-}
-
-// LBName returns the current load balancer name.
-func (m Model) LBName() string {
-	if m.lb != nil {
-		if m.lb.Name != "" {
-			return m.lb.Name
-		}
-		return m.lbID
-	}
-	return m.lbID
-}
-
-// LB returns the current load balancer, or nil if not loaded.
-func (m Model) LB() *loadbalancer.LoadBalancer {
-	return m.lb
-}
+// --- Public accessors ---
 
 // FocusedPane returns the currently focused pane.
-func (m Model) FocusedPane() FocusPane {
-	return m.focus
+func (m Model) FocusedPane() FocusPane { return m.focus }
+
+// InSelector returns true if the selector pane is focused.
+func (m Model) InSelector() bool { return m.focus == FocusSelector }
+
+// SelectedLB returns the load balancer under the selector cursor.
+func (m Model) SelectedLB() *loadbalancer.LoadBalancer {
+	visible := m.visibleLBs()
+	if m.cursor >= 0 && m.cursor < len(visible) {
+		lb := visible[m.cursor]
+		return &lb
+	}
+	return nil
 }
 
-// SelectedListenerID returns the ID of the currently selected listener, or "".
+// LB returns the currently selected load balancer (alias for SelectedLB).
+func (m Model) LB() *loadbalancer.LoadBalancer {
+	return m.SelectedLB()
+}
+
+// LBID returns the selected load balancer ID.
+func (m Model) LBID() string {
+	if lb := m.SelectedLB(); lb != nil {
+		return lb.ID
+	}
+	return ""
+}
+
+// LBName returns the selected load balancer name.
+func (m Model) LBName() string {
+	if lb := m.SelectedLB(); lb != nil {
+		if lb.Name != "" {
+			return lb.Name
+		}
+		return lb.ID
+	}
+	return ""
+}
+
+// SelectedListenerID returns the ID of the currently selected listener.
 func (m Model) SelectedListenerID() string {
 	if m.listenerCursor >= 0 && m.listenerCursor < len(m.listeners) {
 		return m.listeners[m.listenerCursor].ID
@@ -137,7 +191,7 @@ func (m Model) SelectedListenerName() string {
 	return ""
 }
 
-// SelectedPoolID returns the ID of the currently selected pool, or "".
+// SelectedPoolID returns the ID of the currently selected pool.
 func (m Model) SelectedPoolID() string {
 	if m.poolCursor >= 0 && m.poolCursor < len(m.pools) {
 		return m.pools[m.poolCursor].ID
@@ -153,7 +207,7 @@ func (m Model) SelectedPoolName() string {
 	return ""
 }
 
-// SelectedMemberID returns the ID of the currently selected member, or "".
+// SelectedMemberID returns the ID of the currently selected member.
 func (m Model) SelectedMemberID() string {
 	members := m.selectedPoolMembers()
 	if m.memberCursor >= 0 && m.memberCursor < len(members) {
@@ -204,14 +258,10 @@ func (m Model) SelectedMember() *loadbalancer.Member {
 }
 
 // Listeners returns the current listeners list.
-func (m Model) Listeners() []loadbalancer.Listener {
-	return m.listeners
-}
+func (m Model) Listeners() []loadbalancer.Listener { return m.listeners }
 
 // Pools returns the current pools list.
-func (m Model) Pools() []loadbalancer.Pool {
-	return m.pools
-}
+func (m Model) Pools() []loadbalancer.Pool { return m.pools }
 
 // TotalMemberCount returns the total number of members across all pools.
 func (m Model) TotalMemberCount() int {
@@ -257,7 +307,6 @@ func (m *Model) ToggleAllMemberSelection() {
 	if len(members) == 0 {
 		return
 	}
-	// If all are selected, deselect all; otherwise select all
 	allSelected := true
 	for _, mem := range members {
 		if !m.selectedMembers[mem.ID] {
@@ -298,37 +347,84 @@ func (m *Model) ClearMemberSelection() {
 	m.selectedMembers = make(map[string]bool)
 }
 
-// Update handles messages.
+// --- Update ---
+
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case lbDetailLoadedMsg:
-		shared.Debugf("[lbdetail] lbDetailLoadedMsg: %d listeners, %d pools", len(msg.listeners), len(msg.pools))
+	case lbsLoadedMsg:
+		shared.Debugf("[lbview] loaded %d load balancers", len(msg.lbs))
+		var cursorID string
+		if lb := m.SelectedLB(); lb != nil {
+			cursorID = lb.ID
+		}
 		m.loading = false
-		m.lb = msg.lb
-		m.listeners = msg.listeners
-		m.pools = msg.pools
-		m.members = msg.members
-		m.monitors = msg.monitors
+		m.lbs = msg.lbs
 		m.err = ""
-		m.clampCursors()
-		return m, nil
+		m.sortLBs()
+		// Restore cursor position
+		if cursorID != "" {
+			for i, lb := range m.visibleLBs() {
+				if lb.ID == cursorID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		visible := m.visibleLBs()
+		if m.cursor >= len(visible) {
+			m.cursor = max(0, len(visible)-1)
+		}
+		// Trigger detail fetch if needed
+		var cmd tea.Cmd
+		if lb := m.SelectedLB(); lb != nil && lb.ID != m.lastDetailID {
+			_, cmd = m.onSelectorChange()
+		}
+		return m, cmd
 
-	case lbDetailErrMsg:
-		shared.Debugf("[lbdetail] lbDetailErrMsg: %v", msg.err)
+	case lbsErrMsg:
+		shared.Debugf("[lbview] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
-	case shared.TickMsg:
-		if m.loading {
-			shared.Debugf("[lbdetail] tick skipped (loading)")
+	case detailLoadedMsg:
+		shared.Debugf("[lbview] detail loaded: %d listeners, %d pools", len(msg.listeners), len(msg.pools))
+		if lb := m.SelectedLB(); lb == nil || msg.lbID != lb.ID {
+			return m, nil // stale detail
+		}
+		m.detailLoading = false
+		m.listeners = msg.listeners
+		m.pools = msg.pools
+		m.members = msg.members
+		m.monitors = msg.monitors
+		m.detailErr = ""
+		m.clampDetailCursors()
+		return m, nil
+
+	case detailErrMsg:
+		if lb := m.SelectedLB(); lb == nil || msg.lbID != lb.ID {
 			return m, nil
 		}
-		shared.Debugf("[lbdetail] tick fetching")
-		return m, m.fetchDetail()
+		m.detailLoading = false
+		m.detailErr = msg.err.Error()
+		return m, nil
+
+	case shared.TickMsg:
+		if m.loading || m.detailLoading {
+			return m, nil
+		}
+		cmds := []tea.Cmd{m.fetchLBs()}
+		if lb := m.SelectedLB(); lb != nil {
+			cmds = append(cmds, m.fetchDetail(lb.ID))
+		}
+		return m, tea.Batch(cmds...)
+
+	case sortClearMsg:
+		m.sortHighlight = false
+		return m, nil
 
 	case spinner.TickMsg:
-		if m.loading {
+		if m.loading || m.detailLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -347,37 +443,124 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	// Search mode: route keys to text input
+	if m.searchActive {
+		return m.handleSearchKey(msg)
+	}
+
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "lblist"}
+		if m.searchFilter != "" {
+			m.searchFilter = ""
+			m.searchInput.SetValue("")
+			m.cursor = 0
+			m.selectorScroll = 0
+			return m.onSelectorChange()
 		}
+		return m, nil
 
 	case key.Matches(msg, shared.Keys.Tab):
-		m.focus = (m.focus + 1) % FocusPaneCount
+		m.focus = (m.focus + 1) % focusPaneCount
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.ShiftTab):
-		m.focus = (m.focus + FocusPaneCount - 1) % FocusPaneCount
+		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Up):
-		return m.scrollUp(1), nil
+		return m.scrollUp(1)
 
 	case key.Matches(msg, shared.Keys.Down):
-		return m.scrollDown(1), nil
+		return m.scrollDown(1)
 
 	case key.Matches(msg, shared.Keys.PageUp):
-		return m.scrollUp(10), nil
+		return m.scrollUp(10)
 
 	case key.Matches(msg, shared.Keys.PageDown):
-		return m.scrollDown(10), nil
+		return m.scrollDown(10)
+
+	case key.Matches(msg, shared.Keys.Sort):
+		if m.focus == FocusSelector {
+			return m.cycleSort()
+		}
+
+	case key.Matches(msg, shared.Keys.ReverseSort):
+		if m.focus == FocusSelector {
+			return m.reverseSort()
+		}
+
+	case msg.String() == "/":
+		if m.focus == FocusSelector {
+			m.searchActive = true
+			m.searchInput.SetValue(m.searchFilter)
+			m.searchInput.Focus()
+			return m, m.searchInput.Focus()
+		}
 	}
 	return m, nil
 }
 
-func (m Model) scrollUp(n int) Model {
+func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
+		// Esc: clear filter and exit search
+		m.searchActive = false
+		m.searchFilter = ""
+		m.searchInput.SetValue("")
+		m.searchInput.Blur()
+		m.cursor = 0
+		m.selectorScroll = 0
+		return m.onSelectorChange()
+
+	case key.Matches(msg, shared.Keys.Enter):
+		// Enter: keep filter and exit search
+		m.searchActive = false
+		m.searchFilter = m.searchInput.Value()
+		m.searchInput.Blur()
+		m.cursor = 0
+		m.selectorScroll = 0
+		visible := m.visibleLBs()
+		if m.cursor >= len(visible) {
+			m.cursor = max(0, len(visible)-1)
+		}
+		return m.onSelectorChange()
+
+	default:
+		var cmd tea.Cmd
+		m.searchInput, cmd = m.searchInput.Update(msg)
+		// Live filter as user types
+		m.searchFilter = m.searchInput.Value()
+		m.cursor = 0
+		m.selectorScroll = 0
+		visible := m.visibleLBs()
+		if m.cursor >= len(visible) {
+			m.cursor = max(0, len(visible)-1)
+		}
+		var cmds []tea.Cmd
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		_, selCmd := m.onSelectorChange()
+		if selCmd != nil {
+			cmds = append(cmds, selCmd)
+		}
+		return m, tea.Batch(cmds...)
+	}
+}
+
+// --- Scrolling ---
+
+func (m Model) scrollUp(n int) (Model, tea.Cmd) {
 	switch m.focus {
+	case FocusSelector:
+		m.cursor -= n
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		m.ensureSelectorCursorVisible()
+		return m.onSelectorChange()
+	case FocusInfo:
+		// no scrolling
 	case FocusListeners:
 		m.listenerCursor -= n
 		if m.listenerCursor < 0 {
@@ -403,11 +586,25 @@ func (m Model) scrollUp(n int) Model {
 		}
 		m.ensureMemberCursorVisible()
 	}
-	return m
+	return m, nil
 }
 
-func (m Model) scrollDown(n int) Model {
+func (m Model) scrollDown(n int) (Model, tea.Cmd) {
 	switch m.focus {
+	case FocusSelector:
+		visible := m.visibleLBs()
+		m.cursor += n
+		maxIdx := len(visible) - 1
+		if maxIdx < 0 {
+			maxIdx = 0
+		}
+		if m.cursor > maxIdx {
+			m.cursor = maxIdx
+		}
+		m.ensureSelectorCursorVisible()
+		return m.onSelectorChange()
+	case FocusInfo:
+		// no scrolling
 	case FocusListeners:
 		m.listenerCursor += n
 		maxIdx := len(m.listeners) - 1
@@ -446,10 +643,181 @@ func (m Model) scrollDown(n int) Model {
 		}
 		m.ensureMemberCursorVisible()
 	}
-	return m
+	return m, nil
 }
 
-func (m *Model) clampCursors() {
+func (m Model) onSelectorChange() (Model, tea.Cmd) {
+	lb := m.SelectedLB()
+	if lb == nil {
+		if m.lastDetailID != "" {
+			m.resetDetailState()
+			m.lastDetailID = ""
+		}
+		return m, nil
+	}
+	if lb.ID == m.lastDetailID {
+		return m, nil
+	}
+	m.lastDetailID = lb.ID
+	m.resetDetailState()
+	m.detailLoading = true
+	return m, tea.Batch(m.spinner.Tick, m.fetchDetail(lb.ID))
+}
+
+func (m *Model) resetDetailState() {
+	m.listeners = nil
+	m.pools = nil
+	m.members = make(map[string][]loadbalancer.Member)
+	m.monitors = make(map[string]*loadbalancer.HealthMonitor)
+	m.detailErr = ""
+	m.listenerCursor = 0
+	m.listenerScroll = 0
+	m.poolCursor = 0
+	m.poolScroll = 0
+	m.memberCursor = 0
+	m.memberScroll = 0
+	m.selectedMembers = make(map[string]bool)
+}
+
+// --- Filter/search ---
+
+func (m Model) visibleLBs() []loadbalancer.LoadBalancer {
+	if m.searchFilter == "" {
+		return m.lbs
+	}
+	filter := strings.ToLower(m.searchFilter)
+	var result []loadbalancer.LoadBalancer
+	for _, lb := range m.lbs {
+		if strings.Contains(strings.ToLower(lb.Name), filter) ||
+			strings.Contains(strings.ToLower(lb.VipAddress), filter) {
+			result = append(result, lb)
+		}
+	}
+	return result
+}
+
+// --- Sort ---
+
+func (m Model) cycleSort() (Model, tea.Cmd) {
+	var cursorID string
+	if lb := m.SelectedLB(); lb != nil {
+		cursorID = lb.ID
+	}
+	m.sortCol = (m.sortCol + 1) % len(sortColumns)
+	m.sortAsc = true
+	m.sortHighlight = true
+	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.sortLBs()
+	m.restoreCursor(cursorID)
+	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+		return sortClearMsg{}
+	})
+}
+
+func (m Model) reverseSort() (Model, tea.Cmd) {
+	var cursorID string
+	if lb := m.SelectedLB(); lb != nil {
+		cursorID = lb.ID
+	}
+	m.sortAsc = !m.sortAsc
+	m.sortHighlight = true
+	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.sortLBs()
+	m.restoreCursor(cursorID)
+	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+		return sortClearMsg{}
+	})
+}
+
+func (m *Model) restoreCursor(cursorID string) {
+	if cursorID == "" {
+		return
+	}
+	for i, lb := range m.visibleLBs() {
+		if lb.ID == cursorID {
+			m.cursor = i
+			return
+		}
+	}
+}
+
+func (m *Model) sortLBs() {
+	if len(m.lbs) == 0 {
+		return
+	}
+	colKey := sortColumns[m.sortCol]
+	asc := m.sortAsc
+	sort.SliceStable(m.lbs, func(i, j int) bool {
+		a, b := m.lbs[i], m.lbs[j]
+		var less bool
+		switch colKey {
+		case "name":
+			less = strings.ToLower(a.Name) < strings.ToLower(b.Name)
+		case "vipaddress":
+			less = a.VipAddress < b.VipAddress
+		case "provstatus":
+			less = a.ProvisioningStatus < b.ProvisioningStatus
+		case "operstatus":
+			less = a.OperatingStatus < b.OperatingStatus
+		default:
+			less = false
+		}
+		if !asc {
+			return !less
+		}
+		return less
+	})
+}
+
+// --- Cursor visibility ---
+
+func (m *Model) ensureSelectorCursorVisible() {
+	visH := m.selectorVisibleLines()
+	if m.cursor < m.selectorScroll {
+		m.selectorScroll = m.cursor
+	}
+	if m.cursor >= m.selectorScroll+visH {
+		m.selectorScroll = m.cursor - visH + 1
+	}
+}
+
+func (m *Model) ensureListenerCursorVisible() {
+	visH := m.topVisibleLines()
+	if m.listenerCursor < m.listenerScroll {
+		m.listenerScroll = m.listenerCursor
+	}
+	if m.listenerCursor >= m.listenerScroll+visH {
+		m.listenerScroll = m.listenerCursor - visH + 1
+	}
+}
+
+func (m *Model) ensurePoolCursorVisible() {
+	visH := m.bottomVisibleLines()
+	if m.selectedPoolMonitor() != nil {
+		visH -= 8
+		if visH < 1 {
+			visH = 1
+		}
+	}
+	if m.poolCursor < m.poolScroll {
+		m.poolScroll = m.poolCursor
+	}
+	if m.poolCursor >= m.poolScroll+visH {
+		m.poolScroll = m.poolCursor - visH + 1
+	}
+}
+
+func (m *Model) ensureMemberCursorVisible() {
+	visH := m.bottomVisibleLines()
+	if m.memberCursor < m.memberScroll {
+		m.memberScroll = m.memberCursor
+	}
+	if m.memberCursor >= m.memberScroll+visH {
+		m.memberScroll = m.memberCursor - visH + 1
+	}
+}
+
+func (m *Model) clampDetailCursors() {
 	if m.listenerCursor >= len(m.listeners) {
 		m.listenerCursor = max(0, len(m.listeners)-1)
 	}
@@ -484,57 +852,46 @@ func (m Model) selectedPoolMonitor() *loadbalancer.HealthMonitor {
 	return nil
 }
 
-// --- Cursor visibility ---
-
-func (m *Model) ensureListenerCursorVisible() {
-	visH := m.topVisibleLines()
-	if m.listenerCursor < m.listenerScroll {
-		m.listenerScroll = m.listenerCursor
-	}
-	if m.listenerCursor >= m.listenerScroll+visH {
-		m.listenerScroll = m.listenerCursor - visH + 1
-	}
-}
-
-func (m *Model) ensurePoolCursorVisible() {
-	visH := m.bottomVisibleLines()
-	// Account for health monitor reserved space
-	if m.selectedPoolMonitor() != nil {
-		visH -= 8
-		if visH < 1 {
-			visH = 1
-		}
-	}
-	if m.poolCursor < m.poolScroll {
-		m.poolScroll = m.poolCursor
-	}
-	if m.poolCursor >= m.poolScroll+visH {
-		m.poolScroll = m.poolCursor - visH + 1
-	}
-}
-
-func (m *Model) ensureMemberCursorVisible() {
-	visH := m.bottomVisibleLines()
-	if m.memberCursor < m.memberScroll {
-		m.memberScroll = m.memberCursor
-	}
-	if m.memberCursor >= m.memberScroll+visH {
-		m.memberScroll = m.memberCursor - visH + 1
-	}
-}
-
 // --- Height calculations ---
 
 func (m Model) totalPanelHeight() int {
-	h := m.height - 6 // title + blank + action bar + spacer + status bar + newline
+	h := m.height - 8 // title + blank + action bar + spacer + status bar + margins
 	if h < 10 {
 		h = 10
 	}
 	return h
 }
 
+func (m Model) selectorHeight() int {
+	visible := m.visibleLBs()
+	h := len(visible) + 4 // content + header + border
+	if h < 5 {
+		h = 5
+	}
+	maxH := m.totalPanelHeight() * 30 / 100
+	if maxH < 5 {
+		maxH = 5
+	}
+	if h > maxH {
+		h = maxH
+	}
+	return h
+}
+
+func (m Model) selectorVisibleLines() int {
+	lines := m.selectorHeight() - 5 // border(4) + header(1)
+	if lines < 1 {
+		lines = 1
+	}
+	return lines
+}
+
+func (m Model) detailHeight() int {
+	return m.totalPanelHeight() - m.selectorHeight()
+}
+
 func (m Model) topHeight() int {
-	h := m.totalPanelHeight() * 45 / 100
+	h := m.detailHeight() * 45 / 100
 	if h < 6 {
 		h = 6
 	}
@@ -542,7 +899,7 @@ func (m Model) topHeight() int {
 }
 
 func (m Model) bottomHeight() int {
-	h := m.totalPanelHeight() - m.topHeight()
+	h := m.detailHeight() - m.topHeight()
 	if h < 6 {
 		h = 6
 	}
@@ -550,7 +907,7 @@ func (m Model) bottomHeight() int {
 }
 
 func (m Model) topVisibleLines() int {
-	lines := m.topHeight() - 5 // border(4) + header(1)
+	lines := m.topHeight() - 5
 	if lines < 1 {
 		lines = 1
 	}
@@ -558,7 +915,7 @@ func (m Model) topVisibleLines() int {
 }
 
 func (m Model) bottomVisibleLines() int {
-	lines := m.bottomHeight() - 5 // border(4) + header(1)
+	lines := m.bottomHeight() - 5
 	if lines < 1 {
 		lines = 1
 	}
@@ -570,18 +927,20 @@ func (m Model) bottomVisibleLines() int {
 func (m Model) View() string {
 	var b strings.Builder
 
-	title := shared.StyleTitle.Render("Load Balancer Detail")
+	title := shared.StyleTitle.Render("Load Balancers")
 	if m.loading {
 		title += " " + m.spinner.View()
 	}
-	b.WriteString(title + "\n\n")
+	count := fmt.Sprintf(" (%d)", len(m.lbs))
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
 
 	if m.err != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
 		return b.String()
 	}
 
-	if m.lb == nil {
+	if len(m.lbs) == 0 && !m.loading {
+		b.WriteString(shared.StyleHelp.Render("  No load balancers found.") + "\n")
 		return b.String()
 	}
 
@@ -597,6 +956,19 @@ func (m Model) View() string {
 }
 
 func (m Model) renderWide() string {
+	selH := m.selectorHeight()
+
+	// Selector: full width
+	selContent := padContent(m.selectorTitle(), m.renderSelectorContent(m.width-4, selH-4))
+	selPanel := m.panelBorder(FocusSelector).
+		Width(m.width).
+		Height(selH).
+		Render(selContent)
+
+	if m.SelectedLB() == nil {
+		return selPanel
+	}
+
 	topH := m.topHeight()
 	bottomH := m.bottomHeight()
 
@@ -618,17 +990,27 @@ func (m Model) renderWide() string {
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", listenersPanel)
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, poolsPanel, " ", membersPanel)
 
-	return topRow + "\n" + bottomRow
+	return selPanel + "\n" + topRow + "\n" + bottomRow
 }
 
 func (m Model) renderNarrow() string {
 	w := m.width - 2
 	totalH := m.totalPanelHeight()
 
-	infoH := totalH * 25 / 100
-	listenersH := totalH * 25 / 100
-	poolsH := totalH * 25 / 100
-	membersH := totalH - infoH - listenersH - poolsH
+	selH := m.selectorHeight()
+	remaining := totalH - selH
+
+	selContent := m.renderSelectorContent(w-4, selH-4)
+	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(padContent(m.selectorTitle(), selContent))
+
+	if m.SelectedLB() == nil {
+		return selPanel
+	}
+
+	infoH := remaining * 20 / 100
+	listenersH := remaining * 20 / 100
+	poolsH := remaining * 25 / 100
+	membersH := remaining - infoH - listenersH - poolsH
 
 	for _, h := range []*int{&infoH, &listenersH, &poolsH, &membersH} {
 		if *h < 4 {
@@ -641,7 +1023,7 @@ func (m Model) renderNarrow() string {
 	poolsPanel := m.panelBorder(FocusPools).Width(w).Height(poolsH).Render(padContent(m.panelTitle(FocusPools), m.renderPoolsContent(w-4, poolsH-4)))
 	membersPanel := m.panelBorder(FocusMembers).Width(w).Height(membersH).Render(padContent(m.panelTitle(FocusMembers), m.renderMembersContent(w-4, membersH-4)))
 
-	return lipgloss.JoinVertical(lipgloss.Left, infoPanel, listenersPanel, poolsPanel, membersPanel)
+	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, listenersPanel, poolsPanel, membersPanel)
 }
 
 // --- Panel helpers ---
@@ -658,6 +1040,30 @@ func padContent(title, content string) string {
 	return strings.Join(out, "\n")
 }
 
+func (m Model) selectorTitle() string {
+	borderColor := shared.ColorMuted
+	if m.focus == FocusSelector {
+		borderColor = shared.ColorPrimary
+	}
+	titleStyle := lipgloss.NewStyle().Foreground(borderColor).Bold(true)
+
+	visible := m.visibleLBs()
+	t := titleStyle.Render("Load Balancers")
+
+	if m.searchActive {
+		t += " " + m.searchInput.View()
+	} else if m.searchFilter != "" {
+		filterStyle := lipgloss.NewStyle().Foreground(shared.ColorHighlight)
+		t += " " + filterStyle.Render("/"+m.searchFilter)
+		t += " " + shared.StyleHelp.Render(fmt.Sprintf("(%d/%d)", len(visible), len(m.lbs)))
+	}
+
+	if m.loading {
+		t += " " + m.spinner.View()
+	}
+	return t
+}
+
 func (m Model) panelTitle(pane FocusPane) string {
 	borderColor := shared.ColorMuted
 	if m.focus == pane {
@@ -670,13 +1076,13 @@ func (m Model) panelTitle(pane FocusPane) string {
 		return titleStyle.Render("Info")
 	case FocusListeners:
 		t := titleStyle.Render("Listeners")
-		if m.loading {
+		if m.detailLoading {
 			t += " " + m.spinner.View()
 		}
 		return t
 	case FocusPools:
 		t := titleStyle.Render("Pools")
-		if m.loading {
+		if m.detailLoading {
 			t += " " + m.spinner.View()
 		}
 		return t
@@ -689,7 +1095,7 @@ func (m Model) panelTitle(pane FocusPane) string {
 		if poolName != "" {
 			t += " " + lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("("+poolName+")")
 		}
-		if m.loading {
+		if m.detailLoading {
 			t += " " + m.spinner.View()
 		}
 		return t
@@ -708,14 +1114,165 @@ func (m Model) panelBorder(pane FocusPane) lipgloss.Style {
 		BorderTop(true).BorderBottom(true).BorderLeft(true).BorderRight(true)
 }
 
-// --- Info rendering ---
+// --- Selector rendering ---
 
-func (m Model) renderInfoContent(maxWidth int) string {
-	if m.lb == nil {
+func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
+	visible := m.visibleLBs()
+	if len(visible) == 0 {
+		if m.searchFilter != "" {
+			return shared.StyleHelp.Render("No matches")
+		}
 		return ""
 	}
 
-	lb := m.lb
+	// Column widths
+	nameW := len("Name")
+	for _, lb := range visible {
+		if len(lb.Name) > nameW {
+			nameW = len(lb.Name)
+		}
+	}
+	fixedW := 18 + 18 + 16 + 6 + 2 // vip + prov + oper + gaps + prefix
+	maxNameW := maxWidth - fixedW
+	if maxNameW < 12 {
+		maxNameW = 12
+	}
+	if nameW > maxNameW {
+		nameW = maxNameW
+	}
+
+	const gap = 2
+	sep := strings.Repeat(" ", gap)
+
+	// Header
+	headerTitles := []struct {
+		title string
+		width int
+	}{
+		{"Name", nameW},
+		{"VIP Address", 18},
+		{"Prov. Status", 18},
+		{"Oper. Status", 16},
+	}
+	var headerParts []string
+	for i, h := range headerTitles {
+		title := h.title
+		indicator := ""
+		if i == m.sortCol {
+			if m.sortAsc {
+				indicator = " \u25b2"
+			} else {
+				indicator = " \u25bc"
+			}
+		}
+		if i == m.sortCol && m.sortHighlight {
+			headerParts = append(headerParts, lipgloss.NewStyle().
+				Foreground(shared.ColorHighlight).Bold(true).
+				Render(fmt.Sprintf("%-*s", h.width, title+indicator)))
+		} else {
+			headerParts = append(headerParts, shared.StyleHeader.Render(fmt.Sprintf("%-*s", h.width, title+indicator)))
+		}
+	}
+	headerLine := "  " + strings.Join(headerParts, sep)
+
+	visibleLines := maxHeight - 1 // minus header
+	if visibleLines < 1 {
+		visibleLines = 1
+	}
+
+	var lines []string
+	lines = append(lines, headerLine)
+
+	for i, lb := range visible {
+		if i < m.selectorScroll {
+			continue
+		}
+		if i >= m.selectorScroll+visibleLines {
+			break
+		}
+
+		selected := m.focus == FocusSelector && i == m.cursor
+		prefix := "  "
+		if i == m.cursor {
+			prefix = "\u25b8 "
+		}
+
+		name := lb.Name
+		if name == "" && len(lb.ID) > 8 {
+			name = lb.ID[:8] + "..."
+		}
+		if len(name) > nameW {
+			name = name[:nameW-1] + "\u2026"
+		}
+
+		provIcon := shared.StatusIcon(lb.ProvisioningStatus)
+		operIcon := shared.StatusIcon(lb.OperatingStatus)
+
+		provStyle := provStatusStyle(lb.ProvisioningStatus)
+		operStyle := operStatusStyle(lb.OperatingStatus)
+
+		nameStyle := lipgloss.NewStyle().Width(nameW)
+		vipStyle := lipgloss.NewStyle().Width(18)
+		psStyle := provStyle.Width(18)
+		osStyle := operStyle.Width(16)
+
+		var rowBg color.Color
+		hasBg := false
+		if selected {
+			rowBg = lipgloss.Color("#073642")
+			hasBg = true
+			nameStyle = nameStyle.Bold(true).Background(rowBg)
+			vipStyle = vipStyle.Bold(true).Background(rowBg)
+			psStyle = psStyle.Bold(true).Background(rowBg)
+			osStyle = osStyle.Bold(true).Background(rowBg)
+		}
+
+		parts := []string{
+			nameStyle.Render(truncate(name, nameW)),
+			vipStyle.Render(truncate(lb.VipAddress, 18)),
+			psStyle.Render(provIcon + truncate(lb.ProvisioningStatus, 16)),
+			osStyle.Render(operIcon + truncate(lb.OperatingStatus, 14)),
+		}
+
+		prefixStyle := lipgloss.NewStyle()
+		gapStyle := lipgloss.NewStyle()
+		if hasBg {
+			prefixStyle = prefixStyle.Background(rowBg)
+			gapStyle = gapStyle.Background(rowBg)
+		}
+
+		gap := gapStyle.Render(sep)
+		row := prefixStyle.Render(prefix) + strings.Join(parts, gap)
+
+		if hasBg {
+			rowW := lipgloss.Width(row)
+			if rowW < maxWidth+2 {
+				row += gapStyle.Render(strings.Repeat(" ", maxWidth+2-rowW))
+			}
+		}
+
+		lines = append(lines, row)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// --- Info rendering ---
+
+func (m Model) renderInfoContent(maxWidth int) string {
+	lb := m.SelectedLB()
+	if lb == nil {
+		return ""
+	}
+
+	if m.detailLoading {
+		return m.spinner.View() + " Loading..."
+	}
+
+	if m.detailErr != "" {
+		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.detailErr)
+	}
+
 	labelW := 12
 	labelStyle := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Bold(true).Width(labelW)
 	valueStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
@@ -776,11 +1333,16 @@ func (m Model) renderInfoContent(maxWidth int) string {
 // --- Listeners rendering ---
 
 func (m Model) renderListenersContent(maxWidth, maxHeight int) string {
+	if m.SelectedLB() == nil {
+		return ""
+	}
+	if m.detailLoading {
+		return m.spinner.View() + " Loading..."
+	}
 	if len(m.listeners) == 0 {
 		return shared.StyleHelp.Render("No listeners configured")
 	}
 
-	// Build pool name lookup
 	poolNames := make(map[string]string, len(m.pools))
 	for _, p := range m.pools {
 		poolNames[p.ID] = p.Name
@@ -881,6 +1443,12 @@ func (m Model) renderListenersContent(maxWidth, maxHeight int) string {
 // --- Pools rendering ---
 
 func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
+	if m.SelectedLB() == nil {
+		return ""
+	}
+	if m.detailLoading {
+		return m.spinner.View() + " Loading..."
+	}
 	if len(m.pools) == 0 {
 		return shared.StyleHelp.Render("No pools configured")
 	}
@@ -891,7 +1459,7 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 			nameW = len(p.Name)
 		}
 	}
-	maxNameW := maxWidth - 2 - 14 // room for method + health indicator
+	maxNameW := maxWidth - 2 - 14
 	if maxNameW < 8 {
 		maxNameW = 8
 	}
@@ -913,10 +1481,9 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 	header := fmt.Sprintf("  %-*s  %-*s  %s", nameW, "Pool", methodW, "Method", "Hlth")
 	headerLine := headerStyle.Render(header)
 
-	// Reserve lines for health monitor details when a monitor exists
 	monReserve := 0
 	if m.selectedPoolMonitor() != nil {
-		monReserve = 8 // title + blank + up to 6 detail lines
+		monReserve = 8
 	}
 
 	poolVisibleLines := maxHeight - 1 - monReserve
@@ -951,14 +1518,12 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 			method = method[:methodW-1] + "\u2026"
 		}
 
-		// Health monitor indicator
 		health := "\u2014"
 		if mon := m.monitors[p.MonitorID]; mon != nil {
 			health = mon.Type
 			if mon.Type == "HTTP" || mon.Type == "HTTPS" {
 				health = mon.Type + " " + mon.URLPath
 			}
-			// Truncate if too long
 			maxHW := maxWidth - nameW - methodW - 8
 			if maxHW < 4 {
 				maxHW = 4
@@ -981,7 +1546,7 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 		lines = append(lines, line)
 	}
 
-	// Show health monitor details for the selected pool
+	// Health monitor details
 	if mon := m.selectedPoolMonitor(); mon != nil {
 		lines = append(lines, "")
 		monStyle := lipgloss.NewStyle().Foreground(shared.ColorCyan)
@@ -1003,7 +1568,7 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 			details = append(details, struct{ k, v string }{"Status", shared.StatusIcon(mon.OperatingStatus) + mon.OperatingStatus})
 		}
 
-		remaining := monReserve - 2 // title + blank already added
+		remaining := monReserve - 2
 		for _, d := range details {
 			if remaining <= 0 {
 				break
@@ -1019,6 +1584,12 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 // --- Members rendering ---
 
 func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
+	if m.SelectedLB() == nil {
+		return ""
+	}
+	if m.detailLoading {
+		return m.spinner.View() + " Loading..."
+	}
 	members := m.selectedPoolMembers()
 	if len(m.pools) == 0 {
 		return shared.StyleHelp.Render("No pools to show members for")
@@ -1030,7 +1601,6 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 	const gap = 2
 	sep := strings.Repeat(" ", gap)
 
-	// Calculate column widths
 	addrW := len("Address")
 	for _, mem := range members {
 		addr := fmt.Sprintf("%s:%d", mem.Address, mem.ProtocolPort)
@@ -1048,7 +1618,7 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 			nameW = len(mem.Name)
 		}
 	}
-	maxNameW := maxWidth - addrW - 6 - 12 - gap*3 - 2 // weight(6) + status(12)
+	maxNameW := maxWidth - addrW - 6 - 12 - gap*3 - 2
 	if maxNameW < 6 {
 		maxNameW = 6
 	}
@@ -1132,14 +1702,14 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 // --- Action bar ---
 
 func (m Model) renderActionBar() string {
-	if m.lb == nil {
+	if m.SelectedLB() == nil && m.focus != FocusSelector {
 		return ""
 	}
 
 	// Show PENDING status instead of actions when LB is provisioning
-	if strings.HasPrefix(m.lb.ProvisioningStatus, "PENDING_") {
+	if lb := m.SelectedLB(); lb != nil && strings.HasPrefix(lb.ProvisioningStatus, "PENDING_") {
 		return " " + lipgloss.NewStyle().Foreground(shared.ColorWarning).Render(
-			"\u25b2 "+m.lb.ProvisioningStatus+" \u2014 operations disabled")
+			"\u25b2 "+lb.ProvisioningStatus+" \u2014 operations disabled")
 	}
 
 	keyStyle := lipgloss.NewStyle().
@@ -1152,12 +1722,20 @@ func (m Model) renderActionBar() string {
 	var buttons []btn
 
 	switch m.focus {
+	case FocusSelector:
+		buttons = append(buttons, btn{"^n", "Create LB"})
+		if m.SelectedLB() != nil {
+			buttons = append(buttons, btn{"^d", "Delete LB"})
+		}
+		buttons = append(buttons, btn{"/", "Search"})
 	case FocusInfo:
 		buttons = append(buttons, btn{"enter", "Edit LB"})
-		if m.lb.AdminStateUp {
-			buttons = append(buttons, btn{"o", "Disable"})
-		} else {
-			buttons = append(buttons, btn{"o", "Enable"})
+		if lb := m.SelectedLB(); lb != nil {
+			if lb.AdminStateUp {
+				buttons = append(buttons, btn{"o", "Disable"})
+			} else {
+				buttons = append(buttons, btn{"o", "Enable"})
+			}
 		}
 		buttons = append(buttons, btn{"^d", "Delete LB"})
 	case FocusListeners:
@@ -1240,7 +1818,17 @@ func (m Model) renderActionBar() string {
 
 // --- Style helpers ---
 
-func provStatusStyleFn(status string) lipgloss.Style {
+func truncate(s string, w int) string {
+	if len(s) > w && w > 3 {
+		return s[:w-3] + "..."
+	}
+	if len(s) > w {
+		return s[:w]
+	}
+	return s
+}
+
+func provStatusStyle(status string) lipgloss.Style {
 	var fg color.Color = shared.ColorFg
 	switch {
 	case status == "ACTIVE":
@@ -1253,7 +1841,7 @@ func provStatusStyleFn(status string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(fg)
 }
 
-func operStatusStyleFn(status string) lipgloss.Style {
+func operStatusStyle(status string) lipgloss.Style {
 	var fg color.Color = shared.ColorFg
 	switch status {
 	case "ONLINE":
@@ -1262,6 +1850,14 @@ func operStatusStyleFn(status string) lipgloss.Style {
 		fg = shared.ColorError
 	}
 	return lipgloss.NewStyle().Foreground(fg)
+}
+
+func provStatusStyleFn(status string) lipgloss.Style {
+	return provStatusStyle(status)
+}
+
+func operStatusStyleFn(status string) lipgloss.Style {
+	return operStatusStyle(status)
 }
 
 func memberStatusStyle(status string) lipgloss.Style {
@@ -1281,27 +1877,45 @@ func memberStatusStyle(status string) lipgloss.Style {
 
 // --- Data fetching ---
 
-func (m Model) fetchDetail() tea.Cmd {
+func (m Model) fetchLBs() tea.Cmd {
 	client := m.client
-	id := m.lbID
+	if client == nil {
+		return func() tea.Msg {
+			return lbsErrMsg{err: fmt.Errorf("load balancer service not available")}
+		}
+	}
 	return func() tea.Msg {
-		shared.Debugf("[lbdetail] fetchDetail start")
+		shared.Debugf("[lbview] fetch LBs start")
+		lbs, err := loadbalancer.ListLoadBalancers(context.Background(), client)
+		if err != nil {
+			shared.Debugf("[lbview] fetch LBs error: %v", err)
+			return lbsErrMsg{err: err}
+		}
+		shared.Debugf("[lbview] fetch LBs done, count=%d", len(lbs))
+		return lbsLoadedMsg{lbs: lbs}
+	}
+}
+
+func (m Model) fetchDetail(lbID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		shared.Debugf("[lbview] fetchDetail start for %s", lbID)
 		ctx := context.Background()
 
-		lb, err := loadbalancer.GetLoadBalancer(ctx, client, id)
+		lb, err := loadbalancer.GetLoadBalancer(ctx, client, lbID)
 		if err != nil {
-			shared.Debugf("[lbdetail] fetchDetail error: %v", err)
-			return lbDetailErrMsg{err: err}
+			return detailErrMsg{lbID: lbID, err: err}
+		}
+		_ = lb // we already have it in the selector list
+
+		lstnrs, err := loadbalancer.ListListeners(ctx, client, lbID)
+		if err != nil {
+			return detailErrMsg{lbID: lbID, err: err}
 		}
 
-		lstnrs, err := loadbalancer.ListListeners(ctx, client, id)
+		pls, err := loadbalancer.ListPools(ctx, client, lbID)
 		if err != nil {
-			return lbDetailErrMsg{err: err}
-		}
-
-		pls, err := loadbalancer.ListPools(ctx, client, id)
-		if err != nil {
-			return lbDetailErrMsg{err: err}
+			return detailErrMsg{lbID: lbID, err: err}
 		}
 
 		members := make(map[string][]loadbalancer.Member)
@@ -1321,9 +1935,9 @@ func (m Model) fetchDetail() tea.Cmd {
 			}
 		}
 
-		shared.Debugf("[lbdetail] fetchDetail done: %d listeners, %d pools", len(lstnrs), len(pls))
-		return lbDetailLoadedMsg{
-			lb:        lb,
+		shared.Debugf("[lbview] fetchDetail done: %d listeners, %d pools", len(lstnrs), len(pls))
+		return detailLoadedMsg{
+			lbID:      lbID,
 			listeners: lstnrs,
 			pools:     pls,
 			members:   members,
@@ -1332,11 +1946,16 @@ func (m Model) fetchDetail() tea.Cmd {
 	}
 }
 
-// ForceRefresh triggers a manual reload of the load balancer detail.
+// ForceRefresh triggers a manual reload.
 func (m *Model) ForceRefresh() tea.Cmd {
-	shared.Debugf("[lbdetail] ForceRefresh()")
+	shared.Debugf("[lbview] ForceRefresh()")
 	m.loading = true
-	return tea.Batch(m.spinner.Tick, m.fetchDetail())
+	cmds := []tea.Cmd{m.spinner.Tick, m.fetchLBs()}
+	if lb := m.SelectedLB(); lb != nil {
+		m.detailLoading = true
+		cmds = append(cmds, m.fetchDetail(lb.ID))
+	}
+	return tea.Batch(cmds...)
 }
 
 // SetSize updates the dimensions.
@@ -1348,6 +1967,8 @@ func (m *Model) SetSize(w, h int) {
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
 	switch m.focus {
+	case FocusSelector:
+		return "\u2191\u2193 navigate \u2022 / search \u2022 S sort \u2022 ^n create \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 esc back \u2022 ? help"
 	case FocusListeners:
 		return "\u2191\u2193 navigate \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
 	case FocusPools:

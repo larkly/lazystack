@@ -232,11 +232,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Back):
 			m.Active = false
 			return m, nil
-		case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
+		case key.Matches(msg, shared.Keys.Tab):
 			m.focusField = (m.focusField + 1) % m.fieldCount()
 			m.updateFocus()
 			return m, nil
-		case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
+		case key.Matches(msg, shared.Keys.ShiftTab):
 			m.focusField = (m.focusField - 1 + m.fieldCount()) % m.fieldCount()
 			m.updateFocus()
 			return m, nil
@@ -499,13 +499,13 @@ func (m Model) View() string {
 	}
 
 	rows = append(rows, "")
-	submitStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
-	cancelStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
+	submitStyle := shared.StyleButton
+	cancelStyle := shared.StyleButton
 	if m.currentField() == fieldSubmit {
-		submitStyle = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
+		submitStyle = shared.StyleButtonSubmit
 	}
 	if m.currentField() == fieldCancel {
-		cancelStyle = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
+		cancelStyle = shared.StyleButtonCancel
 	}
 
 	if m.submitting {
@@ -515,7 +515,7 @@ func (m Model) View() string {
 		}
 		rows = append(rows, m.spinner.View()+" "+action+" load balancer...")
 	} else {
-		rows = append(rows, submitStyle.Render("[ Submit ]")+"  "+cancelStyle.Render("[ Cancel ]"))
+		rows = append(rows, submitStyle.Render("[ctrl+s] Submit")+"  "+cancelStyle.Render("[esc] Cancel"))
 	}
 
 	content := title + "\n\n" + strings.Join(rows, "\n")

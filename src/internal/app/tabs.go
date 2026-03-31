@@ -8,7 +8,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/imagelist"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
-	"github.com/larkly/lazystack/internal/ui/lblist"
+	"github.com/larkly/lazystack/internal/ui/lbview"
 	"github.com/larkly/lazystack/internal/ui/networkview"
 	"github.com/larkly/lazystack/internal/ui/routerview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
@@ -38,7 +38,7 @@ func DefaultTabs() []TabDef {
 
 func (m Model) isTopLevelView() bool {
 	switch m.view {
-	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBList, viewNetworkList, viewRouterView, viewImageList:
+	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBView, viewNetworkList, viewRouterView, viewImageList:
 		return true
 	}
 	return false
@@ -116,17 +116,17 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 		return m, m.networkView.ForceRefresh()
 
 	case "loadbalancers":
-		m.view = viewLBList
-		m.statusBar.CurrentView = "lblist"
+		m.view = viewLBView
+		m.statusBar.CurrentView = "lbview"
 		if !m.tabInited[idx] {
-			m.lbList = lblist.New(m.client.LoadBalancer, m.refreshInterval)
-			m.lbList.SetSize(m.width, m.height)
+			m.lbView = lbview.New(m.client.LoadBalancer, m.refreshInterval)
+			m.lbView.SetSize(m.width, m.height)
 			m.tabInited[idx] = true
-			m.statusBar.Hint = m.lbList.Hints()
-			return m, m.lbList.Init()
+			m.statusBar.Hint = m.lbView.Hints()
+			return m, m.lbView.Init()
 		}
-		m.statusBar.Hint = m.lbList.Hints()
-		return m, m.lbList.ForceRefresh()
+		m.statusBar.Hint = m.lbView.Hints()
+		return m, m.lbView.ForceRefresh()
 
 	case "routers":
 		m.view = viewRouterView

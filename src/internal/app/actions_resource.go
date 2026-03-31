@@ -12,7 +12,6 @@ import (
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/lbcreate"
-	"github.com/larkly/lazystack/internal/ui/lbdetail"
 	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
 	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
 	"github.com/larkly/lazystack/internal/ui/lbmonitorcreate"
@@ -445,46 +444,23 @@ func (m Model) openRemoveRouterInterfaceConfirm() (Model, tea.Cmd) {
 
 // --- Load Balancer actions ---
 
-func (m Model) openLBDetail() (Model, tea.Cmd) {
-	lb := m.lbList.SelectedLB()
+func (m Model) openLBDeleteConfirm() (Model, tea.Cmd) {
+	lb := m.lbView.SelectedLB()
 	if lb == nil {
 		return m, nil
 	}
-	m.lbDetail = lbdetail.New(m.client.LoadBalancer, lb.ID)
-	m.lbDetail.SetSize(m.width, m.height)
-	m.view = viewLBDetail
-	m.statusBar.CurrentView = "lbdetail"
-	m.statusBar.Hint = m.lbDetail.Hints()
-	return m, m.lbDetail.Init()
-}
-
-func (m Model) openLBDeleteConfirm() (Model, tea.Cmd) {
-	var id, name string
-	switch m.view {
-	case viewLBList:
-		if lb := m.lbList.SelectedLB(); lb != nil {
-			id, name = lb.ID, lb.Name
-			if name == "" {
-				name = id
-			}
-		}
-	case viewLBDetail:
-		id = m.lbDetail.LBID()
-		name = m.lbDetail.LBName()
-	}
-	if id == "" {
-		return m, nil
+	id, name := lb.ID, lb.Name
+	if name == "" {
+		name = id
 	}
 	m.confirm = modal.NewConfirm("delete_lb", id, name)
 	m.confirm.Title = "Delete Load Balancer"
 	body := fmt.Sprintf("Are you sure you want to delete load balancer %q?", name)
-	if m.view == viewLBDetail {
-		lc := len(m.lbDetail.Listeners())
-		pc := len(m.lbDetail.Pools())
-		mc := m.lbDetail.TotalMemberCount()
+	lc := len(m.lbView.Listeners())
+	pc := len(m.lbView.Pools())
+	mc := m.lbView.TotalMemberCount()
+	if lc+pc+mc > 0 {
 		body += fmt.Sprintf("\nThis will cascade-delete %d listeners, %d pools, and %d members.", lc, pc, mc)
-	} else {
-		body += "\nThis will cascade-delete all listeners, pools and members."
 	}
 	m.confirm.Body = body
 	m.confirm.SetSize(m.width, m.height)
@@ -501,15 +477,15 @@ func (m Model) openLBCreate() (Model, tea.Cmd) {
 }
 
 func (m Model) openLBEdit() (Model, tea.Cmd) {
-	if m.lbDetail.LBID() == "" {
+	if m.lbView.LBID() == "" {
 		return m, nil
 	}
-	name := m.lbDetail.LBName()
+	name := m.lbView.LBName()
 	desc := ""
-	if m.lbDetail.LB() != nil {
-		desc = m.lbDetail.LB().Description
+	if m.lbView.LB() != nil {
+		desc = m.lbView.LB().Description
 	}
-	m.lbCreate = lbcreate.NewEdit(m.client.LoadBalancer, m.lbDetail.LBID(), name, desc)
+	m.lbCreate = lbcreate.NewEdit(m.client.LoadBalancer, m.lbView.LBID(), name, desc)
 	m.lbCreate.SetSize(m.width, m.height)
 	return m, m.lbCreate.Init()
 }
@@ -517,24 +493,24 @@ func (m Model) openLBEdit() (Model, tea.Cmd) {
 // --- Load Balancer Listener actions ---
 
 func (m Model) openLBListenerEdit() (Model, tea.Cmd) {
-	l := m.lbDetail.SelectedListener()
+	l := m.lbView.SelectedListener()
 	if l == nil {
 		return m, nil
 	}
-	m.lbListenerCreate = lblistenercreate.NewEdit(m.client.LoadBalancer, l.ID, l.Name, l.Description, l.ConnLimit, m.lbDetail.LBName())
+	m.lbListenerCreate = lblistenercreate.NewEdit(m.client.LoadBalancer, l.ID, l.Name, l.Description, l.ConnLimit, m.lbView.LBName())
 	m.lbListenerCreate.SetSize(m.width, m.height)
 	return m, m.lbListenerCreate.Init()
 }
 
 func (m Model) openLBListenerCreate() (Model, tea.Cmd) {
-	m.lbListenerCreate = lblistenercreate.New(m.client.LoadBalancer, m.lbDetail.LBID(), m.lbDetail.LBName())
+	m.lbListenerCreate = lblistenercreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName())
 	m.lbListenerCreate.SetSize(m.width, m.height)
 	return m, m.lbListenerCreate.Init()
 }
 
 func (m Model) openLBListenerDeleteConfirm() (Model, tea.Cmd) {
-	id := m.lbDetail.SelectedListenerID()
-	name := m.lbDetail.SelectedListenerName()
+	id := m.lbView.SelectedListenerID()
+	name := m.lbView.SelectedListenerName()
 	if id == "" {
 		return m, nil
 	}
@@ -549,24 +525,24 @@ func (m Model) openLBListenerDeleteConfirm() (Model, tea.Cmd) {
 // --- Load Balancer Pool actions ---
 
 func (m Model) openLBPoolEdit() (Model, tea.Cmd) {
-	p := m.lbDetail.SelectedPool()
+	p := m.lbView.SelectedPool()
 	if p == nil {
 		return m, nil
 	}
-	m.lbPoolCreate = lbpoolcreate.NewEdit(m.client.LoadBalancer, p.ID, p.Name, p.LBMethod, m.lbDetail.LBName())
+	m.lbPoolCreate = lbpoolcreate.NewEdit(m.client.LoadBalancer, p.ID, p.Name, p.LBMethod, m.lbView.LBName())
 	m.lbPoolCreate.SetSize(m.width, m.height)
 	return m, m.lbPoolCreate.Init()
 }
 
 func (m Model) openLBPoolCreate() (Model, tea.Cmd) {
-	m.lbPoolCreate = lbpoolcreate.New(m.client.LoadBalancer, m.lbDetail.LBID(), m.lbDetail.LBName())
+	m.lbPoolCreate = lbpoolcreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName())
 	m.lbPoolCreate.SetSize(m.width, m.height)
 	return m, m.lbPoolCreate.Init()
 }
 
 func (m Model) openLBPoolDeleteConfirm() (Model, tea.Cmd) {
-	id := m.lbDetail.SelectedPoolID()
-	name := m.lbDetail.SelectedPoolName()
+	id := m.lbView.SelectedPoolID()
+	name := m.lbView.SelectedPoolName()
 	if id == "" {
 		return m, nil
 	}
@@ -581,9 +557,9 @@ func (m Model) openLBPoolDeleteConfirm() (Model, tea.Cmd) {
 // --- Load Balancer Member actions ---
 
 func (m Model) openLBMemberEdit() (Model, tea.Cmd) {
-	mem := m.lbDetail.SelectedMember()
-	poolID := m.lbDetail.SelectedPoolID()
-	poolName := m.lbDetail.SelectedPoolName()
+	mem := m.lbView.SelectedMember()
+	poolID := m.lbView.SelectedPoolID()
+	poolName := m.lbView.SelectedPoolName()
 	if mem == nil || poolID == "" {
 		return m, nil
 	}
@@ -605,16 +581,16 @@ func (m Model) openLBMemberEdit() (Model, tea.Cmd) {
 }
 
 func (m Model) openLBMemberCreate() (Model, tea.Cmd) {
-	poolID := m.lbDetail.SelectedPoolID()
-	poolName := m.lbDetail.SelectedPoolName()
+	poolID := m.lbView.SelectedPoolID()
+	poolName := m.lbView.SelectedPoolName()
 	if poolID == "" {
 		return m, nil
 	}
 	lbVIPAddress := ""
-	if lb := m.lbDetail.LB(); lb != nil {
+	if lb := m.lbView.LB(); lb != nil {
 		lbVIPAddress = lb.VipAddress
 	}
-	existingMembers := m.lbDetail.SelectedPoolMembers()
+	existingMembers := m.lbView.SelectedPoolMembers()
 	existingMemberAddrs := make([]string, 0, len(existingMembers))
 	for _, member := range existingMembers {
 		existingMemberAddrs = append(existingMemberAddrs, member.Address)
@@ -625,9 +601,9 @@ func (m Model) openLBMemberCreate() (Model, tea.Cmd) {
 }
 
 func (m Model) openLBMemberDeleteConfirm() (Model, tea.Cmd) {
-	memberID := m.lbDetail.SelectedMemberID()
-	memberName := m.lbDetail.SelectedMemberName()
-	poolID := m.lbDetail.SelectedPoolID()
+	memberID := m.lbView.SelectedMemberID()
+	memberName := m.lbView.SelectedMemberName()
+	poolID := m.lbView.SelectedPoolID()
 	if memberID == "" || poolID == "" {
 		return m, nil
 	}
@@ -644,8 +620,8 @@ func (m Model) openLBMemberDeleteConfirm() (Model, tea.Cmd) {
 // --- Load Balancer Bulk Member Delete ---
 
 func (m Model) openLBBulkMemberDeleteConfirm() (Model, tea.Cmd) {
-	poolID := m.lbDetail.SelectedPoolID()
-	ids := m.lbDetail.SelectedMemberIDs()
+	poolID := m.lbView.SelectedPoolID()
+	ids := m.lbView.SelectedMemberIDs()
 	if poolID == "" || len(ids) == 0 {
 		return m, nil
 	}
@@ -663,8 +639,8 @@ func (m Model) openLBBulkMemberDeleteConfirm() (Model, tea.Cmd) {
 // --- Load Balancer Drain action ---
 
 func (m Model) drainLBMember() (Model, tea.Cmd) {
-	mem := m.lbDetail.SelectedMember()
-	poolID := m.lbDetail.SelectedPoolID()
+	mem := m.lbView.SelectedMember()
+	poolID := m.lbView.SelectedPoolID()
 	if mem == nil || poolID == "" {
 		return m, nil
 	}
@@ -686,18 +662,18 @@ func (m Model) drainLBMember() (Model, tea.Cmd) {
 }
 
 func (m Model) drainLBMembersBulk() (Model, tea.Cmd) {
-	poolID := m.lbDetail.SelectedPoolID()
+	poolID := m.lbView.SelectedPoolID()
 	lbID := ""
-	if lb := m.lbDetail.LB(); lb != nil {
+	if lb := m.lbView.LB(); lb != nil {
 		lbID = lb.ID
 	}
-	ids := m.lbDetail.SelectedMemberIDs()
+	ids := m.lbView.SelectedMemberIDs()
 	count := len(ids)
 	if poolID == "" || count == 0 {
 		return m, nil
 	}
 	client := m.client.LoadBalancer
-	m.lbDetail.ClearMemberSelection()
+	m.lbView.ClearMemberSelection()
 	zero := 0
 	return m, func() tea.Msg {
 		ctx := context.Background()
@@ -730,7 +706,7 @@ func (m Model) drainLBMembersBulk() (Model, tea.Cmd) {
 // --- Load Balancer Monitor actions ---
 
 func (m Model) openLBMonitorCreate() (Model, tea.Cmd) {
-	pool := m.lbDetail.SelectedPool()
+	pool := m.lbView.SelectedPool()
 	if pool == nil {
 		return m, nil
 	}
@@ -740,11 +716,11 @@ func (m Model) openLBMonitorCreate() (Model, tea.Cmd) {
 }
 
 func (m Model) openLBMonitorEdit() (Model, tea.Cmd) {
-	pool := m.lbDetail.SelectedPool()
+	pool := m.lbView.SelectedPool()
 	if pool == nil || pool.MonitorID == "" {
 		return m, nil
 	}
-	mon := m.lbDetail.SelectedPoolMonitor()
+	mon := m.lbView.SelectedPoolMonitor()
 	if mon == nil {
 		return m, nil
 	}
@@ -754,7 +730,7 @@ func (m Model) openLBMonitorEdit() (Model, tea.Cmd) {
 }
 
 func (m Model) openLBMonitorDeleteConfirm() (Model, tea.Cmd) {
-	pool := m.lbDetail.SelectedPool()
+	pool := m.lbView.SelectedPool()
 	if pool == nil || pool.MonitorID == "" {
 		return m, nil
 	}
@@ -770,7 +746,7 @@ func (m Model) openLBMonitorDeleteConfirm() (Model, tea.Cmd) {
 // --- Load Balancer Admin State toggle ---
 
 func (m Model) toggleLBAdminState() (Model, tea.Cmd) {
-	lb := m.lbDetail.LB()
+	lb := m.lbView.LB()
 	if lb == nil {
 		return m, nil
 	}
@@ -793,7 +769,7 @@ func (m Model) toggleLBAdminState() (Model, tea.Cmd) {
 }
 
 func (m Model) toggleListenerAdminState() (Model, tea.Cmd) {
-	l := m.lbDetail.SelectedListener()
+	l := m.lbView.SelectedListener()
 	if l == nil {
 		return m, nil
 	}
@@ -816,7 +792,7 @@ func (m Model) toggleListenerAdminState() (Model, tea.Cmd) {
 }
 
 func (m Model) togglePoolAdminState() (Model, tea.Cmd) {
-	p := m.lbDetail.SelectedPool()
+	p := m.lbView.SelectedPool()
 	if p == nil {
 		return m, nil
 	}
@@ -839,8 +815,8 @@ func (m Model) togglePoolAdminState() (Model, tea.Cmd) {
 }
 
 func (m Model) toggleMemberAdminState() (Model, tea.Cmd) {
-	mem := m.lbDetail.SelectedMember()
-	poolID := m.lbDetail.SelectedPoolID()
+	mem := m.lbView.SelectedMember()
+	poolID := m.lbView.SelectedPoolID()
 	if mem == nil || poolID == "" {
 		return m, nil
 	}
