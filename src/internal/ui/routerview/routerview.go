@@ -134,6 +134,28 @@ func (m Model) SelectedInterfaceSubnetID() string {
 	return m.interfaces[m.interfaceCursor].SubnetID
 }
 
+// SelectedInterface returns the full RouterInterface for the selected interface.
+func (m Model) SelectedInterface() *network.RouterInterface {
+	if m.focus != FocusInterfaces {
+		return nil
+	}
+	if m.interfaceCursor < 0 || m.interfaceCursor >= len(m.interfaces) {
+		return nil
+	}
+	return &m.interfaces[m.interfaceCursor]
+}
+
+// InterfacesOnPort returns how many interfaces share the same port as the selected interface.
+func (m Model) InterfacesOnPort(portID string) int {
+	count := 0
+	for _, iface := range m.interfaces {
+		if iface.PortID == portID {
+			count++
+		}
+	}
+	return count
+}
+
 // FocusedPane returns the currently focused pane.
 func (m Model) FocusedPane() focusPane {
 	return m.focus
