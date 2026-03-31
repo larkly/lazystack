@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -39,6 +41,19 @@ var (
 	visibilityOpts = []string{"private", "public", "shared", "community"}
 )
 
+var imageExtensions = map[string]bool{
+	".qcow2": true, ".raw": true, ".vmdk": true, ".vdi": true,
+	".iso": true, ".img": true, ".ami": true,
+	".gz": true, ".bz2": true, ".xz": true,
+}
+
+type pickerEntry struct {
+	name  string
+	path  string
+	isDir bool
+	size  int64
+}
+
 // Messages
 type progressTickMsg struct{}
 type uploadDoneMsg struct{ name string }
@@ -62,6 +77,12 @@ type Model struct {
 	submitting bool
 	uploading  bool
 	imageName  string
+
+	// File picker
+	pickerOpen    bool
+	pickerDir     string
+	pickerEntries []pickerEntry
+	pickerCursor  int
 
 	// Progress tracking via shared atomics
 	sharedBytesRead *atomic.Int64
@@ -201,6 +222,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.warnLargeFile {
 			return m.handleLargeFileWarning(msg)
 		}
+		if m.pickerOpen {
+			return m.handlePickerKey(msg)
+		}
 		return m.handleKey(msg)
 	}
 	return m, nil
@@ -233,6 +257,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.updateFocus()
 			return m, nil
 		case key.Matches(msg, shared.Keys.Enter):
+			// On path field, check if value is a directory → open picker
+			if m.focusField == fieldPath && m.source == 0 {
+				p := strings.TrimSpace(m.pathInput.Value())
+				if info, err := os.Stat(p); err == nil && info.IsDir() {
+					return m.openPicker(p)
+				}
+			}
 			m.focusField = (m.focusField + 1) % numFields
 			m.updateFocus()
 			return m, nil
@@ -379,6 +410,190 @@ func (m Model) submit() (Model, tea.Cmd) {
 	return m.doURLImport()
 }
 
+// --- File picker ---
+
+func (m Model) openPicker(dir string) (Model, tea.Cmd) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		m.err = "Cannot read directory: " + err.Error()
+		return m, nil
+	}
+
+	var dirs, files []pickerEntry
+
+	// Add parent directory unless at root
+	if dir != "/" {
+		dirs = append(dirs, pickerEntry{name: "..", path: filepath.Dir(dir), isDir: true})
+	}
+
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue // skip hidden files
+		}
+		full := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			dirs = append(dirs, pickerEntry{name: e.Name() + "/", path: full, isDir: true})
+		} else {
+			ext := strings.ToLower(filepath.Ext(e.Name()))
+			// Also check double extension like .qcow2.gz
+			nameNoExt := strings.TrimSuffix(e.Name(), ext)
+			ext2 := strings.ToLower(filepath.Ext(nameNoExt))
+			if imageExtensions[ext] || imageExtensions[ext2] {
+				info, _ := e.Info()
+				var size int64
+				if info != nil {
+					size = info.Size()
+				}
+				files = append(files, pickerEntry{name: e.Name(), path: full, size: size})
+			}
+		}
+	}
+
+	sort.Slice(dirs[1:], func(i, j int) bool { // skip ".." for sort
+		return strings.ToLower(dirs[i+1].name) < strings.ToLower(dirs[j+1].name)
+	})
+	sort.Slice(files, func(i, j int) bool {
+		return strings.ToLower(files[i].name) < strings.ToLower(files[j].name)
+	})
+
+	m.pickerEntries = append(dirs, files...)
+	m.pickerDir = dir
+	m.pickerOpen = true
+	m.pickerCursor = 0
+	m.err = ""
+	return m, nil
+}
+
+func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
+		m.pickerOpen = false
+		return m, nil
+	case key.Matches(msg, shared.Keys.Up):
+		if m.pickerCursor > 0 {
+			m.pickerCursor--
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.Down):
+		if m.pickerCursor < len(m.pickerEntries)-1 {
+			m.pickerCursor++
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.PageUp):
+		m.pickerCursor -= 10
+		if m.pickerCursor < 0 {
+			m.pickerCursor = 0
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.PageDown):
+		m.pickerCursor += 10
+		if m.pickerCursor >= len(m.pickerEntries) {
+			m.pickerCursor = len(m.pickerEntries) - 1
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.Enter):
+		if m.pickerCursor < 0 || m.pickerCursor >= len(m.pickerEntries) {
+			return m, nil
+		}
+		entry := m.pickerEntries[m.pickerCursor]
+		if entry.isDir {
+			return m.openPicker(entry.path)
+		}
+		// File selected
+		m.pathInput.SetValue(entry.path)
+		m.pickerOpen = false
+		// Auto-detect disk format from extension
+		m.autoDetectDiskFormat(entry.name)
+		// Advance focus past path
+		m.focusField = fieldDiskFormat
+		m.updateFocus()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *Model) autoDetectDiskFormat(filename string) {
+	name := strings.ToLower(filename)
+	// Strip compression extension first
+	for _, ext := range []string{".gz", ".bz2", ".xz"} {
+		name = strings.TrimSuffix(name, ext)
+	}
+	ext := strings.TrimPrefix(filepath.Ext(name), ".")
+	for i, fmt := range diskFormatOpts {
+		if fmt == ext {
+			m.diskFormat = i
+			return
+		}
+	}
+}
+
+func (m Model) renderPicker() string {
+	title := shared.StyleModalTitle.Render("Upload Image")
+
+	dirStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+	var rows []string
+	rows = append(rows, dirStyle.Render("Browsing: "+m.pickerDir))
+	rows = append(rows, "")
+
+	maxShow := 15
+	start := 0
+	if m.pickerCursor >= maxShow {
+		start = m.pickerCursor - maxShow + 1
+	}
+	end := start + maxShow
+	if end > len(m.pickerEntries) {
+		end = len(m.pickerEntries)
+	}
+
+	nameW := 30
+	formW := m.formWidth() - 8
+	if formW > 20 {
+		nameW = formW - 12 // room for size column
+	}
+
+	for i := start; i < end; i++ {
+		e := m.pickerEntries[i]
+		cursor := "  "
+		if i == m.pickerCursor {
+			cursor = "\u25b8 "
+		}
+
+		name := e.name
+		if len(name) > nameW {
+			name = name[:nameW-1] + "\u2026"
+		}
+
+		var sizeStr string
+		if e.isDir {
+			sizeStr = lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("<dir>")
+		} else {
+			sizeStr = lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(shared.FormatSize(e.size))
+		}
+
+		nameStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
+		if e.isDir {
+			nameStyle = nameStyle.Foreground(shared.ColorCyan)
+		}
+		if i == m.pickerCursor {
+			nameStyle = nameStyle.Bold(true).Foreground(shared.ColorHighlight)
+		}
+
+		row := cursor + nameStyle.Width(nameW).Render(name) + "  " + sizeStr
+		rows = append(rows, row)
+	}
+
+	if len(m.pickerEntries) == 0 {
+		rows = append(rows, shared.StyleHelp.Render("  No image files found"))
+	}
+
+	rows = append(rows, "")
+	rows = append(rows, shared.StyleHelp.Render("\u2191\u2193 navigate \u2022 enter select \u2022 esc back"))
+
+	content := title + "\n\n" + strings.Join(rows, "\n")
+	box := shared.StyleModal.Width(m.formWidth()).Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
 // countingReader wraps a reader and atomically tracks bytes read.
 type countingReader struct {
 	reader  io.Reader
@@ -515,6 +730,9 @@ func (m Model) Hints() string {
 
 // View renders the modal.
 func (m Model) View() string {
+	if m.pickerOpen {
+		return m.renderPicker()
+	}
 	if m.uploading {
 		return m.renderProgress()
 	}

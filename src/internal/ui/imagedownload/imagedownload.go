@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -42,6 +43,12 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+type pickerDirEntry struct {
+	name  string
+	path  string
+	isDir bool
+}
+
 func scheduleProgressTick() tea.Cmd {
 	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
 		return progressTickMsg{}
@@ -55,8 +62,15 @@ type Model struct {
 	imageID   string
 	imageName string
 
-	pathInput  textinput.Model
-	focusField int
+	pathInput    textinput.Model
+	focusField   int
+	defaultFile  string // default filename for save-here
+
+	// Directory picker
+	pickerOpen    bool
+	pickerDir     string
+	pickerEntries []pickerDirEntry
+	pickerCursor  int
 
 	downloading     bool
 	sharedBytesRead *atomic.Int64
@@ -81,7 +95,8 @@ func New(client *gophercloud.ServiceClient, imageID, imageName, diskFormat strin
 		ext = "img"
 	}
 	cwd, _ := os.Getwd()
-	defaultPath := fmt.Sprintf("%s/%s.%s", cwd, sanitizeFilename(imageName), ext)
+	defaultFile := fmt.Sprintf("%s.%s", sanitizeFilename(imageName), ext)
+	defaultPath := filepath.Join(cwd, defaultFile)
 
 	pi.SetValue(defaultPath)
 	pi.CharLimit = 512
@@ -92,12 +107,13 @@ func New(client *gophercloud.ServiceClient, imageID, imageName, diskFormat strin
 	s.Spinner = spinner.Dot
 
 	return Model{
-		Active:    true,
-		client:    client,
-		imageID:   imageID,
-		imageName: imageName,
-		pathInput: pi,
-		spinner:   s,
+		Active:      true,
+		client:      client,
+		imageID:     imageID,
+		imageName:   imageName,
+		defaultFile: defaultFile,
+		pathInput:   pi,
+		spinner:     s,
 	}
 }
 
@@ -160,6 +176,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.pickerOpen {
+			return m.handlePickerKey(msg)
+		}
 		return m.handleKey(msg)
 	}
 	return m, nil
@@ -180,6 +199,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.pathInput.Blur()
 			return m, nil
 		case key.Matches(msg, shared.Keys.Enter):
+			// If value is a directory, open picker
+			p := strings.TrimSpace(m.pathInput.Value())
+			if info, err := os.Stat(p); err == nil && info.IsDir() {
+				return m.openDirPicker(p)
+			}
 			return m.submit()
 		case msg.String() == "ctrl+s":
 			return m.submit()
@@ -232,6 +256,116 @@ func (m *Model) updateFocus() {
 	if m.focusField == fieldPath {
 		m.pathInput.Focus()
 	}
+}
+
+// --- Directory picker ---
+
+func (m Model) openDirPicker(dir string) (Model, tea.Cmd) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		m.err = "Cannot read directory: " + err.Error()
+		return m, nil
+	}
+
+	var dirs []pickerDirEntry
+
+	if dir != "/" {
+		dirs = append(dirs, pickerDirEntry{name: "..", path: filepath.Dir(dir), isDir: true})
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		dirs = append(dirs, pickerDirEntry{
+			name:  e.Name() + "/",
+			path:  filepath.Join(dir, e.Name()),
+			isDir: true,
+		})
+	}
+
+	m.pickerEntries = dirs
+	m.pickerDir = dir
+	m.pickerOpen = true
+	m.pickerCursor = 0
+	m.err = ""
+	return m, nil
+}
+
+func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
+		m.pickerOpen = false
+		return m, nil
+	case key.Matches(msg, shared.Keys.Up):
+		if m.pickerCursor > 0 {
+			m.pickerCursor--
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.Down):
+		if m.pickerCursor < len(m.pickerEntries)-1 {
+			m.pickerCursor++
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.Enter):
+		if m.pickerCursor < 0 || m.pickerCursor >= len(m.pickerEntries) {
+			return m, nil
+		}
+		entry := m.pickerEntries[m.pickerCursor]
+		if entry.name == ".." {
+			return m.openDirPicker(entry.path)
+		}
+		// Selected a directory — save here
+		m.pathInput.SetValue(filepath.Join(entry.path, m.defaultFile))
+		m.pickerOpen = false
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) renderDirPicker() string {
+	title := shared.StyleModalTitle.Render("Download Image \u2014 Choose Directory")
+
+	dirStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+	var rows []string
+	rows = append(rows, dirStyle.Render("Save to: "+m.pickerDir+"/"+m.defaultFile))
+	rows = append(rows, "")
+
+	maxShow := 15
+	start := 0
+	if m.pickerCursor >= maxShow {
+		start = m.pickerCursor - maxShow + 1
+	}
+	end := start + maxShow
+	if end > len(m.pickerEntries) {
+		end = len(m.pickerEntries)
+	}
+
+	for i := start; i < end; i++ {
+		e := m.pickerEntries[i]
+		cursor := "  "
+		if i == m.pickerCursor {
+			cursor = "\u25b8 "
+		}
+
+		nameStyle := lipgloss.NewStyle().Foreground(shared.ColorCyan)
+		if i == m.pickerCursor {
+			nameStyle = nameStyle.Bold(true).Foreground(shared.ColorHighlight)
+		}
+
+		rows = append(rows, cursor+nameStyle.Render(e.name))
+	}
+
+	if len(m.pickerEntries) == 0 {
+		rows = append(rows, shared.StyleHelp.Render("  No subdirectories"))
+	}
+
+	rows = append(rows, "")
+	rows = append(rows, shared.StyleHelp.Render("\u2191\u2193 navigate \u2022 enter save here \u2022 esc back"))
+
+	content := title + "\n\n" + strings.Join(rows, "\n")
+	box := shared.StyleModal.Width(m.formWidth()).Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
@@ -305,6 +439,9 @@ func (m Model) Hints() string {
 
 // View renders the modal.
 func (m Model) View() string {
+	if m.pickerOpen {
+		return m.renderDirPicker()
+	}
 	if m.downloading {
 		return m.renderProgress()
 	}
