@@ -3,9 +3,12 @@ package imagecreate
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
@@ -37,10 +40,7 @@ var (
 )
 
 // Messages
-type uploadProgressMsg struct {
-	bytesRead  int64
-	totalBytes int64
-}
+type progressTickMsg struct{}
 type uploadDoneMsg struct{ name string }
 type uploadErrMsg struct{ err error }
 type importStartedMsg struct{ name string }
@@ -61,10 +61,13 @@ type Model struct {
 	focusField int
 	submitting bool
 	uploading  bool
-	progress   float64
-	bytesRead  int64
-	totalBytes int64
 	imageName  string
+
+	// Progress tracking via shared atomics
+	sharedBytesRead *atomic.Int64
+	sharedTotal     int64
+	bytesRead       int64
+	totalBytes      int64
 
 	// Large file warning
 	warnLargeFile bool
@@ -140,11 +143,13 @@ func (m Model) pathLabel() string {
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case uploadProgressMsg:
-		m.bytesRead = msg.bytesRead
-		m.totalBytes = msg.totalBytes
-		if msg.totalBytes > 0 {
-			m.progress = float64(msg.bytesRead) / float64(msg.totalBytes)
+	case progressTickMsg:
+		if m.sharedBytesRead != nil {
+			m.bytesRead = m.sharedBytesRead.Load()
+			m.totalBytes = m.sharedTotal
+		}
+		if m.uploading {
+			return m, scheduleProgressTick()
 		}
 		return m, nil
 
@@ -374,10 +379,28 @@ func (m Model) submit() (Model, tea.Cmd) {
 	return m.doURLImport()
 }
 
+// countingReader wraps a reader and atomically tracks bytes read.
+type countingReader struct {
+	reader  io.Reader
+	counter *atomic.Int64
+}
+
+func (cr *countingReader) Read(p []byte) (int, error) {
+	n, err := cr.reader.Read(p)
+	cr.counter.Add(int64(n))
+	return n, err
+}
+
+func scheduleProgressTick() tea.Cmd {
+	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
+		return progressTickMsg{}
+	})
+}
+
 func (m Model) doUpload() (Model, tea.Cmd) {
 	m.submitting = true
 	m.uploading = true
-	m.progress = 0
+	m.bytesRead = 0
 
 	name := strings.TrimSpace(m.nameInput.Value())
 	path := strings.TrimSpace(m.pathInput.Value())
@@ -386,11 +409,19 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 	minDisk := parseIntOr(m.minDiskInput.Value(), 0)
 	minRAM := parseIntOr(m.minRAMInput.Value(), 0)
 
+	// Get file size for progress tracking
+	info, _ := os.Stat(path)
+	m.totalBytes = info.Size()
+	m.sharedTotal = info.Size()
+
+	// Shared atomic counter — goroutine increments, tick reads
+	sharedBytes := &atomic.Int64{}
+	m.sharedBytesRead = sharedBytes
+
 	client := m.client
-	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+	return m, tea.Batch(m.spinner.Tick, scheduleProgressTick(), func() tea.Msg {
 		ctx := context.Background()
 
-		// Create image metadata
 		img, err := image.CreateImage(ctx, client, image.CreateImageOpts{
 			Name:       name,
 			DiskFormat: diskFmt,
@@ -402,29 +433,15 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 			return uploadErrMsg{err: err}
 		}
 
-		// Open file
 		f, err := os.Open(path)
 		if err != nil {
-			// Clean up: delete queued image
 			_ = image.DeleteImage(ctx, client, img.ID)
 			return uploadErrMsg{err: fmt.Errorf("opening file: %w", err)}
 		}
 		defer f.Close()
 
-		info, _ := f.Stat()
-		totalSize := info.Size()
+		pr := &countingReader{reader: f, counter: sharedBytes}
 
-		// Wrap in progress reader
-		pr := &image.ProgressReader{
-			Reader: f,
-			Total:  totalSize,
-			OnProgress: func(read, total int64) {
-				// Note: these messages are sent from the goroutine but
-				// bubbletea processes them asynchronously
-			},
-		}
-
-		// Upload
 		err = image.UploadImageData(ctx, client, img.ID, pr)
 		if err != nil {
 			_ = image.DeleteImage(ctx, client, img.ID)
@@ -579,7 +596,27 @@ func (m Model) renderProgress() string {
 	var rows []string
 	rows = append(rows, fmt.Sprintf("Image: %s", m.imageName))
 	rows = append(rows, "")
-	rows = append(rows, m.spinner.View()+" Uploading image data...")
+
+	barWidth := m.formWidth() - 12
+	if barWidth < 20 {
+		barWidth = 20
+	}
+
+	var pct int
+	if m.totalBytes > 0 {
+		pct = int(float64(m.bytesRead) * 100 / float64(m.totalBytes))
+		if pct > 100 {
+			pct = 100
+		}
+	}
+	filled := barWidth * pct / 100
+
+	bar := strings.Repeat("\u2588", filled) + strings.Repeat("\u2591", barWidth-filled)
+	barStyle := lipgloss.NewStyle().Foreground(shared.ColorSuccess)
+	rows = append(rows, barStyle.Render(bar))
+	rows = append(rows, fmt.Sprintf("%d%%  %s / %s",
+		pct, shared.FormatSize(m.bytesRead), shared.FormatSize(m.totalBytes)))
+
 	rows = append(rows, "")
 	rows = append(rows, shared.StyleHelp.Render("b send to background"))
 

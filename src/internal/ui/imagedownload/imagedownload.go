@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
@@ -26,6 +28,25 @@ const (
 
 type downloadDoneMsg struct{ name string }
 type downloadErrMsg struct{ err error }
+type progressTickMsg struct{}
+
+// countingReader wraps a reader and atomically tracks bytes read.
+type countingReader struct {
+	reader  io.Reader
+	counter *atomic.Int64
+}
+
+func (cr *countingReader) Read(p []byte) (int, error) {
+	n, err := cr.reader.Read(p)
+	cr.counter.Add(int64(n))
+	return n, err
+}
+
+func scheduleProgressTick() tea.Cmd {
+	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
+		return progressTickMsg{}
+	})
+}
 
 // Model is the image download modal.
 type Model struct {
@@ -37,10 +58,11 @@ type Model struct {
 	pathInput  textinput.Model
 	focusField int
 
-	downloading bool
-	progress    float64
-	bytesRead   int64
-	totalBytes  int64
+	downloading     bool
+	sharedBytesRead *atomic.Int64
+	sharedTotal     *atomic.Int64
+	bytesRead       int64
+	totalBytes      int64
 
 	spinner spinner.Model
 	width   int
@@ -93,6 +115,18 @@ func (m Model) Init() tea.Cmd {
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case progressTickMsg:
+		if m.sharedBytesRead != nil {
+			m.bytesRead = m.sharedBytesRead.Load()
+		}
+		if m.sharedTotal != nil {
+			m.totalBytes = m.sharedTotal.Load()
+		}
+		if m.downloading {
+			return m, scheduleProgressTick()
+		}
+		return m, nil
+
 	case downloadDoneMsg:
 		m.Active = false
 		m.downloading = false
@@ -215,10 +249,17 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.downloading = true
 	m.err = ""
 
+	sharedBytes := &atomic.Int64{}
+	sharedTotal := &atomic.Int64{}
+	m.sharedBytesRead = sharedBytes
+	m.sharedTotal = sharedTotal
+	m.bytesRead = 0
+	m.totalBytes = 0
+
 	client := m.client
 	imageID := m.imageID
 	name := m.imageName
-	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+	return m, tea.Batch(m.spinner.Tick, scheduleProgressTick(), func() tea.Msg {
 		ctx := context.Background()
 
 		body, contentLength, err := image.DownloadImageData(ctx, client, imageID)
@@ -226,6 +267,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 			return downloadErrMsg{err: err}
 		}
 		defer body.Close()
+		if contentLength > 0 {
+			sharedTotal.Store(contentLength)
+		}
 
 		f, err := os.Create(path)
 		if err != nil {
@@ -233,13 +277,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		}
 		defer f.Close()
 
-		var reader io.Reader = body
-		if contentLength > 0 {
-			reader = &image.ProgressReader{
-				Reader: body,
-				Total:  contentLength,
-			}
-		}
+		reader := &countingReader{reader: body, counter: sharedBytes}
 
 		_, err = io.Copy(f, reader)
 		if err != nil {
@@ -315,7 +353,27 @@ func (m Model) renderProgress() string {
 	var rows []string
 	rows = append(rows, fmt.Sprintf("Image: %s", m.imageName))
 	rows = append(rows, "")
-	rows = append(rows, m.spinner.View()+" Downloading image data...")
+
+	barWidth := m.formWidth() - 12
+	if barWidth < 20 {
+		barWidth = 20
+	}
+
+	if m.totalBytes > 0 {
+		pct := int(float64(m.bytesRead) * 100 / float64(m.totalBytes))
+		if pct > 100 {
+			pct = 100
+		}
+		filled := barWidth * pct / 100
+		bar := strings.Repeat("\u2588", filled) + strings.Repeat("\u2591", barWidth-filled)
+		barStyle := lipgloss.NewStyle().Foreground(shared.ColorSuccess)
+		rows = append(rows, barStyle.Render(bar))
+		rows = append(rows, fmt.Sprintf("%d%%  %s / %s",
+			pct, shared.FormatSize(m.bytesRead), shared.FormatSize(m.totalBytes)))
+	} else {
+		rows = append(rows, m.spinner.View()+" "+shared.FormatSize(m.bytesRead)+" downloaded...")
+	}
+
 	rows = append(rows, "")
 	rows = append(rows, shared.StyleHelp.Render("b send to background"))
 

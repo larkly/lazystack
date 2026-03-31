@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync/atomic"
 	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -193,21 +194,22 @@ func ImportImageURL(ctx context.Context, client *gophercloud.ServiceClient, imag
 	return nil
 }
 
-// ProgressReader wraps an io.Reader to track bytes read.
+// ProgressReader wraps an io.Reader to track bytes read atomically.
 type ProgressReader struct {
-	Reader     io.Reader
-	Total      int64
-	BytesRead  int64
-	OnProgress func(read, total int64)
+	Reader    io.Reader
+	Total     int64
+	bytesRead atomic.Int64
 }
 
 func (pr *ProgressReader) Read(p []byte) (int, error) {
 	n, err := pr.Reader.Read(p)
-	pr.BytesRead += int64(n)
-	if pr.OnProgress != nil {
-		pr.OnProgress(pr.BytesRead, pr.Total)
-	}
+	pr.bytesRead.Add(int64(n))
 	return n, err
+}
+
+// BytesRead returns the current number of bytes read (safe for concurrent access).
+func (pr *ProgressReader) BytesRead() int64 {
+	return pr.bytesRead.Load()
 }
 
 // DeactivateImage deactivates an image (prevents downloads).
