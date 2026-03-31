@@ -285,7 +285,7 @@ func (m Model) updateSGPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focusField++
 		m.updateFocus()
 		return m, nil
-	case " ":
+	case "space":
 		if len(filtered) > 0 && m.sgPickerCursor < len(filtered) {
 			idx := filtered[m.sgPickerCursor].id
 			if m.selectedSGs[idx] {
