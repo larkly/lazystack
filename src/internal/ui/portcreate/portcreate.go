@@ -127,6 +127,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case sgLoadedMsg:
 		m.loadingSGs = false
 		m.secGroups = msg.sgs
+		for i, sg := range m.secGroups {
+			if sg.Name == "default" {
+				m.selectedSGs[i] = true
+				break
+			}
+		}
 		return m, nil
 	case sgLoadErrMsg:
 		m.loadingSGs = false
