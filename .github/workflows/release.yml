@@ -17,7 +17,24 @@ env:
   VERSION: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
+  validate:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag exists
+        run: |
+          if ! git tag -l "${{ github.event.inputs.tag }}" | grep -q .; then
+            echo "::error::Tag '${{ github.event.inputs.tag }}' does not exist"
+            exit 1
+          fi
+
   build:
+    needs: [validate]
+    if: always() && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
       matrix:
