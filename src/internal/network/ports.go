@@ -29,6 +29,70 @@ type FixedIP struct {
 	IPAddress string
 }
 
+// FindRouterPortOnNetwork returns the router interface port on a given network, if any.
+func FindRouterPortOnNetwork(ctx context.Context, client *gophercloud.ServiceClient, routerID, networkID string) (*Port, error) {
+	var result *Port
+	err := ports.List(client, ports.ListOpts{
+		DeviceID:    routerID,
+		DeviceOwner: "network:router_interface",
+		NetworkID:   networkID,
+	}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+		extracted, err := ports.ExtractPorts(page)
+		if err != nil {
+			return false, err
+		}
+		if len(extracted) > 0 {
+			p := extracted[0]
+			port := Port{
+				ID:           p.ID,
+				Name:         p.Name,
+				Status:       p.Status,
+				MACAddress:   p.MACAddress,
+				DeviceOwner:  p.DeviceOwner,
+				DeviceID:     p.DeviceID,
+				NetworkID:    p.NetworkID,
+				AdminStateUp: p.AdminStateUp,
+			}
+			for _, ip := range p.FixedIPs {
+				port.FixedIPs = append(port.FixedIPs, FixedIP{
+					SubnetID:  ip.SubnetID,
+					IPAddress: ip.IPAddress,
+				})
+			}
+			result = &port
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("finding router port on network %s: %w", networkID, err)
+	}
+	return result, nil
+}
+
+// AddFixedIPToPort adds a fixed IP to an existing port.
+func AddFixedIPToPort(ctx context.Context, client *gophercloud.ServiceClient, portID string, existing []FixedIP, subnetID, ipAddress string) error {
+	fixedIPs := make([]ports.IP, 0, len(existing)+1)
+	for _, ip := range existing {
+		fixedIPs = append(fixedIPs, ports.IP{
+			SubnetID:  ip.SubnetID,
+			IPAddress: ip.IPAddress,
+		})
+	}
+	newIP := ports.IP{SubnetID: subnetID}
+	if ipAddress != "" {
+		newIP.IPAddress = ipAddress
+	}
+	fixedIPs = append(fixedIPs, newIP)
+
+	_, err := ports.Update(ctx, client, portID, ports.UpdateOpts{
+		FixedIPs: fixedIPs,
+	}).Extract()
+	if err != nil {
+		return fmt.Errorf("adding fixed IP to port %s: %w", portID, err)
+	}
+	return nil
+}
+
 // ListPortsByDevice fetches all ports attached to a given device (e.g. server).
 func ListPortsByDevice(ctx context.Context, client *gophercloud.ServiceClient, deviceID string) ([]Port, error) {
 	var result []Port

@@ -150,7 +150,8 @@ func (m Model) handleListKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.phase = phaseConfirm
 				m.submitting = true
 				m.err = ""
-				return m, tea.Batch(m.spinner.Tick, m.submitAutoIP())
+				return m, tea.Batch(m.spinner.Tick, m.addInterfaceCmd(
+					m.client, m.routerID, m.routerName, m.selectedSubnet, ""))
 			}
 
 			m.phase = phaseConfirm
@@ -273,12 +274,36 @@ func (m Model) submitInterface() (Model, tea.Cmd) {
 	routerName := m.routerName
 	sub := m.selectedSubnet
 
-	// Always use the PortID path with explicit fixed_ips to prevent Neutron
-	// from auto-assigning addresses from other subnets on the same network.
-	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+	return m, tea.Batch(m.spinner.Tick, m.addInterfaceCmd(client, routerID, routerName, sub, ipStr))
+}
+
+// addInterfaceCmd handles both explicit and auto-allocated IP cases.
+// If the router already has a port on the same network, the new fixed IP
+// is added to that port instead of creating a new one.
+func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, routerName string, sub network.Subnet, ipStr string) tea.Cmd {
+	return func() tea.Msg {
 		ctx := context.Background()
 
-		shared.Debugf("[subnetpicker] creating port (subnet %s, ip %s) for router %s (%s)", sub.ID, ipStr, routerID, routerName)
+		// Check if the router already has a port on this network.
+		existing, err := network.FindRouterPortOnNetwork(ctx, client, routerID, sub.NetworkID)
+		if err != nil {
+			shared.Debugf("[subnetpicker] error checking existing ports: %v", err)
+			return interfaceAddErrMsg{err: err}
+		}
+
+		if existing != nil {
+			shared.Debugf("[subnetpicker] router %s already has port %s on network %s, adding fixed IP", routerID, existing.ID, sub.NetworkID)
+			err = network.AddFixedIPToPort(ctx, client, existing.ID, existing.FixedIPs, sub.ID, ipStr)
+			if err != nil {
+				shared.Debugf("[subnetpicker] error adding fixed IP to port %s: %v", existing.ID, err)
+				return interfaceAddErrMsg{err: err}
+			}
+			shared.Debugf("[subnetpicker] added fixed IP (subnet %s) to existing port %s on router %s", sub.ID, existing.ID, routerName)
+			return interfaceAddedMsg{routerName: routerName}
+		}
+
+		// No existing port on this network — create a new one.
+		shared.Debugf("[subnetpicker] creating port (subnet %s, ip %q) for router %s (%s)", sub.ID, ipStr, routerID, routerName)
 		port, err := network.CreatePort(ctx, client, sub.NetworkID, sub.ID, ipStr)
 		if err != nil {
 			shared.Debugf("[subnetpicker] error creating port for router %s: %v", routerID, err)
@@ -293,37 +318,7 @@ func (m Model) submitInterface() (Model, tea.Cmd) {
 			return interfaceAddErrMsg{err: err}
 		}
 
-		shared.Debugf("[subnetpicker] added interface (port %s, ip %s) to router %s", port.ID, ipStr, routerName)
-		return interfaceAddedMsg{routerName: routerName}
-	})
-}
-
-// submitAutoIP creates a port with Neutron-allocated IP (for SLAAC/DHCPv6 subnets).
-func (m Model) submitAutoIP() tea.Cmd {
-	client := m.client
-	routerID := m.routerID
-	routerName := m.routerName
-	sub := m.selectedSubnet
-
-	return func() tea.Msg {
-		ctx := context.Background()
-
-		shared.Debugf("[subnetpicker] creating port (subnet %s, auto IP) for router %s (%s)", sub.ID, routerID, routerName)
-		port, err := network.CreatePort(ctx, client, sub.NetworkID, sub.ID, "")
-		if err != nil {
-			shared.Debugf("[subnetpicker] error creating port for router %s: %v", routerID, err)
-			return interfaceAddErrMsg{err: err}
-		}
-
-		shared.Debugf("[subnetpicker] adding port %s to router %s (%s)", port.ID, routerID, routerName)
-		err = network.AddRouterInterfaceByPort(ctx, client, routerID, port.ID)
-		if err != nil {
-			shared.Debugf("[subnetpicker] error adding port to router %s, cleaning up port %s: %v", routerID, port.ID, err)
-			_ = network.DeletePort(ctx, client, port.ID)
-			return interfaceAddErrMsg{err: err}
-		}
-
-		shared.Debugf("[subnetpicker] added interface (port %s, auto IP) to router %s", port.ID, routerName)
+		shared.Debugf("[subnetpicker] added interface (port %s, ip %q) to router %s", port.ID, ipStr, routerName)
 		return interfaceAddedMsg{routerName: routerName}
 	}
 }
