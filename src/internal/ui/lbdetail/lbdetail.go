@@ -65,6 +65,9 @@ type Model struct {
 	poolScroll     int
 	memberCursor   int
 	memberScroll   int
+
+	// Bulk member selection
+	selectedMembers map[string]bool
 }
 
 // New creates a load balancer detail model.
@@ -76,8 +79,9 @@ func New(client *gophercloud.ServiceClient, lbID string) Model {
 		lbID:     lbID,
 		loading:  true,
 		spinner:  s,
-		members:  make(map[string][]loadbalancer.Member),
-		monitors: make(map[string]*loadbalancer.HealthMonitor),
+		members:         make(map[string][]loadbalancer.Member),
+		monitors:         make(map[string]*loadbalancer.HealthMonitor),
+		selectedMembers: make(map[string]bool),
 	}
 }
 
@@ -234,6 +238,66 @@ func (m Model) SelectedPoolMembers() []loadbalancer.Member {
 	return out
 }
 
+// ToggleMemberSelection toggles the selection state of the current member.
+func (m *Model) ToggleMemberSelection() {
+	mem := m.SelectedMember()
+	if mem == nil {
+		return
+	}
+	if m.selectedMembers[mem.ID] {
+		delete(m.selectedMembers, mem.ID)
+	} else {
+		m.selectedMembers[mem.ID] = true
+	}
+}
+
+// ToggleAllMemberSelection selects all or deselects all members in current pool.
+func (m *Model) ToggleAllMemberSelection() {
+	members := m.selectedPoolMembers()
+	if len(members) == 0 {
+		return
+	}
+	// If all are selected, deselect all; otherwise select all
+	allSelected := true
+	for _, mem := range members {
+		if !m.selectedMembers[mem.ID] {
+			allSelected = false
+			break
+		}
+	}
+	if allSelected {
+		for _, mem := range members {
+			delete(m.selectedMembers, mem.ID)
+		}
+	} else {
+		for _, mem := range members {
+			m.selectedMembers[mem.ID] = true
+		}
+	}
+}
+
+// SelectedMemberIDs returns the IDs of selected members in the current pool.
+func (m Model) SelectedMemberIDs() []string {
+	members := m.selectedPoolMembers()
+	var ids []string
+	for _, mem := range members {
+		if m.selectedMembers[mem.ID] {
+			ids = append(ids, mem.ID)
+		}
+	}
+	return ids
+}
+
+// SelectedMemberCount returns the number of selected members in the current pool.
+func (m Model) SelectedMemberCount() int {
+	return len(m.SelectedMemberIDs())
+}
+
+// ClearMemberSelection clears all member selections.
+func (m *Model) ClearMemberSelection() {
+	m.selectedMembers = make(map[string]bool)
+}
+
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -330,6 +394,7 @@ func (m Model) scrollUp(n int) Model {
 		if m.poolCursor != prev {
 			m.memberCursor = 0
 			m.memberScroll = 0
+			m.selectedMembers = make(map[string]bool)
 		}
 	case FocusMembers:
 		m.memberCursor -= n
@@ -367,6 +432,7 @@ func (m Model) scrollDown(n int) Model {
 		if m.poolCursor != prev {
 			m.memberCursor = 0
 			m.memberScroll = 0
+			m.selectedMembers = make(map[string]bool)
 		}
 	case FocusMembers:
 		m.memberCursor += n
@@ -1012,9 +1078,16 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 		}
 
 		selected := m.focus == FocusMembers && i == m.memberCursor
-		prefix := "  "
-		if selected {
+		isChecked := m.selectedMembers[mem.ID]
+		var prefix string
+		if isChecked && selected {
+			prefix = "\u25b8\u2713"
+		} else if isChecked {
+			prefix = " \u2713"
+		} else if selected {
 			prefix = "\u25b8 "
+		} else {
+			prefix = "  "
 		}
 
 		name := mem.Name
@@ -1030,7 +1103,12 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 			addr = addr[:addrW-1] + "\u2026"
 		}
 
-		weight := fmt.Sprintf("%d", mem.Weight)
+		var weight string
+		if mem.Weight == 0 {
+			weight = lipgloss.NewStyle().Foreground(shared.ColorWarning).Render("0 drn")
+		} else {
+			weight = fmt.Sprintf("%d", mem.Weight)
+		}
 		displayStatus := mem.OperatingStatus
 		if !mem.AdminStateUp {
 			displayStatus = "DISABLED"
@@ -1114,17 +1192,28 @@ func (m Model) renderActionBar() string {
 			}
 		}
 	case FocusMembers:
-		if m.SelectedPoolID() != "" {
-			buttons = append(buttons, btn{"^n", "Add Member"})
-		}
-		if mem := m.SelectedMember(); mem != nil {
-			buttons = append(buttons, btn{"enter", "Edit"})
-			if mem.AdminStateUp {
-				buttons = append(buttons, btn{"o", "Disable"})
-			} else {
-				buttons = append(buttons, btn{"o", "Enable"})
+		selCount := m.SelectedMemberCount()
+		if selCount > 0 {
+			buttons = append(buttons, btn{"space", "Toggle"})
+			buttons = append(buttons, btn{"x", "All"})
+			buttons = append(buttons, btn{"^d", fmt.Sprintf("Delete %d", selCount)})
+		} else {
+			if m.SelectedPoolID() != "" {
+				buttons = append(buttons, btn{"^n", "Add Member"})
 			}
-			buttons = append(buttons, btn{"^d", "Delete Member"})
+			if mem := m.SelectedMember(); mem != nil {
+				buttons = append(buttons, btn{"enter", "Edit"})
+				if mem.Weight > 0 {
+					buttons = append(buttons, btn{"w", "Drain"})
+				}
+				buttons = append(buttons, btn{"space", "Select"})
+				if mem.AdminStateUp {
+					buttons = append(buttons, btn{"o", "Disable"})
+				} else {
+					buttons = append(buttons, btn{"o", "Enable"})
+				}
+				buttons = append(buttons, btn{"^d", "Delete Member"})
+			}
 		}
 	}
 	buttons = append(buttons, btn{"tab", "Switch Pane"}, btn{"esc", "Back"})
@@ -1264,7 +1353,7 @@ func (m Model) Hints() string {
 	case FocusPools:
 		return "\u2191\u2193 select pool \u2022 ^h monitor \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
 	case FocusMembers:
-		return "\u2191\u2193 navigate members \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 space select \u2022 x all \u2022 w drain \u2022 o admin \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
 	default:
 		return "o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
 	}

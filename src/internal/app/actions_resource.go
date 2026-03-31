@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/loadbalancer"
@@ -580,6 +581,92 @@ func (m Model) openLBMemberDeleteConfirm() (Model, tea.Cmd) {
 	m.confirm = c
 	m.activeModal = modalConfirm
 	return m, nil
+}
+
+// --- Load Balancer Bulk Member Delete ---
+
+func (m Model) openLBBulkMemberDeleteConfirm() (Model, tea.Cmd) {
+	poolID := m.lbDetail.SelectedPoolID()
+	ids := m.lbDetail.SelectedMemberIDs()
+	if poolID == "" || len(ids) == 0 {
+		return m, nil
+	}
+	count := len(ids)
+	// Encode poolID in ServerID for executeAction
+	c := modal.NewConfirm("delete_lb_members_bulk", poolID, fmt.Sprintf("%d members", count))
+	c.Title = "Bulk Delete Members"
+	c.Body = fmt.Sprintf("Delete %d selected members from this pool?", count)
+	c.SetSize(m.width, m.height)
+	m.confirm = c
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Load Balancer Drain action ---
+
+func (m Model) drainLBMember() (Model, tea.Cmd) {
+	mem := m.lbDetail.SelectedMember()
+	poolID := m.lbDetail.SelectedPoolID()
+	if mem == nil || poolID == "" {
+		return m, nil
+	}
+	client := m.client.LoadBalancer
+	memberID := mem.ID
+	name := mem.Name
+	if name == "" {
+		name = fmt.Sprintf("%s:%d", mem.Address, mem.ProtocolPort)
+	}
+	zero := 0
+	return m, func() tea.Msg {
+		shared.Debugf("[action] draining member %s (weight -> 0)", name)
+		err := loadbalancer.UpdateMember(context.Background(), client, poolID, memberID, loadbalancer.MemberUpdateOpts{Weight: &zero})
+		if err != nil {
+			return shared.ResourceActionErrMsg{Action: "Drain", Name: name, Err: err}
+		}
+		return shared.ResourceActionMsg{Action: "Draining", Name: name}
+	}
+}
+
+func (m Model) drainLBMembersBulk() (Model, tea.Cmd) {
+	poolID := m.lbDetail.SelectedPoolID()
+	lbID := ""
+	if lb := m.lbDetail.LB(); lb != nil {
+		lbID = lb.ID
+	}
+	ids := m.lbDetail.SelectedMemberIDs()
+	count := len(ids)
+	if poolID == "" || count == 0 {
+		return m, nil
+	}
+	client := m.client.LoadBalancer
+	m.lbDetail.ClearMemberSelection()
+	zero := 0
+	return m, func() tea.Msg {
+		ctx := context.Background()
+		var failed int
+		for i, memberID := range ids {
+			if i > 0 && lbID != "" {
+				if err := loadbalancer.WaitForActive(ctx, client, lbID, 60*time.Second); err != nil {
+					shared.Debugf("[action] bulk drain wait failed: %s", err)
+					failed += len(ids) - i
+					break
+				}
+			}
+			shared.Debugf("[action] bulk draining member %s (%d/%d)", memberID, i+1, count)
+			if err := loadbalancer.UpdateMember(ctx, client, poolID, memberID, loadbalancer.MemberUpdateOpts{Weight: &zero}); err != nil {
+				shared.Debugf("[action] bulk drain member %s failed: %s", memberID, err)
+				failed++
+			}
+		}
+		if failed > 0 {
+			return shared.ResourceActionErrMsg{
+				Action: "Bulk drain",
+				Name:   fmt.Sprintf("%d of %d members", failed, count),
+				Err:    fmt.Errorf("%d members failed to drain", failed),
+			}
+		}
+		return shared.ResourceActionMsg{Action: fmt.Sprintf("Draining %d members in", count), Name: "pool"}
+	}
 }
 
 // --- Load Balancer Monitor actions ---

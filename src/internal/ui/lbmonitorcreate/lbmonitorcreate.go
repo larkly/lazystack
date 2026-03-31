@@ -3,6 +3,7 @@ package lbmonitorcreate
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -365,6 +366,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 	codes := strings.TrimSpace(m.codesInput.Value())
 	httpMethod := httpMethodOpts[m.selectedHTTPMethod]
 
+	if m.isHTTPType() && codes != "" {
+		if !validExpectedCodes(codes) {
+			m.err = "Expected codes: single (200), list (200,201), or range (200-299)"
+			return m, nil
+		}
+	}
+
 	m.submitting = true
 	m.err = ""
 	client := m.client
@@ -498,4 +506,10 @@ func (m Model) View() string {
 	content := title + "\n\n" + strings.Join(rows, "\n")
 	box := shared.StyleModal.Width(55).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+var expectedCodesRe = regexp.MustCompile(`^[1-5][0-9]{2}([,-][1-5][0-9]{2})*$`)
+
+func validExpectedCodes(s string) bool {
+	return expectedCodesRe.MatchString(s)
 }
