@@ -26,6 +26,8 @@ import (
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/subnetedit"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
+	"github.com/larkly/lazystack/internal/ui/portcreate"
+	"github.com/larkly/lazystack/internal/ui/portedit"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 	"github.com/larkly/lazystack/internal/ui/volumepicker"
@@ -343,6 +345,51 @@ func (m Model) openSubnetDeleteConfirm() (Model, tea.Cmd) {
 	m.confirm = modal.NewConfirm("delete_subnet", subID, subName)
 	m.confirm.Title = "Delete Subnet"
 	m.confirm.Body = fmt.Sprintf("Delete subnet %q from network %q?", subName, netName)
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+// --- Port actions ---
+
+func (m Model) openPortCreate() (Model, tea.Cmd) {
+	netID := m.networkView.SelectedNetworkID()
+	netName := m.networkView.SelectedNetworkName()
+	if netID == "" {
+		return m, nil
+	}
+	subs := m.networkView.NetworkSubnets()
+	m.portCreate = portcreate.New(m.client.Network, netID, netName, subs)
+	m.portCreate.SetSize(m.width, m.height)
+	return m, m.portCreate.Init()
+}
+
+func (m Model) openPortEdit() (Model, tea.Cmd) {
+	p := m.networkView.SelectedPort()
+	if p == nil {
+		return m, nil
+	}
+	m.portEdit = portedit.New(m.client.Network, *p)
+	m.portEdit.SetSize(m.width, m.height)
+	return m, m.portEdit.Init()
+}
+
+func (m Model) openPortDeleteConfirm() (Model, tea.Cmd) {
+	p := m.networkView.SelectedPort()
+	if p == nil {
+		return m, nil
+	}
+	name := p.Name
+	if name == "" {
+		name = p.ID[:8] + "..."
+	}
+	m.confirm = modal.NewConfirm("delete_port", p.ID, name)
+	m.confirm.Title = "Delete Port"
+	if p.DeviceOwner != "" {
+		m.confirm.Body = fmt.Sprintf("Port %q is in use by %s. Delete anyway?", name, p.DeviceOwner)
+	} else {
+		m.confirm.Body = fmt.Sprintf("Delete port %q?", name)
+	}
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil

@@ -184,6 +184,40 @@ func (m Model) InSubnets() bool {
 	return m.focus == FocusSubnets
 }
 
+// InPorts returns true when the ports pane is focused.
+func (m Model) InPorts() bool {
+	return m.focus == focusPorts
+}
+
+// SelectedPort returns the full Port object for the currently selected port.
+func (m Model) SelectedPort() *network.Port {
+	if m.focus != focusPorts {
+		return nil
+	}
+	if m.portsCursor < 0 || m.portsCursor >= len(m.ports) {
+		return nil
+	}
+	return &m.ports[m.portsCursor]
+}
+
+// SelectedPortID returns the ID of the currently selected port.
+func (m Model) SelectedPortID() string {
+	if p := m.SelectedPort(); p != nil {
+		return p.ID
+	}
+	return ""
+}
+
+// SGNames returns the security group name map.
+func (m Model) SGNames() map[string]string {
+	return m.sgNames
+}
+
+// NetworkSubnets returns subnets belonging to the selected network (exported).
+func (m Model) NetworkSubnets() []network.Subnet {
+	return m.networkSubnets()
+}
+
 // networkSubnets returns subnets belonging to the selected network.
 func (m Model) networkSubnets() []network.Subnet {
 	n := m.selectedNetwork()
@@ -1066,6 +1100,27 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 				sgLine := "      SGs: " + strings.Join(sgStrs, ", ")
 				lines = append(lines, detailStyle.Render(sgLine))
 			}
+
+			// Show port security and allowed address pairs
+			psStr := "on"
+			if !p.PortSecurityEnabled {
+				psStr = lipgloss.NewStyle().Foreground(shared.ColorWarning).Render("off")
+			}
+			psLine := "      Port Security: " + psStr
+			lines = append(lines, detailStyle.Render(psLine))
+
+			if len(p.AllowedAddressPairs) > 0 {
+				var apStrs []string
+				for _, ap := range p.AllowedAddressPairs {
+					s := ap.IPAddress
+					if ap.MACAddress != "" {
+						s += " (" + ap.MACAddress + ")"
+					}
+					apStrs = append(apStrs, s)
+				}
+				apLine := "      Allowed Pairs: " + strings.Join(apStrs, ", ")
+				lines = append(lines, detailStyle.Render(apLine))
+			}
 		}
 	}
 
@@ -1140,7 +1195,11 @@ func (m Model) renderActionBar() string {
 			buttons = append(buttons, btn("^d", "Delete Subnet"))
 		}
 	case focusPorts:
-		// ports are read-only
+		buttons = append(buttons, btn("^n", "New Port"))
+		if m.SelectedPortID() != "" {
+			buttons = append(buttons, btn("enter", "Edit Port"))
+			buttons = append(buttons, btn("^d", "Delete Port"))
+		}
 	}
 
 	keyStyle := lipgloss.NewStyle().
@@ -1223,7 +1282,7 @@ func (m Model) Hints() string {
 	case FocusSubnets:
 		return "\u2191\u2193 navigate \u2022 enter edit \u2022 ^n add subnet \u2022 ^d delete \u2022 tab focus \u2022 R refresh \u2022 ? help"
 	case focusPorts:
-		return "\u2191\u2193 navigate \u2022 tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 enter edit \u2022 ^n create port \u2022 ^d delete \u2022 tab focus \u2022 R refresh \u2022 ? help"
 	case focusInfo:
 		return "tab focus \u2022 ^n new \u2022 ^d delete \u2022 R refresh \u2022 ? help"
 	default:

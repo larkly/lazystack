@@ -885,6 +885,20 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			shared.Debugf("[action] removed interface (subnet %s) from %s", subnetID, name)
 			return shared.ResourceActionMsg{Action: "Removed interface from", Name: name}
 		}
+	case "delete_port":
+		netClient := m.client.Network
+		id := action.ServerID
+		name := action.Name
+		return m, func() tea.Msg {
+			shared.Debugf("[action] deleting port %s", name)
+			err := network.DeletePort(context.Background(), netClient, id)
+			if err != nil {
+				shared.Debugf("[action] delete port %s failed: %s", name, err)
+				return shared.ResourceActionErrMsg{Action: "Delete port", Name: name, Err: err}
+			}
+			shared.Debugf("[action] deleted port %s", name)
+			return shared.ResourceActionMsg{Action: "Deleted port", Name: name}
+		}
 	case "delete_network":
 		netClient := m.client.Network
 		id := action.ServerID
