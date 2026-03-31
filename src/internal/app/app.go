@@ -39,6 +39,8 @@ import (
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/networkcreate"
 	"github.com/larkly/lazystack/internal/ui/networkview"
+	"github.com/larkly/lazystack/internal/ui/portcreate"
+	"github.com/larkly/lazystack/internal/ui/portedit"
 	"github.com/larkly/lazystack/internal/ui/projectpicker"
 	"github.com/larkly/lazystack/internal/ui/quotaview"
 	"github.com/larkly/lazystack/internal/ui/routercreate"
@@ -138,6 +140,8 @@ type Model struct {
 	networkCreate       networkcreate.Model
 	subnetCreate        subnetcreate.Model
 	subnetEdit          subnetedit.Model
+	portCreate          portcreate.Model
+	portEdit            portedit.Model
 	routerView          routerview.Model
 	routerCreate        routercreate.Model
 	subnetPicker        subnetpicker.Model
@@ -320,6 +324,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.networkCreate.SetSize(m.width, m.height)
 		m.subnetCreate.SetSize(m.width, m.height)
 		m.subnetEdit.SetSize(m.width, m.height)
+		m.portCreate.SetSize(m.width, m.height)
+		m.portEdit.SetSize(m.width, m.height)
 		m.routerCreate.SetSize(m.width, m.height)
 		m.subnetPicker.SetSize(m.width, m.height)
 		m.projectPicker.SetSize(m.width, m.height)
@@ -469,6 +475,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.subnetEdit.Active {
 			var cmd tea.Cmd
 			m.subnetEdit, cmd = m.subnetEdit.Update(msg)
+			return m, cmd
+		}
+
+		// Port create/edit modals intercept all keys when active
+		if m.portCreate.Active {
+			var cmd tea.Cmd
+			m.portCreate, cmd = m.portCreate.Update(msg)
+			return m, cmd
+		}
+		if m.portEdit.Active {
+			var cmd tea.Cmd
+			m.portEdit, cmd = m.portEdit.Update(msg)
 			return m, cmd
 		}
 
@@ -777,16 +795,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.networkView.InSubnets() {
 					return m.openSubnetDeleteConfirm()
 				}
+				if m.networkView.InPorts() {
+					return m.openPortDeleteConfirm()
+				}
 				return m.openNetworkDeleteConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Create) {
 				if m.networkView.InSubnets() {
 					return m.openSubnetCreate()
 				}
+				if m.networkView.InPorts() {
+					return m.openPortCreate()
+				}
 				return m.openNetworkCreate()
 			}
 			if key.Matches(msg, shared.Keys.Enter) && m.networkView.InSubnets() {
 				return m.openSubnetEdit()
+			}
+			if key.Matches(msg, shared.Keys.Enter) && m.networkView.InPorts() {
+				return m.openPortEdit()
 			}
 		}
 
@@ -1396,6 +1423,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.subnetEdit.Active {
 			var cmd tea.Cmd
 			m.subnetEdit, cmd = m.subnetEdit.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.portCreate.Active {
+			var cmd tea.Cmd
+			m.portCreate, cmd = m.portCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.portEdit.Active {
+			var cmd tea.Cmd
+			m.portEdit, cmd = m.portEdit.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.sgCreate.Active {

@@ -112,6 +112,12 @@ func (m Model) viewContent() string {
 	if m.subnetEdit.Active {
 		return m.subnetEdit.View()
 	}
+	if m.portCreate.Active {
+		return m.portCreate.View()
+	}
+	if m.portEdit.Active {
+		return m.portEdit.View()
+	}
 	if m.sgCreate.Active {
 		return m.sgCreate.View()
 	}
