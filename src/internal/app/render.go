@@ -43,10 +43,8 @@ func (m Model) viewName() string {
 		return "keypairdetail"
 	case viewRouterView:
 		return "routerview"
-	case viewLBList:
-		return "lblist"
-	case viewLBDetail:
-		return "lbdetail"
+	case viewLBView:
+		return "lbview"
 	case viewImageList:
 		return "imagelist"
 	case viewImageDetail:
@@ -202,10 +200,8 @@ func (m Model) viewContent() string {
 		content = m.keypairDetail.View()
 	case viewRouterView:
 		content = m.routerView.View()
-	case viewLBList:
-		content = m.lbList.View()
-	case viewLBDetail:
-		content = m.lbDetail.View()
+	case viewLBView:
+		content = m.lbView.View()
 	case viewImageList:
 		content = m.imageList.View()
 	case viewImageDetail:

@@ -30,8 +30,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/lbcreate"
-	"github.com/larkly/lazystack/internal/ui/lbdetail"
-	"github.com/larkly/lazystack/internal/ui/lblist"
+	"github.com/larkly/lazystack/internal/ui/lbview"
 	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
 	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
 	"github.com/larkly/lazystack/internal/ui/lbmonitorcreate"
@@ -81,8 +80,7 @@ const (
 	viewFloatingIPList
 	viewSecGroupView
 	viewKeypairList
-	viewLBList
-	viewLBDetail
+	viewLBView
 	viewVolumeCreate
 	viewKeypairCreate
 	viewNetworkList
@@ -158,8 +156,7 @@ type Model struct {
 	imageList           imagelist.Model
 	imageDetail         imagedetail.Model
 	networkView         networkview.Model
-	lbList              lblist.Model
-	lbDetail            lbdetail.Model
+	lbView              lbview.Model
 	lbCreate            lbcreate.Model
 	lbListenerCreate    lblistenercreate.Model
 	lbPoolCreate        lbpoolcreate.Model
@@ -836,27 +833,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Load balancer list: Enter to open detail, ctrl+d to delete, ctrl+n create
-		if m.view == viewLBList {
-			if key.Matches(msg, shared.Keys.Enter) {
-				return m.openLBDetail()
-			}
-			if key.Matches(msg, shared.Keys.Delete) {
-				if lb := m.lbList.SelectedLB(); lb != nil && strings.HasPrefix(lb.ProvisioningStatus, "PENDING_") {
-					m.statusBar.Error = "Load balancer is " + lb.ProvisioningStatus + ", please wait..."
-					return m, nil
-				}
-				return m.openLBDeleteConfirm()
-			}
-			if key.Matches(msg, shared.Keys.Create) {
-				return m.openLBCreate()
-			}
-		}
-
-		// Load balancer detail: context-sensitive CRUD based on focused pane
-		if m.view == viewLBDetail {
-			// Reviewer fix #2: block ALL mutation keys during PENDING state
-			if lb := m.lbDetail.LB(); lb != nil && strings.HasPrefix(lb.ProvisioningStatus, "PENDING_") {
+		// Load balancer view: context-sensitive CRUD based on focused pane
+		if m.view == viewLBView {
+			// Block ALL mutation keys during PENDING state
+			if lb := m.lbView.LB(); lb != nil && strings.HasPrefix(lb.ProvisioningStatus, "PENDING_") {
 				if key.Matches(msg, shared.Keys.Delete) ||
 					key.Matches(msg, shared.Keys.Create) ||
 					key.Matches(msg, shared.Keys.Enter) ||
@@ -867,11 +847,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			pane := m.lbDetail.FocusedPane()
+			pane := m.lbView.FocusedPane()
 
 			// Health monitor: ctrl+h on pools pane
-			if msg.String() == "ctrl+h" && pane == lbdetail.FocusPools {
-				if pool := m.lbDetail.SelectedPool(); pool != nil {
+			if msg.String() == "ctrl+h" && pane == lbview.FocusPools {
+				if pool := m.lbView.SelectedPool(); pool != nil {
 					if pool.MonitorID != "" {
 						return m.openLBMonitorEdit()
 					}
@@ -882,33 +862,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Admin state toggle: 'o' key
 			if key.Matches(msg, shared.Keys.StopStart) {
 				switch pane {
-				case lbdetail.FocusInfo:
+				case lbview.FocusInfo:
 					return m.toggleLBAdminState()
-				case lbdetail.FocusListeners:
+				case lbview.FocusListeners:
 					return m.toggleListenerAdminState()
-				case lbdetail.FocusPools:
+				case lbview.FocusPools:
 					return m.togglePoolAdminState()
-				case lbdetail.FocusMembers:
+				case lbview.FocusMembers:
 					return m.toggleMemberAdminState()
 				}
 			}
 
 			// Bulk member selection: space toggles, x toggles all
-			if key.Matches(msg, shared.Keys.Select) && pane == lbdetail.FocusMembers {
-				m.lbDetail.ToggleMemberSelection()
+			if key.Matches(msg, shared.Keys.Select) && pane == lbview.FocusMembers {
+				m.lbView.ToggleMemberSelection()
 				return m, nil
 			}
-			if msg.String() == "x" && pane == lbdetail.FocusMembers {
-				m.lbDetail.ToggleAllMemberSelection()
+			if msg.String() == "x" && pane == lbview.FocusMembers {
+				m.lbView.ToggleAllMemberSelection()
 				return m, nil
 			}
 
 			// Drain member: 'w' key on members pane
-			if msg.String() == "w" && pane == lbdetail.FocusMembers {
-				if m.lbDetail.SelectedMemberCount() > 0 {
+			if msg.String() == "w" && pane == lbview.FocusMembers {
+				if m.lbView.SelectedMemberCount() > 0 {
 					return m.drainLBMembersBulk()
 				}
-				if mem := m.lbDetail.SelectedMember(); mem != nil && mem.Weight > 0 {
+				if mem := m.lbView.SelectedMember(); mem != nil && mem.Weight > 0 {
 					return m.drainLBMember()
 				}
 			}
@@ -916,24 +896,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch {
 			case key.Matches(msg, shared.Keys.Delete):
 				switch pane {
-				case lbdetail.FocusListeners:
-					if m.lbDetail.SelectedListenerID() != "" {
+				case lbview.FocusSelector:
+					return m.openLBDeleteConfirm()
+				case lbview.FocusListeners:
+					if m.lbView.SelectedListenerID() != "" {
 						return m.openLBListenerDeleteConfirm()
 					}
 					return m.openLBDeleteConfirm()
-				case lbdetail.FocusPools:
-					if pool := m.lbDetail.SelectedPool(); pool != nil && pool.MonitorID != "" {
+				case lbview.FocusPools:
+					if pool := m.lbView.SelectedPool(); pool != nil && pool.MonitorID != "" {
 						return m.openLBMonitorDeleteConfirm()
 					}
-					if m.lbDetail.SelectedPoolID() != "" {
+					if m.lbView.SelectedPoolID() != "" {
 						return m.openLBPoolDeleteConfirm()
 					}
 					return m.openLBDeleteConfirm()
-				case lbdetail.FocusMembers:
-					if m.lbDetail.SelectedMemberCount() > 0 {
+				case lbview.FocusMembers:
+					if m.lbView.SelectedMemberCount() > 0 {
 						return m.openLBBulkMemberDeleteConfirm()
 					}
-					if m.lbDetail.SelectedMemberID() != "" {
+					if m.lbView.SelectedMemberID() != "" {
 						return m.openLBMemberDeleteConfirm()
 					}
 				default:
@@ -941,29 +923,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case key.Matches(msg, shared.Keys.Create):
 				switch pane {
-				case lbdetail.FocusListeners:
+				case lbview.FocusSelector:
+					return m.openLBCreate()
+				case lbview.FocusListeners:
 					return m.openLBListenerCreate()
-				case lbdetail.FocusPools:
+				case lbview.FocusPools:
 					return m.openLBPoolCreate()
-				case lbdetail.FocusMembers:
-					if m.lbDetail.SelectedPoolID() != "" {
+				case lbview.FocusMembers:
+					if m.lbView.SelectedPoolID() != "" {
 						return m.openLBMemberCreate()
 					}
 				}
 			case key.Matches(msg, shared.Keys.Enter):
 				switch pane {
-				case lbdetail.FocusInfo:
+				case lbview.FocusInfo:
 					return m.openLBEdit()
-				case lbdetail.FocusListeners:
-					if m.lbDetail.SelectedListenerID() != "" {
+				case lbview.FocusListeners:
+					if m.lbView.SelectedListenerID() != "" {
 						return m.openLBListenerEdit()
 					}
-				case lbdetail.FocusPools:
-					if pool := m.lbDetail.SelectedPool(); pool != nil {
+				case lbview.FocusPools:
+					if pool := m.lbView.SelectedPool(); pool != nil {
 						return m.openLBPoolEdit()
 					}
-				case lbdetail.FocusMembers:
-					if m.lbDetail.SelectedMemberID() != "" {
+				case lbview.FocusMembers:
+					if m.lbView.SelectedMemberID() != "" {
 						return m.openLBMemberEdit()
 					}
 				}
@@ -1250,9 +1234,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = viewKeypairList
 			m.statusBar.CurrentView = "keypairlist"
 		}
-		if m.view == viewLBDetail {
-			m.statusBar.CurrentView = "lbdetail"
-			return m, m.lbDetail.ForceRefresh()
+		if m.view == viewLBView {
+			m.statusBar.CurrentView = "lbview"
+			return m, m.lbView.ForceRefresh()
 		}
 		if m.view == viewImageDetail {
 			m.view = viewImageList

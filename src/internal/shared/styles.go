@@ -170,6 +170,21 @@ var (
 
 	StyleValue = lipgloss.NewStyle().
 			Foreground(ColorFg)
+
+	StyleButton = lipgloss.NewStyle().
+			Padding(0, 2).
+			Background(lipgloss.Color("#073642")).
+			Foreground(ColorFg)
+
+	StyleButtonSubmit = StyleButton.
+				Background(ColorSuccess).
+				Foreground(ColorBg).
+				Bold(true)
+
+	StyleButtonCancel = StyleButton.
+				Background(ColorError).
+				Foreground(ColorBg).
+				Bold(true)
 )
 
 // RebuildStyles reassigns all Style* vars from current Color* values.
@@ -224,6 +239,21 @@ func RebuildStyles() {
 
 	StyleValue = lipgloss.NewStyle().
 		Foreground(ColorFg)
+
+	StyleButton = lipgloss.NewStyle().
+		Padding(0, 2).
+		Background(lipgloss.Color("#073642")).
+		Foreground(ColorFg)
+
+	StyleButtonSubmit = StyleButton.
+		Background(ColorSuccess).
+		Foreground(ColorBg).
+		Bold(true)
+
+	StyleButtonCancel = StyleButton.
+		Background(ColorError).
+		Foreground(ColorBg).
+		Bold(true)
 
 	// Rebuild status/power color maps that reference Color* vars.
 	StatusColors["ACTIVE"] = ColorSuccess

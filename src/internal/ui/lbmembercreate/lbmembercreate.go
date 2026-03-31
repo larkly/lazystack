@@ -139,7 +139,7 @@ func New(client, computeClient *gophercloud.ServiceClient, poolID, poolName, lbV
 	mpi.Prompt = ""
 	mpi.Placeholder = "optional health-check port"
 	mpi.CharLimit = 5
-	mpi.SetWidth(18)
+	mpi.SetWidth(28)
 
 	ti := textinput.New()
 	ti.Prompt = ""
@@ -210,7 +210,7 @@ func NewEdit(client *gophercloud.ServiceClient, poolID, memberID, currentName st
 	mpi.Prompt = ""
 	mpi.Placeholder = "optional health-check port"
 	mpi.CharLimit = 5
-	mpi.SetWidth(18)
+	mpi.SetWidth(28)
 	if currentMonitorPort > 0 {
 		mpi.SetValue(strconv.Itoa(currentMonitorPort))
 	}
@@ -362,10 +362,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Back):
 			m.Active = false
 			return m, nil
-		case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
+		case key.Matches(msg, shared.Keys.Tab):
 			m.advanceFocus(1)
 			return m, nil
-		case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
+		case key.Matches(msg, shared.Keys.ShiftTab):
 			m.advanceFocus(-1)
 			return m, nil
 		case key.Matches(msg, shared.Keys.Enter):
@@ -763,13 +763,13 @@ func (m Model) View() string {
 	}
 
 	rows = append(rows, "")
-	submitStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
-	cancelStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
+	submitStyle := shared.StyleButton
+	cancelStyle := shared.StyleButton
 	if m.focusField == fieldSubmit {
-		submitStyle = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
+		submitStyle = shared.StyleButtonSubmit
 	}
 	if m.focusField == fieldCancel {
-		cancelStyle = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
+		cancelStyle = shared.StyleButtonCancel
 	}
 
 	if m.submitting {
@@ -779,7 +779,7 @@ func (m Model) View() string {
 		}
 		rows = append(rows, m.spinner.View()+" "+action+" member...")
 	} else {
-		rows = append(rows, submitStyle.Render("[ Submit ]")+"  "+cancelStyle.Render("[ Cancel ]"))
+		rows = append(rows, submitStyle.Render("[ctrl+s] Submit")+"  "+cancelStyle.Render("[esc] Cancel"))
 	}
 
 	content := title + "\n\n" + strings.Join(rows, "\n")
