@@ -3,9 +3,12 @@ package image
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/imagedata"
+	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/imageimport"
 	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/images"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 )
@@ -77,6 +80,8 @@ type UpdateImageOpts struct {
 	Visibility *string
 	MinDisk    *int
 	MinRAM     *int
+	Tags       *[]string
+	Protected  *bool
 }
 
 // UpdateImage updates image properties.
@@ -95,6 +100,12 @@ func UpdateImage(ctx context.Context, client *gophercloud.ServiceClient, id stri
 	if opts.MinRAM != nil {
 		patches = append(patches, images.ReplaceImageMinRam{NewMinRam: *opts.MinRAM})
 	}
+	if opts.Tags != nil {
+		patches = append(patches, images.ReplaceImageTags{NewTags: *opts.Tags})
+	}
+	if opts.Protected != nil {
+		patches = append(patches, images.ReplaceImageProtected{NewProtected: *opts.Protected})
+	}
 	if len(patches) == 0 {
 		return nil
 	}
@@ -103,6 +114,100 @@ func UpdateImage(ctx context.Context, client *gophercloud.ServiceClient, id stri
 		return fmt.Errorf("updating image %s: %w", id, err)
 	}
 	return nil
+}
+
+// CreateImageOpts holds fields for creating a new image (metadata only).
+type CreateImageOpts struct {
+	Name            string
+	DiskFormat      string
+	ContainerFormat string
+	Visibility      string
+	MinDisk         int
+	MinRAM          int
+	Tags            []string
+}
+
+// CreateImage creates image metadata (status becomes "queued").
+func CreateImage(ctx context.Context, client *gophercloud.ServiceClient, opts CreateImageOpts) (*Image, error) {
+	containerFormat := opts.ContainerFormat
+	if containerFormat == "" {
+		containerFormat = "bare"
+	}
+	visibility := opts.Visibility
+	if visibility == "" {
+		visibility = "private"
+	}
+	vis := images.ImageVisibility(visibility)
+
+	createOpts := images.CreateOpts{
+		Name:            opts.Name,
+		DiskFormat:      opts.DiskFormat,
+		ContainerFormat: containerFormat,
+		Visibility:      &vis,
+		MinDisk:         opts.MinDisk,
+		MinRAM:          opts.MinRAM,
+		Tags:            opts.Tags,
+	}
+
+	raw, err := images.Create(ctx, client, createOpts).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("creating image: %w", err)
+	}
+	img := imageFromGophercloud(*raw)
+	return &img, nil
+}
+
+// UploadImageData uploads image file data to an existing image.
+func UploadImageData(ctx context.Context, client *gophercloud.ServiceClient, imageID string, data io.Reader) error {
+	err := imagedata.Upload(ctx, client, imageID, data).ExtractErr()
+	if err != nil {
+		return fmt.Errorf("uploading image data %s: %w", imageID, err)
+	}
+	return nil
+}
+
+// DownloadImageData downloads image file data. Returns a reader and content length (-1 if unknown).
+func DownloadImageData(ctx context.Context, client *gophercloud.ServiceClient, imageID string) (io.ReadCloser, int64, error) {
+	result := imagedata.Download(ctx, client, imageID)
+	body, err := result.Extract()
+	if err != nil {
+		return nil, 0, fmt.Errorf("downloading image data %s: %w", imageID, err)
+	}
+	var contentLength int64 = -1
+	if cl := result.Header.Get("Content-Length"); cl != "" {
+		fmt.Sscanf(cl, "%d", &contentLength)
+	}
+	return body, contentLength, nil
+}
+
+// ImportImageURL triggers a web-download import for an image.
+func ImportImageURL(ctx context.Context, client *gophercloud.ServiceClient, imageID, url string) error {
+	opts := imageimport.CreateOpts{
+		Name: imageimport.WebDownloadMethod,
+		URI:  url,
+	}
+	err := imageimport.Create(ctx, client, imageID, opts).ExtractErr()
+	if err != nil {
+		return fmt.Errorf("importing image %s from URL: %w", imageID, err)
+	}
+	return nil
+}
+
+// ProgressReader wraps an io.Reader to track bytes read.
+type ProgressReader struct {
+	Reader     io.Reader
+	Total      int64
+	BytesRead  int64
+	OnProgress func(read, total int64)
+}
+
+func (pr *ProgressReader) Read(p []byte) (int, error) {
+	n, err := pr.Reader.Read(p)
+	pr.BytesRead += int64(n)
+	if pr.OnProgress != nil {
+		pr.OnProgress(pr.BytesRead, pr.Total)
+	}
+	return n, err
 }
 
 // DeactivateImage deactivates an image (prevents downloads).

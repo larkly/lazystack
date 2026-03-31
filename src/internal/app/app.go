@@ -24,8 +24,10 @@ import (
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/help"
-	"github.com/larkly/lazystack/internal/ui/imagedetail"
-	"github.com/larkly/lazystack/internal/ui/imagelist"
+	"github.com/larkly/lazystack/internal/ui/imagecreate"
+	"github.com/larkly/lazystack/internal/ui/imagedownload"
+	"github.com/larkly/lazystack/internal/ui/imageedit"
+	"github.com/larkly/lazystack/internal/ui/imageview"
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
@@ -86,8 +88,7 @@ const (
 	viewNetworkList
 	viewKeypairDetail
 	viewRouterView
-	viewImageList
-	viewImageDetail
+	viewImageView
 )
 
 type modalType int
@@ -153,8 +154,10 @@ type Model struct {
 	keypairList         keypairlist.Model
 	keypairCreate       keypaircreate.Model
 	keypairDetail       keypairdetail.Model
-	imageList           imagelist.Model
-	imageDetail         imagedetail.Model
+	imageView           imageview.Model
+	imageEdit           imageedit.Model
+	imageCreate         imagecreate.Model
+	imageDownload       imagedownload.Model
 	networkView         networkview.Model
 	lbView              lbview.Model
 	lbCreate            lbcreate.Model
@@ -498,6 +501,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sgRuleCreate.Active {
 			var cmd tea.Cmd
 			m.sgRuleCreate, cmd = m.sgRuleCreate.Update(msg)
+			return m, cmd
+		}
+
+		// Image modals intercept all keys when active
+		if m.imageEdit.Active {
+			var cmd tea.Cmd
+			m.imageEdit, cmd = m.imageEdit.Update(msg)
+			return m, cmd
+		}
+		if m.imageCreate.Active {
+			var cmd tea.Cmd
+			m.imageCreate, cmd = m.imageCreate.Update(msg)
+			return m, cmd
+		}
+		if m.imageDownload.Active {
+			var cmd tea.Cmd
+			m.imageDownload, cmd = m.imageDownload.Update(msg)
 			return m, cmd
 		}
 
@@ -974,26 +994,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Image list: Enter to open detail, ctrl+d to delete, d to deactivate/reactivate
-		if m.view == viewImageList {
-			if key.Matches(msg, shared.Keys.Enter) {
-				return m.openImageDetail()
-			}
-			if key.Matches(msg, shared.Keys.Delete) {
-				return m.openImageDeleteConfirm()
-			}
-			if key.Matches(msg, shared.Keys.Deactivate) {
-				return m.openImageDeactivateConfirm()
-			}
-		}
+		// Image view: context-sensitive actions based on focused pane
+		if m.view == viewImageView {
+			pane := m.imageView.FocusedPane()
 
-		// Image detail: ctrl+d delete, d to deactivate/reactivate
-		if m.view == viewImageDetail {
 			if key.Matches(msg, shared.Keys.Delete) {
 				return m.openImageDeleteConfirm()
 			}
-			if key.Matches(msg, shared.Keys.Deactivate) {
+			if key.Matches(msg, shared.Keys.Deactivate) && (pane == imageview.FocusSelector || pane == imageview.FocusInfo) {
 				return m.openImageDeactivateConfirm()
+			}
+			if key.Matches(msg, shared.Keys.Create) && pane == imageview.FocusSelector {
+				return m.openImageUpload()
+			}
+			if msg.String() == "ctrl+g" && pane == imageview.FocusProperties {
+				return m.openImageDownload()
+			}
+			if key.Matches(msg, shared.Keys.Enter) {
+				switch pane {
+				case imageview.FocusInfo:
+					return m.openImageEdit()
+				case imageview.FocusServers:
+					if serverID := m.imageView.SelectedServerID(); serverID != "" {
+						return m.handleDetailNavigation(shared.NavigateToDetailMsg{Resource: "server", ID: serverID})
+					}
+				}
 			}
 		}
 
@@ -1238,9 +1263,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusBar.CurrentView = "lbview"
 			return m, m.lbView.ForceRefresh()
 		}
-		if m.view == viewImageDetail {
-			m.view = viewImageList
-			m.statusBar.CurrentView = "imagelist"
+		if m.view == viewImageView {
+			m.statusBar.CurrentView = "imageview"
+			return m, m.imageView.ForceRefresh()
 		}
 		if m.view == viewSecGroupView {
 			return m, m.secGroupView.ForceRefresh()
@@ -1427,6 +1452,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sgRuleCreate.Active {
 			var cmd tea.Cmd
 			m.sgRuleCreate, cmd = m.sgRuleCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.imageEdit.Active {
+			var cmd tea.Cmd
+			m.imageEdit, cmd = m.imageEdit.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.imageCreate.Active {
+			var cmd tea.Cmd
+			m.imageCreate, cmd = m.imageCreate.Update(msg)
+			return m, tea.Batch(viewCmd, cmd)
+		}
+		if m.imageDownload.Active {
+			var cmd tea.Cmd
+			m.imageDownload, cmd = m.imageDownload.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
 		if m.lbCreate.Active {

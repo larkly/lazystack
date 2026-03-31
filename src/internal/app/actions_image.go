@@ -6,40 +6,52 @@ import (
 
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/ui/imagedetail"
+	"github.com/larkly/lazystack/internal/ui/imagecreate"
+	"github.com/larkly/lazystack/internal/ui/imagedownload"
+	"github.com/larkly/lazystack/internal/ui/imageedit"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"charm.land/bubbletea/v2"
 )
 
-func (m Model) openImageDetail() (Model, tea.Cmd) {
-	img := m.imageList.SelectedImage()
-	if img == nil {
+func (m Model) openImageEdit() (Model, tea.Cmd) {
+	im := m.imageView.SelectedImage()
+	if im == nil {
 		return m, nil
 	}
-	m.imageDetail = imagedetail.New(m.client.Image, img.ID)
-	m.imageDetail.SetSize(m.width, m.height)
-	m.view = viewImageDetail
-	m.statusBar.CurrentView = "imagedetail"
-	m.statusBar.Hint = m.imageDetail.Hints()
-	return m, m.imageDetail.Init()
+	m.imageEdit = imageedit.New(m.client.Image, im.ID, im.Name, im.Visibility,
+		im.MinDisk, im.MinRAM, im.Tags, im.Protected)
+	m.imageEdit.SetSize(m.width, m.height)
+	return m, m.imageEdit.Init()
+}
+
+func (m Model) openImageUpload() (Model, tea.Cmd) {
+	m.imageCreate = imagecreate.New(m.client.Image)
+	m.imageCreate.SetSize(m.width, m.height)
+	return m, m.imageCreate.Init()
+}
+
+func (m Model) openImageDownload() (Model, tea.Cmd) {
+	im := m.imageView.SelectedImage()
+	if im == nil {
+		return m, nil
+	}
+	m.imageDownload = imagedownload.New(m.client.Image, im.ID, im.Name, im.DiskFormat)
+	m.imageDownload.SetSize(m.width, m.height)
+	return m, m.imageDownload.Init()
 }
 
 func (m Model) openImageDeleteConfirm() (Model, tea.Cmd) {
-	var id, name string
-	switch m.view {
-	case viewImageList:
-		if img := m.imageList.SelectedImage(); img != nil {
-			id, name = img.ID, img.Name
-			if name == "" {
-				name = id
-			}
-		}
-	case viewImageDetail:
-		id = m.imageDetail.ImageID()
-		name = m.imageDetail.ImageName()
-	}
-	if id == "" {
+	im := m.imageView.SelectedImage()
+	if im == nil {
 		return m, nil
+	}
+	if im.Protected {
+		m.statusBar.Error = "Image is protected \u2014 edit to unprotect first"
+		return m, nil
+	}
+	id, name := im.ID, im.Name
+	if name == "" {
+		name = id
 	}
 	m.confirm = modal.NewConfirm("delete_image", id, name)
 	m.confirm.Title = "Delete Image"
@@ -50,22 +62,13 @@ func (m Model) openImageDeleteConfirm() (Model, tea.Cmd) {
 }
 
 func (m Model) openImageDeactivateConfirm() (Model, tea.Cmd) {
-	var id, name, status string
-	switch m.view {
-	case viewImageList:
-		if img := m.imageList.SelectedImage(); img != nil {
-			id, name, status = img.ID, img.Name, img.Status
-			if name == "" {
-				name = id
-			}
-		}
-	case viewImageDetail:
-		id = m.imageDetail.ImageID()
-		name = m.imageDetail.ImageName()
-		status = m.imageDetail.ImageStatus()
-	}
-	if id == "" {
+	im := m.imageView.SelectedImage()
+	if im == nil {
 		return m, nil
+	}
+	id, name, status := im.ID, im.Name, im.Status
+	if name == "" {
+		name = id
 	}
 
 	action := "deactivate_image"

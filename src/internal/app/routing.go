@@ -72,12 +72,9 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewLBView:
 		m.lbView, cmd = m.lbView.Update(msg)
 		m.statusBar.Hint = m.lbView.Hints()
-	case viewImageList:
-		m.imageList, cmd = m.imageList.Update(msg)
-		m.statusBar.Hint = m.imageList.Hints()
-	case viewImageDetail:
-		m.imageDetail, cmd = m.imageDetail.Update(msg)
-		m.statusBar.Hint = m.imageDetail.Hints()
+	case viewImageView:
+		m.imageView, cmd = m.imageView.Update(msg)
+		m.statusBar.Hint = m.imageView.Hints()
 	}
 	return m, cmd
 }
@@ -120,7 +117,7 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 			m.lbView, cmd = m.lbView.Update(msg)
 			cmds = append(cmds, cmd)
 		case "images":
-			m.imageList, cmd = m.imageList.Update(msg)
+			m.imageView, cmd = m.imageView.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -133,10 +130,7 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 	case viewVolumeDetail:
 		m.volumeDetail, cmd = m.volumeDetail.Update(msg)
 		cmds = append(cmds, cmd)
-	// viewRouterView and viewLBView are tab views, not sub-views — handled above
-	case viewImageDetail:
-		m.imageDetail, cmd = m.imageDetail.Update(msg)
-		cmds = append(cmds, cmd)
+	// viewRouterView, viewLBView, and viewImageView are tab views, not sub-views — handled above
 	case viewConsoleLog:
 		m.consoleLog, cmd = m.consoleLog.Update(msg)
 		cmds = append(cmds, cmd)
@@ -243,6 +237,13 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 			m.statusBar.Hint = m.secGroupView.Hints()
 			return m, nil
 		}
+		if m.returnToView == viewImageView {
+			m.returnToView = 0
+			m.view = viewImageView
+			m.statusBar.CurrentView = "imageview"
+			m.statusBar.Hint = m.imageView.Hints()
+			return m, nil
+		}
 		m.returnToView = 0
 		m.view = viewServerList
 		m.statusBar.CurrentView = "serverlist"
@@ -313,10 +314,10 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		return m, m.lbView.ForceRefresh()
 
 	case "imagelist":
-		m.view = viewImageList
-		m.statusBar.CurrentView = "imagelist"
-		m.statusBar.Hint = m.imageList.Hints()
-		return m, m.imageList.Init()
+		m.view = viewImageView
+		m.statusBar.CurrentView = "imageview"
+		m.statusBar.Hint = m.imageView.Hints()
+		return m, m.imageView.ForceRefresh()
 
 	case "servercreate":
 		m.serverCreate = servercreate.New(m.client.Compute, m.client.Image, m.client.Network)
@@ -362,10 +363,8 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.routerView.ForceRefresh()
 	case viewLBView:
 		return m, m.lbView.ForceRefresh()
-	case viewImageList:
-		return m, m.imageList.ForceRefresh()
-	case viewImageDetail:
-		return m, m.imageDetail.ForceRefresh()
+	case viewImageView:
+		return m, m.imageView.ForceRefresh()
 	case viewConsoleLog:
 		return m, m.consoleLog.ForceRefresh()
 	case viewActionLog:

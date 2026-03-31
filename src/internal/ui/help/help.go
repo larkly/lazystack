@@ -233,23 +233,18 @@ var allSections = []section{
 		},
 	},
 	{
-		name: "Image List",
+		name: "Images",
 		binds: []string{
 			"↑/k ↓/j      navigate",
-			"enter         view detail",
-			"ctrl+d        delete image",
-			"d             deactivate image",
+			"tab/shift+tab cycle panes",
+			"/             search/filter images",
 			"s/S           sort / reverse sort",
-			"/             filter",
-		},
-	},
-	{
-		name: "Image Detail",
-		binds: []string{
-			"↑/k ↓/j      scroll",
+			"enter         edit image / server detail",
+			"ctrl+n        upload image",
 			"ctrl+d        delete image",
-			"d             deactivate image",
-			"esc           back to list",
+			"d             deactivate/reactivate",
+			"ctrl+g        download image",
+			"esc           clear filter",
 		},
 	},
 	{
@@ -283,8 +278,7 @@ var viewSections = map[string][]string{
 	"routerlist":    {"Routers"},
 	"routerdetail":  {"Routers"},
 	"lbview":        {"Load Balancers"},
-	"imagelist":     {"Image List"},
-	"imagedetail":   {"Image Detail"},
+	"imageview":     {"Images"},
 	"cloudpicker":   {},
 }
 
