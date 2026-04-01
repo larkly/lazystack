@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // CacheEntry holds the result of a previous update check.
@@ -34,38 +36,53 @@ var checkFn = CheckLatest
 // LoadCache reads the cached update-check result from disk.
 // Returns nil, nil if the file does not exist.
 func LoadCache() (*CacheEntry, error) {
+	shared.Debugf("[selfupdate] LoadCache: start")
 	path := CachePath()
 	if path == "" {
+		shared.Debugf("[selfupdate] LoadCache: no cache path")
 		return nil, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			shared.Debugf("[selfupdate] LoadCache: miss (file not found)")
 			return nil, nil
 		}
+		shared.Debugf("[selfupdate] LoadCache: error reading: %v", err)
 		return nil, err
 	}
 	var entry CacheEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
+		shared.Debugf("[selfupdate] LoadCache: error unmarshaling: %v", err)
 		return nil, err
 	}
+	shared.Debugf("[selfupdate] LoadCache: hit version=%s checkedAt=%s", entry.LatestVersion, entry.CheckedAt)
 	return &entry, nil
 }
 
 // SaveCache writes the update-check result to disk.
 func SaveCache(entry CacheEntry) error {
+	shared.Debugf("[selfupdate] SaveCache: start version=%s", entry.LatestVersion)
 	path := CachePath()
 	if path == "" {
+		shared.Debugf("[selfupdate] SaveCache: error no cache path")
 		return errors.New("cannot determine cache directory")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		shared.Debugf("[selfupdate] SaveCache: error creating dir: %v", err)
 		return err
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
+		shared.Debugf("[selfupdate] SaveCache: error marshaling: %v", err)
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		shared.Debugf("[selfupdate] SaveCache: error writing: %v", err)
+		return err
+	}
+	shared.Debugf("[selfupdate] SaveCache: success")
+	return nil
 }
 
 // CheckLatestCached wraps CheckLatest with a disk cache to avoid
@@ -74,16 +91,22 @@ func SaveCache(entry CacheEntry) error {
 // for a different binary version (i.e. the user upgraded via their
 // package manager).
 func CheckLatestCached(currentVersion string, ttl time.Duration) (latest, downloadURL, checksumsURL string, err error) {
+	shared.Debugf("[selfupdate] CheckLatestCached: start currentVersion=%s ttl=%s", currentVersion, ttl)
 	cache, _ := LoadCache()
 	if cache != nil && cache.CurrentVersion == currentVersion && time.Since(cache.CheckedAt) < ttl {
+		shared.Debugf("[selfupdate] CheckLatestCached: using cached result (age=%s)", time.Since(cache.CheckedAt))
 		if cache.LatestVersion == "" {
+			shared.Debugf("[selfupdate] CheckLatestCached: cache says up to date")
 			return "", "", "", nil
 		}
+		shared.Debugf("[selfupdate] CheckLatestCached: cache says latest=%s", cache.LatestVersion)
 		return cache.LatestVersion, cache.DownloadURL, cache.ChecksumsURL, nil
 	}
 
+	shared.Debugf("[selfupdate] CheckLatestCached: cache miss or expired, querying API")
 	latest, downloadURL, checksumsURL, err = checkFn(currentVersion)
 	if err != nil {
+		shared.Debugf("[selfupdate] CheckLatestCached: error from API: %v", err)
 		return "", "", "", err
 	}
 
@@ -95,5 +118,6 @@ func CheckLatestCached(currentVersion string, ttl time.Duration) (latest, downlo
 		CurrentVersion: currentVersion,
 	})
 
+	shared.Debugf("[selfupdate] CheckLatestCached: result latest=%s", latest)
 	return latest, downloadURL, checksumsURL, nil
 }

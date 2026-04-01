@@ -169,6 +169,7 @@ func New(client *gophercloud.ServiceClient, lbID, lbName string) Model {
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[lbpoolcreate] Init() lbName=%q editMode=%v", m.lbName, m.editMode)
 	return nil
 }
 
@@ -191,12 +192,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.editMode {
 			action = "Updated pool on"
 		}
+		shared.Debugf("[lbpoolcreate] success lbName=%q", m.lbName)
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: action, Name: m.lbName}
 		}
 	case poolCreateErrMsg:
 		m.submitting = false
 		m.err = shared.SanitizeAPIError(msg.err)
+		shared.Debugf("[lbpoolcreate] error: %v", msg.err)
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting {
@@ -445,6 +448,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	m.submitting = true
 	m.err = ""
+	shared.Debugf("[lbpoolcreate] submit protocol=%s method=%s", protocol, lbMethod)
 	client := m.client
 	lbID := m.lbID
 

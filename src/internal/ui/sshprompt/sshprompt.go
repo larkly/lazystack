@@ -115,6 +115,7 @@ func New(serverName string, floatingIPs, ipv6, ipv4 []string, keyPath string, ig
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[sshprompt] Init() server=%q ips=%d", m.serverName, len(m.ips))
 	return textinput.Blink
 }
 
@@ -342,6 +343,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 	m.Active = false
 	ip := m.selectedIP()
+	shared.Debugf("[sshprompt] submit user=%q ip=%s", user, ip)
 	return m, func() tea.Msg {
 		return SSHConnectMsg{
 			User:           user,

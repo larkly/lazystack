@@ -10,9 +10,11 @@ import (
 
 // ApplyAll applies all config sections to the shared globals.
 func ApplyAll(cfg Config) {
+	shared.Debugf("[config] ApplyAll: start")
 	ApplyGeneral(cfg.General)
 	ApplyColors(cfg.Colors)
 	ApplyKeybindings(cfg.Keybindings)
+	shared.Debugf("[config] ApplyAll: done")
 }
 
 // ApplyGeneral sets shared.PlainMode from config.
@@ -22,6 +24,7 @@ func ApplyGeneral(g GeneralConfig) {
 
 // ApplyColors sets shared.Color* vars and rebuilds shared.Style* vars.
 func ApplyColors(c ColorConfig) {
+	shared.Debugf("[config] ApplyColors: start")
 	if c.Primary != "" {
 		shared.ColorPrimary = lipgloss.Color(c.Primary)
 	}
@@ -54,6 +57,7 @@ func ApplyColors(c ColorConfig) {
 	}
 
 	shared.RebuildStyles()
+	shared.Debugf("[config] ApplyColors: done")
 }
 
 // keybindingFieldMap maps config keybinding names to KeyMap field setters.
@@ -174,7 +178,9 @@ var defaultHelpText = map[string]string{
 
 // ApplyKeybindings sets shared.Keys fields from the config map.
 func ApplyKeybindings(kb map[string]string) {
+	shared.Debugf("[config] ApplyKeybindings: start bindings=%d", len(kb))
 	if kb == nil {
+		shared.Debugf("[config] ApplyKeybindings: nil map, skipping")
 		return
 	}
 	for name, keys := range kb {
@@ -202,4 +208,5 @@ func ApplyKeybindings(kb map[string]string) {
 			key.WithHelp(helpKey, helpText),
 		))
 	}
+	shared.Debugf("[config] ApplyKeybindings: done")
 }

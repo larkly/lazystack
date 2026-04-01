@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/larkly/lazystack/internal/shared"
+
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
@@ -109,6 +111,7 @@ type HealthMonitor struct {
 
 // ListLoadBalancers fetches all load balancers.
 func ListLoadBalancers(ctx context.Context, client *gophercloud.ServiceClient) ([]LoadBalancer, error) {
+	shared.Debugf("[lb] ListLoadBalancers: starting")
 	var result []LoadBalancer
 	err := loadbalancers.List(client, loadbalancers.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := loadbalancers.ExtractLoadBalancers(page)
@@ -131,17 +134,22 @@ func ListLoadBalancers(ctx context.Context, client *gophercloud.ServiceClient) (
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[lb] ListLoadBalancers: error: %v", err)
 		return nil, fmt.Errorf("listing load balancers: %w", err)
 	}
+	shared.Debugf("[lb] ListLoadBalancers: success, count=%d", len(result))
 	return result, nil
 }
 
 // GetLoadBalancer fetches a single load balancer by ID.
 func GetLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string) (*LoadBalancer, error) {
+	shared.Debugf("[lb] GetLoadBalancer: starting, id=%s", id)
 	lb, err := loadbalancers.Get(ctx, client, id).Extract()
 	if err != nil {
+		shared.Debugf("[lb] GetLoadBalancer: error: %v", err)
 		return nil, fmt.Errorf("getting load balancer %s: %w", id, err)
 	}
+	shared.Debugf("[lb] GetLoadBalancer: success, id=%s name=%s", id, lb.Name)
 	return &LoadBalancer{
 		ID:                 lb.ID,
 		Name:               lb.Name,
@@ -157,6 +165,7 @@ func GetLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id 
 
 // CreateLoadBalancer creates a new load balancer on the given subnet.
 func CreateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, name, description, vipSubnetID string) (*LoadBalancer, error) {
+	shared.Debugf("[lb] CreateLoadBalancer: starting, name=%s subnetID=%s", name, vipSubnetID)
 	opts := loadbalancers.CreateOpts{
 		Name:        name,
 		Description: description,
@@ -164,8 +173,10 @@ func CreateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, 
 	}
 	lb, err := loadbalancers.Create(ctx, client, opts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] CreateLoadBalancer: error: %v", err)
 		return nil, fmt.Errorf("creating load balancer: %w", err)
 	}
+	shared.Debugf("[lb] CreateLoadBalancer: success, id=%s name=%s", lb.ID, lb.Name)
 	return &LoadBalancer{
 		ID:                 lb.ID,
 		Name:               lb.Name,
@@ -181,6 +192,7 @@ func CreateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, 
 
 // UpdateLoadBalancer updates a load balancer's name and/or description.
 func UpdateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string, adminStateUp *bool) error {
+	shared.Debugf("[lb] UpdateLoadBalancer: starting, id=%s", id)
 	opts := loadbalancers.UpdateOpts{
 		Name:         name,
 		Description:  description,
@@ -188,22 +200,28 @@ func UpdateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, 
 	}
 	_, err := loadbalancers.Update(ctx, client, id, opts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] UpdateLoadBalancer: error: %v", err)
 		return fmt.Errorf("updating load balancer %s: %w", id, err)
 	}
+	shared.Debugf("[lb] UpdateLoadBalancer: success, id=%s", id)
 	return nil
 }
 
 // DeleteLoadBalancer deletes a load balancer with cascade.
 func DeleteLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[lb] DeleteLoadBalancer: starting, id=%s", id)
 	r := loadbalancers.Delete(ctx, client, id, loadbalancers.DeleteOpts{Cascade: true})
 	if r.Err != nil {
+		shared.Debugf("[lb] DeleteLoadBalancer: error: %v", r.Err)
 		return fmt.Errorf("deleting load balancer %s: %w", id, r.Err)
 	}
+	shared.Debugf("[lb] DeleteLoadBalancer: success, id=%s", id)
 	return nil
 }
 
 // ListListeners fetches listeners for a load balancer.
 func ListListeners(ctx context.Context, client *gophercloud.ServiceClient, lbID string) ([]Listener, error) {
+	shared.Debugf("[lb] ListListeners: starting, lbID=%s", lbID)
 	var result []Listener
 	err := listeners.List(client, listeners.ListOpts{LoadbalancerID: lbID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := listeners.ExtractListeners(page)
@@ -225,13 +243,16 @@ func ListListeners(ctx context.Context, client *gophercloud.ServiceClient, lbID 
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[lb] ListListeners: error: %v", err)
 		return nil, fmt.Errorf("listing listeners for LB %s: %w", lbID, err)
 	}
+	shared.Debugf("[lb] ListListeners: success, lbID=%s count=%d", lbID, len(result))
 	return result, nil
 }
 
 // ListPools fetches pools for a load balancer.
 func ListPools(ctx context.Context, client *gophercloud.ServiceClient, lbID string) ([]Pool, error) {
+	shared.Debugf("[lb] ListPools: starting, lbID=%s", lbID)
 	var result []Pool
 	err := pools.List(client, pools.ListOpts{LoadbalancerID: lbID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := pools.ExtractPools(page)
@@ -251,17 +272,22 @@ func ListPools(ctx context.Context, client *gophercloud.ServiceClient, lbID stri
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[lb] ListPools: error: %v", err)
 		return nil, fmt.Errorf("listing pools for LB %s: %w", lbID, err)
 	}
+	shared.Debugf("[lb] ListPools: success, lbID=%s count=%d", lbID, len(result))
 	return result, nil
 }
 
 // GetHealthMonitor fetches a single health monitor by ID.
 func GetHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string) (*HealthMonitor, error) {
+	shared.Debugf("[lb] GetHealthMonitor: starting, id=%s", id)
 	mon, err := monitors.Get(ctx, client, id).Extract()
 	if err != nil {
+		shared.Debugf("[lb] GetHealthMonitor: error: %v", err)
 		return nil, fmt.Errorf("getting health monitor %s: %w", id, err)
 	}
+	shared.Debugf("[lb] GetHealthMonitor: success, id=%s type=%s", mon.ID, mon.Type)
 	return &HealthMonitor{
 		ID:                 mon.ID,
 		Name:               mon.Name,
@@ -281,6 +307,7 @@ func GetHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id
 
 // CreateListener creates a listener on a load balancer.
 func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol string, port int) (*Listener, error) {
+	shared.Debugf("[lb] CreateListener: starting, lbID=%s name=%s protocol=%s port=%d", lbID, name, protocol, port)
 	opts := listeners.CreateOpts{
 		LoadbalancerID: lbID,
 		Name:           name,
@@ -289,8 +316,10 @@ func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID
 	}
 	l, err := listeners.Create(ctx, client, opts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] CreateListener: error: %v", err)
 		return nil, fmt.Errorf("creating listener: %w", err)
 	}
+	shared.Debugf("[lb] CreateListener: success, id=%s name=%s", l.ID, l.Name)
 	return &Listener{
 		ID:            l.ID,
 		Name:          l.Name,
@@ -305,15 +334,19 @@ func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID
 
 // DeleteListener deletes a listener.
 func DeleteListener(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[lb] DeleteListener: starting, id=%s", id)
 	r := listeners.Delete(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[lb] DeleteListener: error: %v", r.Err)
 		return fmt.Errorf("deleting listener %s: %w", id, r.Err)
 	}
+	shared.Debugf("[lb] DeleteListener: success, id=%s", id)
 	return nil
 }
 
 // UpdateListener updates a listener's name.
 func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string, connLimit *int, adminStateUp *bool) error {
+	shared.Debugf("[lb] UpdateListener: starting, id=%s", id)
 	opts := listeners.UpdateOpts{
 		Name:         name,
 		Description:  description,
@@ -322,14 +355,17 @@ func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id s
 	}
 	_, err := listeners.Update(ctx, client, id, opts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] UpdateListener: error: %v", err)
 		return fmt.Errorf("updating listener %s: %w", id, err)
 	}
+	shared.Debugf("[lb] UpdateListener: success, id=%s", id)
 	return nil
 }
 
 // CreatePool creates a pool on a load balancer and, when requested, creates its
 // health monitor as a follow-up operation.
 func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol, lbMethod string, mon *monitors.CreateOpts) (*Pool, error) {
+	shared.Debugf("[lb] CreatePool: starting, lbID=%s name=%s protocol=%s lbMethod=%s", lbID, name, protocol, lbMethod)
 	opts := pools.CreateOpts{
 		LoadbalancerID: lbID,
 		Name:           name,
@@ -338,8 +374,10 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 	}
 	p, err := pools.Create(ctx, client, opts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] CreatePool: error: %v", err)
 		return nil, fmt.Errorf("creating pool: %w", err)
 	}
+	shared.Debugf("[lb] CreatePool: pool created, id=%s name=%s", p.ID, p.Name)
 	result := &Pool{
 		ID:           p.ID,
 		Name:         p.Name,
@@ -349,35 +387,44 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 		AdminStateUp: p.AdminStateUp,
 	}
 	if mon == nil {
+		shared.Debugf("[lb] CreatePool: success (no monitor), id=%s", p.ID)
 		return result, nil
 	}
 
+	shared.Debugf("[lb] CreatePool: creating health monitor for pool %s", p.ID)
 	monOpts := *mon
 	monOpts.PoolID = p.ID
 
 	createdMon, err := monitors.Create(ctx, client, monOpts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] CreatePool: health monitor creation failed: %v, cleaning up pool %s", err, p.ID)
 		if deleteErr := DeletePool(ctx, client, p.ID); deleteErr != nil {
+			shared.Debugf("[lb] CreatePool: cleanup of pool %s failed: %v", p.ID, deleteErr)
 			return nil, fmt.Errorf("creating health monitor for pool %s: %w (cleanup failed: %v)", p.ID, err, deleteErr)
 		}
 		return nil, fmt.Errorf("creating health monitor for pool %s: %w", p.ID, err)
 	}
 
 	result.MonitorID = createdMon.ID
+	shared.Debugf("[lb] CreatePool: success with monitor, poolID=%s monitorID=%s", p.ID, createdMon.ID)
 	return result, nil
 }
 
 // DeletePool deletes a pool.
 func DeletePool(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[lb] DeletePool: starting, id=%s", id)
 	r := pools.Delete(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[lb] DeletePool: error: %v", r.Err)
 		return fmt.Errorf("deleting pool %s: %w", id, r.Err)
 	}
+	shared.Debugf("[lb] DeletePool: success, id=%s", id)
 	return nil
 }
 
 // UpdatePool updates a pool's name and/or LB method.
 func UpdatePool(ctx context.Context, client *gophercloud.ServiceClient, id string, name *string, lbMethod string, adminStateUp *bool) error {
+	shared.Debugf("[lb] UpdatePool: starting, id=%s", id)
 	opts := pools.UpdateOpts{
 		Name:         name,
 		AdminStateUp: adminStateUp,
@@ -387,13 +434,16 @@ func UpdatePool(ctx context.Context, client *gophercloud.ServiceClient, id strin
 	}
 	_, err := pools.Update(ctx, client, id, opts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] UpdatePool: error: %v", err)
 		return fmt.Errorf("updating pool %s: %w", id, err)
 	}
+	shared.Debugf("[lb] UpdatePool: success, id=%s", id)
 	return nil
 }
 
 // CreateMember adds a member to a pool.
 func CreateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID string, opts MemberCreateOpts) (*Member, error) {
+	shared.Debugf("[lb] CreateMember: starting, poolID=%s address=%s port=%d", poolID, opts.Address, opts.ProtocolPort)
 	createOpts := pools.CreateMemberOpts{
 		Name:           opts.Name,
 		Address:        opts.Address,
@@ -407,32 +457,41 @@ func CreateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID
 	}
 	m, err := pools.CreateMember(ctx, client, poolID, createOpts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] CreateMember: error: %v", err)
 		return nil, fmt.Errorf("creating member: %w", err)
 	}
 	member := simplifyMember(m)
+	shared.Debugf("[lb] CreateMember: success, poolID=%s memberID=%s", poolID, member.ID)
 	return &member, nil
 }
 
 // DeleteMember removes a member from a pool.
 func DeleteMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string) error {
+	shared.Debugf("[lb] DeleteMember: starting, poolID=%s memberID=%s", poolID, memberID)
 	r := pools.DeleteMember(ctx, client, poolID, memberID)
 	if r.Err != nil {
+		shared.Debugf("[lb] DeleteMember: error: %v", r.Err)
 		return fmt.Errorf("deleting member %s: %w", memberID, r.Err)
 	}
+	shared.Debugf("[lb] DeleteMember: success, poolID=%s memberID=%s", poolID, memberID)
 	return nil
 }
 
 // UpdateMember updates an existing member.
 func UpdateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string, opts MemberUpdateOpts) error {
+	shared.Debugf("[lb] UpdateMember: starting, poolID=%s memberID=%s", poolID, memberID)
 	_, err := pools.UpdateMember(ctx, client, poolID, memberID, memberUpdateRequest(opts)).Extract()
 	if err != nil {
+		shared.Debugf("[lb] UpdateMember: error: %v", err)
 		return fmt.Errorf("updating member %s: %w", memberID, err)
 	}
+	shared.Debugf("[lb] UpdateMember: success, poolID=%s memberID=%s", poolID, memberID)
 	return nil
 }
 
 // ListMembers fetches members for a pool.
 func ListMembers(ctx context.Context, client *gophercloud.ServiceClient, poolID string) ([]Member, error) {
+	shared.Debugf("[lb] ListMembers: starting, poolID=%s", poolID)
 	var result []Member
 	err := pools.ListMembers(client, poolID, pools.ListMembersOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := pools.ExtractMembers(page)
@@ -445,8 +504,10 @@ func ListMembers(ctx context.Context, client *gophercloud.ServiceClient, poolID 
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[lb] ListMembers: error: %v", err)
 		return nil, fmt.Errorf("listing members for pool %s: %w", poolID, err)
 	}
+	shared.Debugf("[lb] ListMembers: success, poolID=%s count=%d", poolID, len(result))
 	return result, nil
 }
 
@@ -517,6 +578,7 @@ func cloneStringSlice(values []string) []string {
 
 // CreateHealthMonitor creates a health monitor for a pool.
 func CreateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, poolID, monType string, delay, timeout, maxRetries int, urlPath, expectedCodes, httpMethod string) (*HealthMonitor, error) {
+	shared.Debugf("[lb] CreateHealthMonitor: starting, poolID=%s type=%s", poolID, monType)
 	opts := monitors.CreateOpts{
 		PoolID:     poolID,
 		Type:       monType,
@@ -535,8 +597,10 @@ func CreateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient,
 	}
 	mon, err := monitors.Create(ctx, client, opts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] CreateHealthMonitor: error: %v", err)
 		return nil, fmt.Errorf("creating health monitor: %w", err)
 	}
+	shared.Debugf("[lb] CreateHealthMonitor: success, id=%s poolID=%s", mon.ID, poolID)
 	return &HealthMonitor{
 		ID:                 mon.ID,
 		Name:               mon.Name,
@@ -556,6 +620,7 @@ func CreateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient,
 
 // UpdateHealthMonitor updates a health monitor's settings.
 func UpdateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string, delay, timeout, maxRetries *int, urlPath, expectedCodes, httpMethod *string) error {
+	shared.Debugf("[lb] UpdateHealthMonitor: starting, id=%s", id)
 	opts := monitors.UpdateOpts{}
 	if delay != nil {
 		opts.Delay = *delay
@@ -577,40 +642,51 @@ func UpdateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient,
 	}
 	_, err := monitors.Update(ctx, client, id, opts).Extract()
 	if err != nil {
+		shared.Debugf("[lb] UpdateHealthMonitor: error: %v", err)
 		return fmt.Errorf("updating health monitor %s: %w", id, err)
 	}
+	shared.Debugf("[lb] UpdateHealthMonitor: success, id=%s", id)
 	return nil
 }
 
 // DeleteHealthMonitor deletes a health monitor.
 func DeleteHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[lb] DeleteHealthMonitor: starting, id=%s", id)
 	r := monitors.Delete(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[lb] DeleteHealthMonitor: error: %v", r.Err)
 		return fmt.Errorf("deleting health monitor %s: %w", id, r.Err)
 	}
+	shared.Debugf("[lb] DeleteHealthMonitor: success, id=%s", id)
 	return nil
 }
 
 // WaitForActive polls the LB until its provisioning status is ACTIVE or the
 // context is cancelled. Returns nil once ACTIVE, error on timeout/failure.
 func WaitForActive(ctx context.Context, client *gophercloud.ServiceClient, lbID string, timeout time.Duration) error {
+	shared.Debugf("[lb] WaitForActive: starting, lbID=%s timeout=%s", lbID, timeout)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		lb, err := loadbalancers.Get(ctx, client, lbID).Extract()
 		if err != nil {
+			shared.Debugf("[lb] WaitForActive: polling error: %v", err)
 			return fmt.Errorf("polling LB %s: %w", lbID, err)
 		}
 		if lb.ProvisioningStatus == "ACTIVE" {
+			shared.Debugf("[lb] WaitForActive: success, lbID=%s is ACTIVE", lbID)
 			return nil
 		}
 		if strings.HasPrefix(lb.ProvisioningStatus, "ERROR") {
+			shared.Debugf("[lb] WaitForActive: error status, lbID=%s status=%s", lbID, lb.ProvisioningStatus)
 			return fmt.Errorf("LB %s entered %s", lbID, lb.ProvisioningStatus)
 		}
 		select {
 		case <-ctx.Done():
+			shared.Debugf("[lb] WaitForActive: context cancelled, lbID=%s", lbID)
 			return ctx.Err()
 		case <-time.After(2 * time.Second):
 		}
 	}
+	shared.Debugf("[lb] WaitForActive: timed out, lbID=%s", lbID)
 	return fmt.Errorf("timed out waiting for LB %s to become ACTIVE", lbID)
 }

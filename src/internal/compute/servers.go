@@ -10,6 +10,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/remoteconsoles"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/v2/pagination"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Server is a simplified representation of a Nova server.
@@ -57,6 +58,7 @@ func VolumeAttachmentIDs(attachments []VolumeAttachment) []string {
 
 // ListServers fetches all servers from Nova.
 func ListServers(ctx context.Context, client *gophercloud.ServiceClient) ([]Server, error) {
+	shared.Debugf("[compute] listing servers")
 	opts := servers.ListOpts{
 		AllTenants: false,
 	}
@@ -73,242 +75,318 @@ func ListServers(ctx context.Context, client *gophercloud.ServiceClient) ([]Serv
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[compute] list servers: %v", err)
 		return nil, fmt.Errorf("listing servers: %w", err)
 	}
+	shared.Debugf("[compute] listed %d servers", len(result))
 	return result, nil
 }
 
 // GetServer fetches a single server by ID.
 func GetServer(ctx context.Context, client *gophercloud.ServiceClient, id string) (*Server, error) {
+	shared.Debugf("[compute] getting server %s", id)
 	r := servers.Get(ctx, client, id)
 	s, err := r.Extract()
 	if err != nil {
+		shared.Debugf("[compute] get server %s: %v", id, err)
 		return nil, fmt.Errorf("getting server %s: %w", id, err)
 	}
 	srv := mapServer(*s)
+	shared.Debugf("[compute] got server %s (%s)", srv.Name, id)
 	return &srv, nil
 }
 
 // CreateServer creates a new server.
 func CreateServer(ctx context.Context, client *gophercloud.ServiceClient, opts servers.CreateOpts) (*Server, error) {
+	shared.Debugf("[compute] creating server %q", opts.Name)
 	return CreateServerWithOpts(ctx, client, opts)
 }
 
 // CreateServerWithOpts creates a new server with arbitrary CreateOptsBuilder (e.g. keypairs.CreateOptsExt).
 func CreateServerWithOpts(ctx context.Context, client *gophercloud.ServiceClient, opts servers.CreateOptsBuilder) (*Server, error) {
+	shared.Debugf("[compute] creating server with opts")
 	r := servers.Create(ctx, client, opts, nil)
 	s, err := r.Extract()
 	if err != nil {
+		shared.Debugf("[compute] create server: %v", err)
 		return nil, fmt.Errorf("creating server: %w", err)
 	}
 	srv := mapServer(*s)
+	shared.Debugf("[compute] created server %s (%s)", srv.Name, srv.ID)
 	return &srv, nil
 }
 
 // DeleteServer deletes a server by ID.
 func DeleteServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] deleting server %s", id)
 	r := servers.Delete(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] delete server %s: %v", id, r.Err)
 		return fmt.Errorf("deleting server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] deleted server %s", id)
 	return nil
 }
 
 // RebootServer reboots a server. Use servers.SoftReboot or servers.HardReboot.
 func RebootServer(ctx context.Context, client *gophercloud.ServiceClient, id string, how servers.RebootMethod) error {
+	shared.Debugf("[compute] rebooting server %s (method=%s)", id, how)
 	r := servers.Reboot(ctx, client, id, servers.RebootOpts{Type: how})
 	if r.Err != nil {
+		shared.Debugf("[compute] reboot server %s: %v", id, r.Err)
 		return fmt.Errorf("rebooting server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] rebooted server %s", id)
 	return nil
 }
 
 // PauseServer pauses a server.
 func PauseServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] pausing server %s", id)
 	r := servers.Pause(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] pause server %s: %v", id, r.Err)
 		return fmt.Errorf("pausing server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] paused server %s", id)
 	return nil
 }
 
 // UnpauseServer unpauses a server.
 func UnpauseServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] unpausing server %s", id)
 	r := servers.Unpause(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] unpause server %s: %v", id, r.Err)
 		return fmt.Errorf("unpausing server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] unpaused server %s", id)
 	return nil
 }
 
 // SuspendServer suspends a server.
 func SuspendServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] suspending server %s", id)
 	r := servers.Suspend(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] suspend server %s: %v", id, r.Err)
 		return fmt.Errorf("suspending server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] suspended server %s", id)
 	return nil
 }
 
 // ResumeServer resumes a suspended server.
 func ResumeServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] resuming server %s", id)
 	r := servers.Resume(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] resume server %s: %v", id, r.Err)
 		return fmt.Errorf("resuming server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] resumed server %s", id)
 	return nil
 }
 
 // ShelveServer shelves a server.
 func ShelveServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] shelving server %s", id)
 	r := servers.Shelve(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] shelve server %s: %v", id, r.Err)
 		return fmt.Errorf("shelving server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] shelved server %s", id)
 	return nil
 }
 
 // UnshelveServer unshelves a server.
 func UnshelveServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] unshelving server %s", id)
 	r := servers.Unshelve(ctx, client, id, servers.UnshelveOpts{})
 	if r.Err != nil {
+		shared.Debugf("[compute] unshelve server %s: %v", id, r.Err)
 		return fmt.Errorf("unshelving server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] unshelved server %s", id)
 	return nil
 }
 
 // StopServer stops (shuts down) a server.
 func StopServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] stopping server %s", id)
 	r := servers.Stop(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] stop server %s: %v", id, r.Err)
 		return fmt.Errorf("stopping server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] stopped server %s", id)
 	return nil
 }
 
 // StartServer starts a stopped server.
 func StartServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] starting server %s", id)
 	r := servers.Start(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] start server %s: %v", id, r.Err)
 		return fmt.Errorf("starting server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] started server %s", id)
 	return nil
 }
 
 // LockServer prevents modifications to a server.
 func LockServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] locking server %s", id)
 	r := servers.Lock(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] lock server %s: %v", id, r.Err)
 		return fmt.Errorf("locking server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] locked server %s", id)
 	return nil
 }
 
 // UnlockServer removes the lock on a server.
 func UnlockServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] unlocking server %s", id)
 	r := servers.Unlock(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] unlock server %s: %v", id, r.Err)
 		return fmt.Errorf("unlocking server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] unlocked server %s", id)
 	return nil
 }
 
 // ResizeServer resizes a server to a new flavor.
 func ResizeServer(ctx context.Context, client *gophercloud.ServiceClient, id, flavorRef string) error {
+	shared.Debugf("[compute] resizing server %s to flavor %s", id, flavorRef)
 	r := servers.Resize(ctx, client, id, servers.ResizeOpts{FlavorRef: flavorRef})
 	if r.Err != nil {
+		shared.Debugf("[compute] resize server %s: %v", id, r.Err)
 		return fmt.Errorf("resizing server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] resized server %s", id)
 	return nil
 }
 
 // ConfirmResize confirms a server resize.
 func ConfirmResize(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] confirming resize for server %s", id)
 	r := servers.ConfirmResize(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] confirm resize server %s: %v", id, r.Err)
 		return fmt.Errorf("confirming resize for server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] confirmed resize for server %s", id)
 	return nil
 }
 
 // RevertResize reverts a server resize.
 func RevertResize(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] reverting resize for server %s", id)
 	r := servers.RevertResize(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] revert resize server %s: %v", id, r.Err)
 		return fmt.Errorf("reverting resize for server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] reverted resize for server %s", id)
 	return nil
 }
 
 // CreateSnapshot creates an image snapshot of a server.
 func CreateSnapshot(ctx context.Context, client *gophercloud.ServiceClient, id, snapshotName string) error {
+	shared.Debugf("[compute] creating snapshot %q of server %s", snapshotName, id)
 	r := servers.CreateImage(ctx, client, id, servers.CreateImageOpts{Name: snapshotName})
 	if r.Err != nil {
 		if gophercloud.ResponseCodeIs(r.Err, 409) {
+			shared.Debugf("[compute] create snapshot server %s: snapshot already in progress", id)
 			return fmt.Errorf("server already has a snapshot in progress")
 		}
+		shared.Debugf("[compute] create snapshot server %s: %v", id, r.Err)
 		return fmt.Errorf("creating snapshot of server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] created snapshot %q of server %s", snapshotName, id)
 	return nil
 }
 
 // RebuildServer rebuilds a server with a new image.
 func RebuildServer(ctx context.Context, client *gophercloud.ServiceClient, id, imageRef string) error {
+	shared.Debugf("[compute] rebuilding server %s with image %s", id, imageRef)
 	_, err := servers.Rebuild(ctx, client, id, servers.RebuildOpts{ImageRef: imageRef}).Extract()
 	if err != nil {
+		shared.Debugf("[compute] rebuild server %s: %v", id, err)
 		return fmt.Errorf("rebuilding server %s: %w", id, err)
 	}
+	shared.Debugf("[compute] rebuilt server %s", id)
 	return nil
 }
 
 // RescueServer places a server into RESCUE mode and returns the admin password.
 func RescueServer(ctx context.Context, client *gophercloud.ServiceClient, id string) (string, error) {
+	shared.Debugf("[compute] rescuing server %s", id)
 	r := servers.Rescue(ctx, client, id, servers.RescueOpts{})
 	adminPass, err := r.Extract()
 	if err != nil {
+		shared.Debugf("[compute] rescue server %s: %v", id, err)
 		return "", fmt.Errorf("rescuing server %s: %w", id, err)
 	}
+	shared.Debugf("[compute] rescued server %s", id)
 	return adminPass, nil
 }
 
 // UnrescueServer returns a server from RESCUE mode.
 func UnrescueServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] unrescuing server %s", id)
 	r := servers.Unrescue(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[compute] unrescue server %s: %v", id, r.Err)
 		return fmt.Errorf("unrescuing server %s: %w", id, r.Err)
 	}
+	shared.Debugf("[compute] unrescued server %s", id)
 	return nil
 }
 
 // RenameServer updates a server's name.
 func RenameServer(ctx context.Context, client *gophercloud.ServiceClient, id, newName string) error {
+	shared.Debugf("[compute] renaming server %s to %q", id, newName)
 	_, err := servers.Update(ctx, client, id, servers.UpdateOpts{Name: newName}).Extract()
 	if err != nil {
+		shared.Debugf("[compute] rename server %s: %v", id, err)
 		return fmt.Errorf("renaming server %s: %w", id, err)
 	}
+	shared.Debugf("[compute] renamed server %s to %q", id, newName)
 	return nil
 }
 
 // GetRemoteConsole retrieves a noVNC console URL for a server.
 func GetRemoteConsole(ctx context.Context, client *gophercloud.ServiceClient, id string) (string, error) {
+	shared.Debugf("[compute] getting remote console for server %s", id)
 	result := remoteconsoles.Create(ctx, client, id, remoteconsoles.CreateOpts{
 		Protocol: remoteconsoles.ConsoleProtocolVNC,
 		Type:     remoteconsoles.ConsoleTypeNoVNC,
 	})
 	rc, err := result.Extract()
 	if err != nil {
+		shared.Debugf("[compute] get remote console server %s: %v", id, err)
 		return "", fmt.Errorf("getting remote console for %s: %w", id, err)
 	}
+	shared.Debugf("[compute] got remote console for server %s", id)
 	return rc.URL, nil
 }
 
 // GetConsoleOutput retrieves console output for a server.
 func GetConsoleOutput(ctx context.Context, client *gophercloud.ServiceClient, id string, lines int) (string, error) {
+	shared.Debugf("[compute] getting console output for server %s (lines=%d)", id, lines)
 	r := servers.ShowConsoleOutput(ctx, client, id, servers.ShowConsoleOutputOpts{Length: lines})
 	output, err := r.Extract()
 	if err != nil {
+		shared.Debugf("[compute] get console output server %s: %v", id, err)
 		return "", fmt.Errorf("getting console output for %s: %w", id, err)
 	}
+	shared.Debugf("[compute] got console output for server %s", id)
 	return output, nil
 }
 

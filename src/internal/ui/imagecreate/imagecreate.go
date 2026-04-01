@@ -142,6 +142,7 @@ func New(client *gophercloud.ServiceClient) Model {
 
 // Init returns initial commands.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[imagecreate] Init()")
 	m.focusField = fieldName
 	return m.nameInput.Focus()
 }
@@ -177,6 +178,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case uploadDoneMsg:
 		m.Active = false
 		m.uploading = false
+		shared.Debugf("[imagecreate] upload success name=%q", msg.name)
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: "Uploaded image", Name: msg.name}
 		}
@@ -185,10 +187,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.uploading = false
 		m.submitting = false
 		m.err = msg.err.Error()
+		shared.Debugf("[imagecreate] error: %v", msg.err)
 		return m, nil
 
 	case importStartedMsg:
 		m.Active = false
+		shared.Debugf("[imagecreate] import started name=%q", msg.name)
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: "Import started for image", Name: msg.name}
 		}
@@ -390,6 +394,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	m.imageName = name
 	m.err = ""
+	shared.Debugf("[imagecreate] submit name=%q format=%s", name, diskFormatOpts[m.diskFormat])
 
 	if m.source == 0 {
 		// Local file: check existence and size

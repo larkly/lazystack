@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/larkly/lazystack/internal/shared"
+
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
 	"github.com/gophercloud/gophercloud/v2/pagination"
@@ -33,6 +35,7 @@ type Volume struct {
 
 // ListVolumes fetches all volumes.
 func ListVolumes(ctx context.Context, client *gophercloud.ServiceClient) ([]Volume, error) {
+	shared.Debugf("[volume] ListVolumes: starting")
 	var result []Volume
 	err := volumes.List(client, volumes.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := volumes.ExtractVolumes(page)
@@ -66,15 +69,19 @@ func ListVolumes(ctx context.Context, client *gophercloud.ServiceClient) ([]Volu
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[volume] ListVolumes: error: %v", err)
 		return nil, fmt.Errorf("listing volumes: %w", err)
 	}
+	shared.Debugf("[volume] ListVolumes: success, count=%d", len(result))
 	return result, nil
 }
 
 // GetVolume fetches a single volume by ID.
 func GetVolume(ctx context.Context, client *gophercloud.ServiceClient, id string) (*Volume, error) {
+	shared.Debugf("[volume] GetVolume: starting, id=%s", id)
 	v, err := volumes.Get(ctx, client, id).Extract()
 	if err != nil {
+		shared.Debugf("[volume] GetVolume: error: %v", err)
 		return nil, fmt.Errorf("getting volume %s: %w", id, err)
 	}
 	vol := &Volume{
@@ -98,14 +105,17 @@ func GetVolume(ctx context.Context, client *gophercloud.ServiceClient, id string
 		vol.AttachedServerID = v.Attachments[0].ServerID
 		vol.AttachedDevice = v.Attachments[0].Device
 	}
+	shared.Debugf("[volume] GetVolume: success, id=%s name=%s", vol.ID, vol.Name)
 	return vol, nil
 }
 
 // CreateVolume creates a new volume.
 func CreateVolume(ctx context.Context, client *gophercloud.ServiceClient, opts volumes.CreateOpts) (*Volume, error) {
+	shared.Debugf("[volume] CreateVolume: starting, name=%s size=%d", opts.Name, opts.Size)
 	r := volumes.Create(ctx, client, opts, nil)
 	v, err := r.Extract()
 	if err != nil {
+		shared.Debugf("[volume] CreateVolume: error: %v", err)
 		return nil, fmt.Errorf("creating volume: %w", err)
 	}
 	vol := &Volume{
@@ -115,6 +125,7 @@ func CreateVolume(ctx context.Context, client *gophercloud.ServiceClient, opts v
 		Size:       v.Size,
 		VolumeType: v.VolumeType,
 	}
+	shared.Debugf("[volume] CreateVolume: success, id=%s name=%s", vol.ID, vol.Name)
 	return vol, nil
 }
 
@@ -126,6 +137,7 @@ type VolumeType struct {
 
 // ListVolumeTypes fetches all volume types.
 func ListVolumeTypes(ctx context.Context, client *gophercloud.ServiceClient) ([]VolumeType, error) {
+	shared.Debugf("[volume] ListVolumeTypes: starting")
 	url := client.ServiceURL("types")
 	var body struct {
 		VolumeTypes []struct {
@@ -135,6 +147,7 @@ func ListVolumeTypes(ctx context.Context, client *gophercloud.ServiceClient) ([]
 	}
 	resp, err := client.Get(ctx, url, &body, nil)
 	if err != nil {
+		shared.Debugf("[volume] ListVolumeTypes: error: %v", err)
 		return nil, fmt.Errorf("listing volume types: %w", err)
 	}
 	resp.Body.Close()
@@ -143,20 +156,25 @@ func ListVolumeTypes(ctx context.Context, client *gophercloud.ServiceClient) ([]
 	for i, vt := range body.VolumeTypes {
 		result[i] = VolumeType{ID: vt.ID, Name: vt.Name}
 	}
+	shared.Debugf("[volume] ListVolumeTypes: success, count=%d", len(result))
 	return result, nil
 }
 
 // DeleteVolume deletes a volume.
 func DeleteVolume(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[volume] DeleteVolume: starting, id=%s", id)
 	r := volumes.Delete(ctx, client, id, volumes.DeleteOpts{})
 	if r.Err != nil {
+		shared.Debugf("[volume] DeleteVolume: error: %v", r.Err)
 		return fmt.Errorf("deleting volume %s: %w", id, r.Err)
 	}
+	shared.Debugf("[volume] DeleteVolume: success, id=%s", id)
 	return nil
 }
 
 // AttachVolume attaches a volume to a server using Nova's os-volume_attachments.
 func AttachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient, serverID, volumeID string) error {
+	shared.Debugf("[volume] AttachVolume: starting, serverID=%s volumeID=%s", serverID, volumeID)
 	body := map[string]interface{}{
 		"volumeAttachment": map[string]interface{}{
 			"volumeId": volumeID,
@@ -166,18 +184,23 @@ func AttachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient,
 		OkCodes: []int{200, 201, 202},
 	})
 	if err != nil {
+		shared.Debugf("[volume] AttachVolume: error: %v", err)
 		return fmt.Errorf("attaching volume %s to server %s: %w", volumeID, serverID, err)
 	}
 	resp.Body.Close()
+	shared.Debugf("[volume] AttachVolume: success, serverID=%s volumeID=%s", serverID, volumeID)
 	return nil
 }
 
 // DetachVolume detaches a volume from a server.
 func DetachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient, serverID, volumeID string) error {
+	shared.Debugf("[volume] DetachVolume: starting, serverID=%s volumeID=%s", serverID, volumeID)
 	resp, err := computeClient.Delete(ctx, computeClient.ServiceURL("servers", serverID, "os-volume_attachments", volumeID), nil)
 	if err != nil {
+		shared.Debugf("[volume] DetachVolume: error: %v", err)
 		return fmt.Errorf("detaching volume %s from server %s: %w", volumeID, serverID, err)
 	}
 	resp.Body.Close()
+	shared.Debugf("[volume] DetachVolume: success, serverID=%s volumeID=%s", serverID, volumeID)
 	return nil
 }

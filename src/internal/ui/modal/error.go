@@ -20,6 +20,7 @@ type ErrorModel struct {
 
 // NewError creates an error modal.
 func NewError(context string, err error) ErrorModel {
+	shared.Debugf("[error] shown context=%s err=%v", context, err)
 	return ErrorModel{
 		Context: context,
 		Err:     err.Error(),
@@ -33,6 +34,7 @@ func (m ErrorModel) Update(msg tea.Msg) (ErrorModel, tea.Cmd) {
 		switch {
 		case key.Matches(msg, shared.Keys.Enter),
 			key.Matches(msg, shared.Keys.Back):
+			shared.Debugf("[error] dismissed context=%s", m.Context)
 			return m, func() tea.Msg {
 				return ErrorDismissedMsg{}
 			}

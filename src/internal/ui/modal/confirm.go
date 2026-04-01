@@ -66,6 +66,7 @@ func NewBulkConfirm(action string, servers []ServerRef) ConfirmModel {
 }
 
 func (m ConfirmModel) confirmMsg() tea.Cmd {
+	shared.Debugf("[confirm] confirmed action=%s name=%q", m.Action, m.Name)
 	return func() tea.Msg {
 		return ConfirmAction{
 			Action:        m.Action,
@@ -80,6 +81,7 @@ func (m ConfirmModel) confirmMsg() tea.Cmd {
 }
 
 func (m ConfirmModel) cancelMsg() tea.Cmd {
+	shared.Debugf("[confirm] cancelled action=%s name=%q", m.Action, m.Name)
 	return func() tea.Msg {
 		return ConfirmAction{
 			Action:   m.Action,

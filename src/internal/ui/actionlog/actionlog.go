@@ -52,6 +52,7 @@ func New(client *gophercloud.ServiceClient, serverID, serverName string) Model {
 
 // Init fetches actions.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[actionlog] Init() serverID=%s serverName=%q", m.serverID, m.serverName)
 	return tea.Batch(m.spinner.Tick, m.fetchActions())
 }
 
@@ -62,11 +63,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.actions = msg.actions
 		m.err = ""
+		shared.Debugf("[actionlog] loaded %d actions", len(msg.actions))
 		return m, nil
 
 	case actionsErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
+		shared.Debugf("[actionlog] error: %v", msg.err)
 		return m, nil
 
 	case spinner.TickMsg:
@@ -206,6 +209,7 @@ func (m Model) fetchActions() tea.Cmd {
 
 // ForceRefresh triggers a manual reload of the action history.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[actionlog] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchActions())
 }

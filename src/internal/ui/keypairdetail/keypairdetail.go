@@ -44,6 +44,7 @@ func New(client *gophercloud.ServiceClient, name string) Model {
 
 // Init fetches the keypair.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[keypairdetail] Init() name=%q", m.name)
 	return tea.Batch(m.spinner.Tick, m.fetchKeypair())
 }
 
@@ -53,10 +54,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case keypairLoadedMsg:
 		m.loading = false
 		m.kp = msg.kp
+		shared.Debugf("[keypairdetail] loaded keypair %q", m.name)
 		return m, nil
 	case keypairErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
+		shared.Debugf("[keypairdetail] error: %v", msg.err)
 		return m, nil
 	case spinner.TickMsg:
 		if m.loading {

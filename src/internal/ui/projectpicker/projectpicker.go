@@ -21,6 +21,7 @@ type Model struct {
 
 // New creates a project picker with the given projects.
 func New(projects []shared.ProjectInfo, currentID string) Model {
+	shared.Debugf("[projectpicker] Init() projects=%d currentID=%s", len(projects), currentID)
 	// Position cursor on the current project
 	cursor := 0
 	for i, p := range projects {
@@ -55,9 +56,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				selected := m.projects[m.cursor]
 				if selected.ID == m.currentID {
 					// Already on this project, just close
+					shared.Debugf("[projectpicker] selected current project, closing")
 					m.Active = false
 					return m, nil
 				}
+				shared.Debugf("[projectpicker] selected project=%q id=%s", selected.Name, selected.ID)
 				m.Active = false
 				return m, func() tea.Msg {
 					return shared.ProjectSelectedMsg{

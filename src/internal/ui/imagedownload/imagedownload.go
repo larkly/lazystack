@@ -125,6 +125,7 @@ func sanitizeFilename(name string) string {
 
 // Init returns initial commands.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[imagedownload] Init() imageID=%s imageName=%q", m.imageID, m.imageName)
 	return m.pathInput.Focus()
 }
 
@@ -146,6 +147,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case downloadDoneMsg:
 		m.Active = false
 		m.downloading = false
+		shared.Debugf("[imagedownload] download success name=%q", msg.name)
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: "Downloaded image", Name: msg.name}
 		}
@@ -153,6 +155,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case downloadErrMsg:
 		m.downloading = false
 		m.err = msg.err.Error()
+		shared.Debugf("[imagedownload] error: %v", msg.err)
 		return m, nil
 
 	case spinner.TickMsg:
@@ -382,6 +385,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	m.downloading = true
 	m.err = ""
+	shared.Debugf("[imagedownload] download start imageID=%s path=%s", m.imageID, path)
 
 	sharedBytes := &atomic.Int64{}
 	sharedTotal := &atomic.Int64{}

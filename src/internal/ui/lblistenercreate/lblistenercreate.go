@@ -149,6 +149,7 @@ func NewEdit(client *gophercloud.ServiceClient, listenerID, currentName, current
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[lblistenercreate] Init() lbName=%q editMode=%v", m.lbName, m.editMode)
 	return nil
 }
 
@@ -162,12 +163,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.editMode {
 			action = "Updated listener on"
 		}
+		shared.Debugf("[lblistenercreate] success lbName=%q", m.lbName)
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: action, Name: m.lbName}
 		}
 	case listenerCreateErrMsg:
 		m.submitting = false
 		m.err = shared.SanitizeAPIError(msg.err)
+		shared.Debugf("[lblistenercreate] error: %v", msg.err)
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting {
@@ -347,6 +350,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	m.submitting = true
 	m.err = ""
+	shared.Debugf("[lblistenercreate] submit protocol=%s port=%d", protocolOpts[m.selectedProtocol], port)
 	client := m.client
 	lbID := m.lbID
 	protocol := protocolOpts[m.selectedProtocol]

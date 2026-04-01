@@ -126,6 +126,7 @@ func NewEdit(client *gophercloud.ServiceClient, lbID, currentName, currentDesc s
 
 // Init fetches subnets for the picker.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[lbcreate] Init() editMode=%v", m.editMode)
 	if m.editMode {
 		return nil
 	}
@@ -187,12 +188,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.editMode {
 			action = "Updated LB"
 		}
+		shared.Debugf("[lbcreate] success name=%q", strings.TrimSpace(m.nameInput.Value()))
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: action, Name: strings.TrimSpace(m.nameInput.Value())}
 		}
 	case lbCreateErrMsg:
 		m.submitting = false
 		m.err = shared.SanitizeAPIError(msg.err)
+		shared.Debugf("[lbcreate] error: %v", msg.err)
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting || m.subnetsLoading {
@@ -421,6 +424,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	m.submitting = true
 	m.err = ""
+	shared.Debugf("[lbcreate] submit name=%q", name)
 	client := m.client
 	desc := strings.TrimSpace(m.descInput.Value())
 	subnetID := m.subnets[m.selectedSubnet].ID
