@@ -16,7 +16,7 @@
 | Phase 2: Extended Compute | ✓ Complete | All actions, console log, resize, bulk ops, action history |
 | Phase 3: Additional Resources | ✓ Complete | Tabbed navigation, volumes, floating IPs, security groups, key pairs, networks (CRUD), routers (CRUD) |
 | Phase 4: Refactor, Octavia, Projects, Quotas | ✓ Complete | App refactor, dynamic tabs, Octavia LB tab, project switching, quota overlay |
-| Phase 5: Quality of Life | Partial | Server rename, rebuild, snapshot, rescue/unrescue, image management, confirmation dialogs for all actions, SSH integration, console access (noVNC), server cloning, cross-resource navigation — done. Clipboard (general), config file, DNS — not started |
+| Phase 5: Quality of Life | Mostly Complete | Server rename, rebuild, snapshot, rescue/unrescue, image management (combined view with upload/download/edit), cloud-init/user data, port CRUD, subnet edit, search/filter on all views, confirmation dialogs, SSH integration, console access (noVNC), server cloning, cross-resource navigation — done. Clipboard (general), config file, DNS — not started |
 | Phase 6: Operational | Not started | Admin views, hypervisor view, service catalog browser |
 
 ## Concerns and Considerations
@@ -131,7 +131,8 @@ src/
     image/
       images.go                     # Image listing
     network/
-      networks.go                   # Network listing, external networks, port lookup
+      networks.go                   # Network listing, external networks
+      ports.go                      # Port CRUD (list, create, update, delete)
       routers.go                    # Router CRUD, interfaces, static routes
       floatingips.go                # Floating IP CRUD (allocate, associate, disassociate, release)
       secgroups.go                  # Security group listing, rule create/delete
@@ -170,24 +171,24 @@ src/
         keypairdetail.go            # Key pair detail view showing public key
       keypairlist/
         keypairlist.go              # Key pair table with sorting, delete, auto-refresh
-      lblist/
-        lblist.go                   # Load balancer table with status colors, sorting
-      lbdetail/
-        lbdetail.go                 # LB detail with listener/pool/member tree
+      lbview/                        # Combined LB view (list + detail tree + search)
       serverrename/                 # Server rename inline input
       serverrebuild/                # Server rebuild with image picker
       serversnapshot/               # Server snapshot creation
-      networklist/
-        networklist.go              # Network browser with expandable subnets
+      networkview/                  # Combined network view with subnets and ports
       networkcreate/                # Network create form
-      subnetcreate/                 # Subnet create form
-      routerlist/                   # Router list with sorting
-      routerdetail/                 # Router detail with interfaces
-      routercreate/                 # Router create form
+      subnetcreate/                 # Subnet create form with IPv6 support
+      subnetedit/                   # Subnet edit modal
       subnetpicker/                 # Subnet picker modal
+      portcreate/                   # Port create form with port security, allowed address pairs
+      portedit/                     # Port edit form
+      routerview/                   # Combined router list + detail with interfaces
+      routercreate/                 # Router create form
       sgcreate/                     # Security group create form
-      imagelist/                    # Image list with sorting
-      imagedetail/                  # Image detail properties view
+      imageview/                    # Combined image view (list + detail + servers)
+      imagecreate/                  # Image upload form (file picker or URL, format detection)
+      imageedit/                    # Image edit form (name, visibility, tags, etc.)
+      imagedownload/                # Image download with directory picker
       volumecreate/
         volumecreate.go             # Volume create form with type/AZ pickers
       serverpicker/
@@ -196,6 +197,16 @@ src/
         sgrulecreate.go             # Security group rule create modal
       fippicker/
         fippicker.go                # Floating IP picker modal for server association
+      sshprompt/                    # SSH IP selection prompt
+      cloneprogress/                # Server clone progress view
+      consoleurl/                   # Console URL retrieval and browser launch
+      configview/                   # Configuration display
+      lbcreate/                     # Load balancer create form
+      lblistenercreate/             # LB listener create form
+      lbpoolcreate/                 # LB pool create form
+      lbmembercreate/               # LB member create form
+      lbmonitorcreate/              # LB health monitor create form
+      volumepicker/                 # Volume picker modal
       projectpicker/
         projectpicker.go            # Project picker modal for project switching
       quotaview/
@@ -219,42 +230,46 @@ src/
                     └──────┬──────┘
                            │ select cloud (auto if single)
                            ▼
-  ┌────────────── Dynamic Tab Bar (1-N / ←→) ──────────────────────┐
-  │  Tabs built from service catalog: Servers always, Volumes if   │
-  │  Cinder, Floating IPs/Sec Groups always, LBs if Octavia,      │
-  │  Key Pairs always                                              │
-  │                                                                │
-  │ ┌──────────┐ ┌──────────┐ ┌────────┐ ┌───────┐ ┌────┐ ┌─────┐│
-  │ │Server    │ │Volume    │ │Float   │ │SecGrp │ │LBs │ │Keys ││
-  │ │List      │ │List      │ │IP List │ │View   │ │List│ │List ││
-  │ └──┬───┬───┘ └──┬───────┘ └────────┘ └───────┘ └─┬──┘ └─────┘│
-  │    │   │ ^n   Enter                             Enter         │
-  │    │   │       │                                  │           │
-  │  Enter ▼       ▼                                  ▼           │
-  │    │ ┌──────┐ ┌───────────┐              ┌───────────┐        │
-  │    │ │Create│ │Vol Detail │              │LB Detail  │        │
-  │    ▼ └──────┘ └───────────┘              └───────────┘        │
-  │ ┌──────────┐                                                  │
-  │ │Server    │                                                  │
-  │ │Detail    │                                                  │
-  │ └──┬──┬────┘                                                  │
-  │    l  a                                                       │
-  │    │  │                                                       │
-  │    ▼  ▼                                                       │
-  │ ┌────────┐ ┌──────────┐                                       │
-  │ │Console │ │Action Log│                                       │
-  │ └────────┘ └──────────┘                                       │
-  └────────────────────────────────────────────────────────────────┘
+  ┌─────────── Dynamic Tab Bar (1-N / ←→) ─────────────────────────────────────┐
+  │  Tabs built from service catalog: Servers, Volumes (if Cinder),            │
+  │  Images, Floating IPs, Security Groups, Networks, Key Pairs — always.      │
+  │  Load Balancers — if Octavia. Routers — always.                            │
+  │                                                                            │
+  │ ┌────────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌───────┐ ┌─────┐ ┌────┐ ┌───────┐ │
+  │ │Servers │ │Vols  │ │Images│ │FIPs  │ │SecGrps│ │Nets │ │Keys│ │Routers│ │
+  │ │List    │ │List  │ │View  │ │List  │ │View   │ │View │ │List│ │List   │ │
+  │ └──┬─┬───┘ └──┬───┘ └──┬───┘ └──────┘ └───────┘ └──┬──┘ └────┘ └──┬────┘ │
+  │    │ │^n    Enter    Enter                          │            Enter    │
+  │    │ │        │        │                            │              │      │
+  │  Enter ▼      ▼        ▼                            ▼              ▼      │
+  │    │ ┌──────┐┌──────┐┌────────────────┐   ┌─────────────┐  ┌───────────┐  │
+  │    │ │Create││Vol   ││Image Detail    │   │Network      │  │Router     │  │
+  │    │ │Form  ││Detail││+ Upload (^n)   │   │+ Subnets    │  │Detail     │  │
+  │    │ └──────┘└──────┘│+ Download (d)  │   │+ Ports      │  │+ Intf list│  │
+  │    │                 │+ Edit (e)      │   │+ Port CRUD  │  │+ Add (^a) │  │
+  │    ▼                 └────────────────┘   │+ Subnet Edit│  │+ Rm  (^t) │  │
+  │ ┌──────────┐                              └─────────────┘  └───────────┘  │
+  │ │Server    │                                                              │
+  │ │Detail    │   ┌──────────────────────────────────────────────┐            │
+  │ └──┬──┬────┘   │ Load Balancers (if Octavia)                 │            │
+  │    l  a        │ Combined view: LB list + detail tree        │            │
+  │    │  │        │ Create: LB → Listener → Pool → Member       │            │
+  │    ▼  ▼        │ Health monitor CRUD                         │            │
+  │ ┌────────┐     └──────────────────────────────────────────────┘            │
+  │ │Console │ ┌──────────┐                                                   │
+  │ │Log     │ │Action Log│                                                   │
+  │ └────────┘ └──────────┘                                                   │
+  └───────────────────────────────────────────────────────────────────────────-┘
 
   Overlays (always available):
   ┌─────────────┐ ┌──────────┐ ┌──────┐ ┌────────┐ ┌──────────┐
   │Confirm Modal│ │Error     │ │Help  │ │Resize  │ │FIP Picker│
   │(y/n/enter)  │ │(enter)   │ │(?)   │ │(^f)    │ │(^a)      │
   └─────────────┘ └──────────┘ └──────┘ └────────┘ └──────────┘
-  ┌──────────────┐ ┌──────────┐
-  │Project Picker│ │Quotas    │
-  │(P)           │ │(Q)       │
-  └──────────────┘ └──────────┘
+  ┌──────────────┐ ┌──────────┐ ┌──────────────┐
+  │Project Picker│ │Quotas    │ │File Picker   │
+  │(P)           │ │(Q)       │ │(in forms)    │
+  └──────────────┘ └──────────┘ └──────────────┘
 ```
 
 ## Features
@@ -291,7 +306,8 @@ src/
 - Empty fields hidden for cleaner display
 
 #### Server Create
-- Form fields: Name, Image, Flavor, Network, Key Pair (inline filterable pickers), Count
+- Form fields: Name, Image, Flavor, Network, Key Pair (inline filterable pickers), User Data (cloud-init file picker), Count
+- User data field opens file picker for cloud-init scripts (.yaml, .yml, .sh, .cfg, .txt, .conf, extensionless)
 - Count field (1–100) for batch creation using Nova's `min_count`/`max_count`
 - Parallel resource fetching on form open (images, flavors, networks, keypairs)
 - Type-to-filter in picker dropdowns
@@ -421,22 +437,25 @@ src/
 - **Delete** (`Ctrl+D`): Confirmation modal, works from list or detail
 
 #### Network Management
-- **Networks Tab**: Network list with Name, Status, Subnets count, Shared columns
+- **Networks Tab**: Combined view with network list, expandable subnets, and port management
 - **Expandable Subnets**: Enter expands/collapses network to show subnet details (name, CIDR, gateway, IP version, DHCP status)
 - **Create Network** (`Ctrl+N`): Form with name, admin state, shared option
 - **Delete Network** (`Ctrl+D`): Confirmation modal
-- **Create Subnet** (`Ctrl+N` when expanded): Form with name, CIDR, gateway, IP version, DHCP
+- **Create Subnet** (`Ctrl+N` when expanded): Form with name, CIDR, gateway, IP version, DHCP, IPv6 address mode, IPv6 RA mode
+- **Edit Subnet** (`e` on subnet): Modal to modify subnet properties
 - **Delete Subnet** (`Ctrl+D` when in subnets): Confirmation modal
-- **Port Listing**: Read-only port listing per network
-- Auto-refresh, sorting
+- **IPv6 Subnet Support**: Address mode (DHCP stateful, DHCP stateless, SLAAC, unmanaged), RA mode configuration, custom prefix length. Hidden IPv6-specific fields skipped during tab navigation when IP version is v4
+- **Port CRUD**: Create ports with port security toggle and allowed address pairs. Edit existing ports. Delete ports with confirmation
+- Auto-refresh, sorting, search/filter
 
 #### Router Management
 - **Router List**: Columns (Name, Status, External Gateway, Routes), auto-refresh, sorting
 - **Router Detail** (`Enter`): Properties view with interfaces section and static routes
 - **Create Router** (`Ctrl+N`): Form with name, external network selection, admin state
 - **Delete Router** (`Ctrl+D`): Confirmation modal
-- **Add Interface** (`Ctrl+A` from detail): Subnet picker modal
-- **Remove Interface** (`Ctrl+T` from detail): Confirmation modal
+- **Add Interface** (`Ctrl+A` from detail): Subnet picker modal with optional custom IP assignment
+- **Remove Interface** (`Ctrl+T` from detail): Confirmation modal. Handles removing individual IPs from multi-IP router ports
+- **IPv6 handling**: Auto-addressed IPv6 subnets handled correctly when adding interfaces. Supports routers with multiple IPs on the same network
 
 #### Column Sorting
 - `s` cycles sort to next visible column (ascending), `S` toggles sort direction
@@ -472,9 +491,15 @@ src/
 - Clouds without optional services work normally — those tabs simply don't appear
 
 #### Load Balancer Management (Octavia)
-- **LB List**: Columns (Name, VIP Address, Provisioning Status, Operating Status), auto-refresh, sorting
-- **LB Detail**: Properties display plus tree view of Listeners → Pools → Members
-- **Delete** (`Ctrl+D`): Cascade delete (removes listeners, pools, members along with LB)
+- **Combined View**: Merged list+detail with search/filter, tree structure (Listeners → Pools → Members)
+- **Create LB** (`Ctrl+N`): Form with name, VIP subnet, VIP address
+- **Create Listener** (`Ctrl+N` on LB): Protocol, port, connection limit
+- **Create Pool** (`Ctrl+N` on listener): Algorithm, protocol, session persistence
+- **Create Member** (`Ctrl+N` on pool): Address, port, weight, subnet
+- **Create Health Monitor** (`Ctrl+N` on pool): Type, delay, timeout, max retries
+- **Edit**: Members (weight, admin state), pools, listeners
+- **Delete** (`Ctrl+D`): Cascade delete for LBs, individual delete for listeners/pools/members/monitors
+- **Bulk member operations**: Add multiple members at once
 - Status colors: ACTIVE/ONLINE=green, PENDING_*=yellow, ERROR/OFFLINE=red
 
 #### Project Switching (ALPHA — UNTESTED)
@@ -519,10 +544,32 @@ src/
 - Supports bulk rescue operations
 
 #### Image Management
-- **Image List Tab**: Columns (Name, Status, Size, Visibility, Created), auto-refresh, sorting
-- **Image Detail** (`Enter`): Full properties view
+- **Combined View**: Merged list+detail with servers-using-image panel, search/filter
+- **Image Detail** (`Enter`): Full properties view with servers using this image
+- **Upload** (`Ctrl+N`): Local file picker or URL import with disk format auto-detection (qcow2, raw, vmdk, vdi, iso, vhd, aki, ari, ami). Auto-fills image name from filename. Progress bar with atomic counters
+- **Download** (`d`): Stream image to local file with directory picker and overwrite protection. Progress bar
+- **Edit** (`e`): Modify name, visibility, min disk/RAM, tags, protected flag
 - **Delete Image** (`Ctrl+D`): Confirmation modal, works from list or detail
 - **Deactivate/Reactivate**: Toggle image availability
+
+#### SSH Integration (`x` / `y`)
+- Launch SSH session directly from server list or detail view (`x` key)
+- SSH prompt with IP selection (floating IP, IPv4, IPv6 — IPv6 preferred when available)
+- Copy SSH command to clipboard (`y` key)
+- Option to ignore host key checking
+
+#### Server Cloning (`c`)
+- Clone a server with its configuration (flavor, network, key pair, security groups)
+- Progress view showing clone status
+
+#### Console Access (`V`)
+- Retrieve VNC console URL from Nova
+- Opens URL in default browser
+
+#### Cross-Resource Navigation
+- Jump from server detail to attached volumes, networks, security groups
+- Jump from volume detail to attached server
+- Resource links are navigable with keyboard
 
 #### Self-Update
 - `--update` flag downloads latest release from GitHub
@@ -579,6 +626,10 @@ src/
 | `Ctrl+A` | Assign floating IP (FIP picker modal) |
 | `l` | Console log |
 | `a` | Action history |
+| `x` | SSH to server |
+| `y` | Copy SSH command to clipboard |
+| `V` | Open VNC console in browser |
+| `c` | Clone server |
 | `/` | Filter |
 | `Esc` | Clear filter / clear selection |
 
@@ -602,6 +653,9 @@ src/
 | `Ctrl+X` | Revert resize (when VERIFY_RESIZE) |
 | `l` | Console log |
 | `a` | Action history |
+| `x` | SSH to server |
+| `y` | Copy SSH command to clipboard |
+| `V` | Open VNC console in browser |
 | `Esc` | Back to list |
 
 #### Create Form
@@ -620,6 +674,7 @@ src/
 | `Enter` | View detail |
 | `Ctrl+N` | Create volume |
 | `Ctrl+D` | Delete volume |
+| `/` | Filter |
 
 #### Volume Detail
 | Key | Action |
@@ -637,6 +692,7 @@ src/
 | `Ctrl+N` | Allocate new floating IP |
 | `Ctrl+T` | Disassociate from port |
 | `Ctrl+D` | Release floating IP |
+| `/` | Filter |
 
 #### Security Groups
 | Key | Action |
@@ -654,40 +710,51 @@ src/
 | `Enter` | View detail (public key) |
 | `Ctrl+N` | Create / import key pair |
 | `Ctrl+D` | Delete key pair |
+| `/` | Filter |
 
 #### Networks
 | Key | Action |
 |-----|--------|
 | `↑/k` `↓/j` | Navigate |
 | `Enter` | Expand / collapse subnets |
-| `Ctrl+N` | Create network (or subnet when expanded) |
-| `Ctrl+D` | Delete network (or subnet in subnets) |
+| `Ctrl+N` | Create network (or subnet/port contextually) |
+| `Ctrl+D` | Delete network (or subnet/port contextually) |
+| `e` | Edit subnet (when on subnet) |
+| `/` | Filter |
 
 #### Routers
 | Key | Action |
 |-----|--------|
 | `↑/k` `↓/j` | Navigate |
-| `Enter` | View detail (interfaces) |
+| `Enter` | View detail (interfaces, static routes) |
 | `Ctrl+N` | Create router |
 | `Ctrl+D` | Delete router |
-| `Ctrl+A` | Add interface (from detail) |
+| `Ctrl+A` | Add interface (from detail, with optional custom IP) |
 | `Ctrl+T` | Remove interface (from detail) |
+| `/` | Filter |
 | `Esc` | Back to list (from detail) |
 
 #### Load Balancers
 | Key | Action |
 |-----|--------|
 | `↑/k` `↓/j` | Navigate |
-| `Enter` | View detail (listener/pool/member tree) |
-| `Ctrl+D` | Delete load balancer (cascade) |
-| `Esc` | Back to list (from detail) |
+| `Enter` | Expand / view detail (tree navigation) |
+| `Ctrl+N` | Create (LB / listener / pool / member / monitor, contextual) |
+| `e` | Edit (member, pool, listener) |
+| `Ctrl+D` | Delete (cascade for LBs, individual for children) |
+| `/` | Filter |
+| `Esc` | Collapse / back |
 
 #### Images
 | Key | Action |
 |-----|--------|
 | `↑/k` `↓/j` | Navigate |
 | `Enter` | View detail |
+| `Ctrl+N` | Upload image (file picker or URL) |
+| `d` | Download image to local file |
+| `e` | Edit image properties |
 | `Ctrl+D` | Delete image |
+| `/` | Filter |
 
 #### Console Log / Action History
 | Key | Action |
@@ -721,24 +788,24 @@ src/
 ## Future Roadmap
 
 ### Backlog (deferred from Phase 3 — all complete)
-- ~~**Create Volume form**~~: ✓ Complete — name, size, type picker, AZ, description
-- ~~**Create/Import Key Pair**~~: ✓ Complete — RSA/ED25519, file browser, save-to-file
-- ~~**Create Security Group Rule**~~: ✓ Complete — modal with cycle pickers
-- ~~**Volume Attach from detail**~~: ✓ Complete — server picker modal
-- ~~**Network/subnet browsing**~~: ✓ Complete — Networks tab with expandable subnets
+- ✅ **Create Volume form** — name, size, type picker, AZ, description
+- ✅ **Create/Import Key Pair** — RSA/ED25519, file browser, save-to-file
+- ✅ **Create Security Group Rule** — modal with cycle pickers
+- ✅ **Volume Attach from detail** — server picker modal
+- ✅ **Network/subnet browsing** — Networks tab with expandable subnets, port CRUD, subnet edit
 
 ### Server Action Gaps
 
 Actions available in Nova but not yet implemented, prioritized by usefulness:
 
 #### High-value (all complete)
-- ~~**Rename server**~~: ✓ Complete — `r` key, inline rename
-- ~~**Rebuild**~~: ✓ Complete — `Ctrl+G`, image picker modal
-- ~~**Create snapshot**~~: ✓ Complete — `Ctrl+S`, creates image from server
-- ~~**Rescue/Unrescue**~~: ✓ Complete — `Ctrl+W`, toggle rescue mode
+- ✅ **Rename server** — `r` key, inline rename
+- ✅ **Rebuild** — `Ctrl+G`, image picker modal
+- ✅ **Create snapshot** — `Ctrl+S`, creates image from server
+- ✅ **Rescue/Unrescue** — `Ctrl+W`, toggle rescue mode
 
 #### Medium-value (specific scenarios)
-- ~~**Console access (noVNC)**~~ ✓ Done — Retrieve and open VNC console URL via `V` key. Opens in browser or copies to clipboard.
+- ✅ **Console access (noVNC)** — Retrieve and open VNC console URL via `V` key. Opens in browser or copies to clipboard.
 - **Get password** — Retrieve auto-generated password for Windows VMs (`servers.GetPassword`).
 
 #### Admin-only (Phase 6)
@@ -753,11 +820,19 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 - Custom column selection and ordering
 - Saved filters
 - Server name templates for create
-- ~~SSH integration (launch SSH session to selected server)~~ ✓ Done (#27)
+- ✅ SSH integration (launch SSH session to selected server) — Done (#27)
 - Copy-to-clipboard for IDs, IPs (general — SSH command copy done via `y`)
 - Log/audit trail of actions taken
 - Designate (DNS) tab
-- ~~Console access (noVNC URL retrieval and browser launch)~~ ✓ Done (#50)
+- ✅ Console access (noVNC URL retrieval and browser launch) — Done (#50)
+- ✅ Image upload/download/edit with file picker and combined view — Done (#126)
+- ✅ Cloud-init / user data file picker in server create — Done
+- ✅ Port CRUD with port security and allowed address pairs — Done
+- ✅ Subnet edit modal — Done
+- ✅ IPv6 subnet support (address mode, RA mode, auto-addressed subnets) — Done
+- ✅ Search/filter (`/`) on all list views — Done
+- ✅ Load balancer full CRUD (create/edit/delete LB, listeners, pools, members, monitors) — Done
+- ✅ Server cloning with progress view — Done
 
 ### Phase 6: Operational
 - Hypervisor view (admin)
