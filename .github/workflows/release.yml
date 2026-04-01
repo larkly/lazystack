@@ -34,7 +34,7 @@ jobs:
 
   build:
     needs: [validate]
-    if: always() && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
