@@ -3,6 +3,8 @@ package servercreate
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,11 +31,25 @@ const (
 	fieldNetwork  = 3
 	fieldKeypair  = 4
 	fieldSecGroup = 5
-	fieldCount    = 6
-	fieldSubmit   = 7
-	fieldCancel   = 8
-	numFields     = 9
+	fieldUserData = 6
+	fieldCount    = 7
+	fieldSubmit   = 8
+	fieldCancel   = 9
+	numFields     = 10
 )
+
+var udFileExtensions = map[string]bool{
+	".yaml": true, ".yml": true, ".sh": true,
+	".cfg": true, ".txt": true, ".conf": true,
+	"": true, // extensionless files
+}
+
+type udPickerEntry struct {
+	name  string
+	path  string
+	isDir bool
+	size  int64
+}
 
 type imagesLoadedMsg struct{ images []img.Image }
 type flavorsLoadedMsg struct{ flavors []compute.Flavor }
@@ -97,6 +113,16 @@ type Model struct {
 	err        string
 	width      int
 	height     int
+
+	// User data (cloud-init)
+	userData     []byte
+	userDataFile string // display filename
+
+	// User data file picker
+	udPickerOpen    bool
+	udPickerDir     string
+	udPickerEntries []udPickerEntry
+	udPickerCursor  int
 
 	// Clone mode
 	cloneMode    bool
@@ -241,6 +267,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.udPickerOpen {
+			return m.updateUDPicker(msg)
+		}
 		if m.pickerOpen {
 			return m.updatePicker(msg)
 		}
@@ -329,6 +358,8 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldName:
 			m.advanceFocus()
 			return m, nil
+		case fieldUserData:
+			return m.openUDPicker()
 		case fieldCount:
 			if m.cloneMode && m.hasCloneVolumes() {
 				m.cloneVolumes = !m.cloneVolumes
@@ -351,6 +382,13 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.pickerFilter.Focus()
 			return m, nil
 		}
+	}
+
+	// Handle backspace on user data to clear selection
+	if m.focusField == fieldUserData && (msg.String() == "backspace" || msg.String() == "delete") {
+		m.userData = nil
+		m.userDataFile = ""
+		return m, nil
 	}
 
 	// Handle space to toggle clone volumes checkbox
@@ -552,6 +590,194 @@ func (m *Model) retreatFocus() {
 	m.updateFocus()
 }
 
+func (m Model) userDataDisplay() string {
+	if m.userDataFile != "" {
+		return fmt.Sprintf("%s (%s)", m.userDataFile, shared.FormatSize(int64(len(m.userData))))
+	}
+	return "none"
+}
+
+// --- User data file picker ---
+
+func (m Model) openUDPicker() (Model, tea.Cmd) {
+	dir, _ := os.UserHomeDir()
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	return m.loadUDDir(dir)
+}
+
+func (m Model) loadUDDir(dir string) (Model, tea.Cmd) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		m.err = "Cannot read directory: " + err.Error()
+		return m, nil
+	}
+
+	var dirs, files []udPickerEntry
+
+	if dir != "/" {
+		dirs = append(dirs, udPickerEntry{name: "..", path: filepath.Dir(dir), isDir: true})
+	}
+
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		full := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			dirs = append(dirs, udPickerEntry{name: e.Name() + "/", path: full, isDir: true})
+		} else {
+			ext := strings.ToLower(filepath.Ext(e.Name()))
+			if udFileExtensions[ext] {
+				info, _ := e.Info()
+				var size int64
+				if info != nil {
+					size = info.Size()
+				}
+				files = append(files, udPickerEntry{name: e.Name(), path: full, size: size})
+			}
+		}
+	}
+
+	sort.Slice(dirs[1:], func(i, j int) bool {
+		return strings.ToLower(dirs[i+1].name) < strings.ToLower(dirs[j+1].name)
+	})
+	sort.Slice(files, func(i, j int) bool {
+		return strings.ToLower(files[i].name) < strings.ToLower(files[j].name)
+	})
+
+	m.udPickerEntries = append(dirs, files...)
+	m.udPickerDir = dir
+	m.udPickerOpen = true
+	m.udPickerCursor = 0
+	m.err = ""
+	return m, nil
+}
+
+func (m Model) updateUDPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
+		m.udPickerOpen = false
+		return m, nil
+	case key.Matches(msg, shared.Keys.Up):
+		if m.udPickerCursor > 0 {
+			m.udPickerCursor--
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.Down):
+		if m.udPickerCursor < len(m.udPickerEntries)-1 {
+			m.udPickerCursor++
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.PageUp):
+		m.udPickerCursor -= 10
+		if m.udPickerCursor < 0 {
+			m.udPickerCursor = 0
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.PageDown):
+		m.udPickerCursor += 10
+		if m.udPickerCursor >= len(m.udPickerEntries) {
+			m.udPickerCursor = len(m.udPickerEntries) - 1
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.Enter):
+		if m.udPickerCursor < 0 || m.udPickerCursor >= len(m.udPickerEntries) {
+			return m, nil
+		}
+		entry := m.udPickerEntries[m.udPickerCursor]
+		if entry.isDir {
+			return m.loadUDDir(entry.path)
+		}
+		// Read file content
+		data, err := os.ReadFile(entry.path)
+		if err != nil {
+			m.err = "Cannot read file: " + err.Error()
+			m.udPickerOpen = false
+			return m, nil
+		}
+		m.userData = data
+		m.userDataFile = entry.name
+		m.udPickerOpen = false
+		m.advanceFocus()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) renderUDPicker() string {
+	var b strings.Builder
+
+	titleText := "Create Server"
+	if m.cloneMode {
+		titleText = "Clone Server"
+	}
+	title := shared.StyleTitle.Render(titleText + " \u2014 Select User Data File")
+	b.WriteString(title + "\n\n")
+
+	dirStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+	b.WriteString("  " + dirStyle.Render("Browsing: "+m.udPickerDir) + "\n")
+	b.WriteString("  " + dirStyle.Render("Showing: .yaml .yml .sh .cfg .txt .conf") + "\n\n")
+
+	maxShow := m.height - 10
+	if maxShow < 5 {
+		maxShow = 5
+	}
+	start := 0
+	if m.udPickerCursor >= maxShow {
+		start = m.udPickerCursor - maxShow + 1
+	}
+	end := start + maxShow
+	if end > len(m.udPickerEntries) {
+		end = len(m.udPickerEntries)
+	}
+
+	nameW := 40
+	if m.width > 80 {
+		nameW = m.width - 40
+	}
+
+	for i := start; i < end; i++ {
+		e := m.udPickerEntries[i]
+		cursor := "  "
+		if i == m.udPickerCursor {
+			cursor = "\u25b8 "
+		}
+
+		name := e.name
+		if len(name) > nameW {
+			name = name[:nameW-1] + "\u2026"
+		}
+
+		var sizeStr string
+		if e.isDir {
+			sizeStr = lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("<dir>")
+		} else {
+			sizeStr = lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(shared.FormatSize(e.size))
+		}
+
+		nameStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
+		if e.isDir {
+			nameStyle = nameStyle.Foreground(shared.ColorCyan)
+		}
+		if i == m.udPickerCursor {
+			nameStyle = nameStyle.Bold(true).Foreground(shared.ColorHighlight)
+		}
+
+		b.WriteString("  " + cursor + nameStyle.Width(nameW).Render(name) + "  " + sizeStr + "\n")
+	}
+
+	if len(m.udPickerEntries) == 0 {
+		b.WriteString("  " + shared.StyleHelp.Render("No matching files found") + "\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(shared.StyleHelp.Render("  \u2191\u2193 navigate \u2022 enter select \u2022 esc back") + "\n")
+
+	return b.String()
+}
+
 func (m Model) hasCloneVolumes() bool {
 	return m.cloneConfig != nil && len(m.cloneConfig.VolumeIDs) > 0
 }
@@ -592,6 +818,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		Name:      name,
 		ImageRef:  m.images[m.selectedImage].ID,
 		FlavorRef: m.flavors[m.selectedFlavor].ID,
+		UserData:  m.userData,
 	}
 
 	if count > 1 {
@@ -638,6 +865,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 // View renders the create form.
 func (m Model) View() string {
+	if m.udPickerOpen {
+		return m.renderUDPicker()
+	}
+
 	var b strings.Builder
 
 	titleText := "Create Server"
@@ -670,6 +901,7 @@ func (m Model) View() string {
 		{"Network", m.selectionDisplay(fieldNetwork), m.focusField == fieldNetwork, false},
 		{"Key Pair", m.selectionDisplay(fieldKeypair), m.focusField == fieldKeypair, false},
 		{"Security Groups", m.selectionDisplay(fieldSecGroup), m.focusField == fieldSecGroup, false},
+		{"User Data", m.userDataDisplay(), m.focusField == fieldUserData, false},
 	}
 	if m.cloneMode && m.hasCloneVolumes() {
 		check := "[ ]"
