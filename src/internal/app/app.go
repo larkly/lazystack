@@ -9,6 +9,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/config"
@@ -1081,11 +1082,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				for _, p := range projs {
 					infos = append(infos, shared.ProjectInfo{ID: p.ID, Name: p.Name})
 				}
-				// Try to get current project ID from the auth scope
+				// Extract current project ID from the auth token scope
 				currentID := ""
-				if pc.GetAuthResult() != nil {
-					// The token should have project scope info
-					// We'll match by checking project IDs
+				if ar, ok := pc.GetAuthResult().(interface {
+					ExtractProject() (*tokens.Project, error)
+				}); ok {
+					if proj, err := ar.ExtractProject(); err == nil && proj != nil {
+						currentID = proj.ID
+					}
 				}
 				return shared.ProjectsLoadedMsg{Projects: infos, CurrentID: currentID}
 			})
