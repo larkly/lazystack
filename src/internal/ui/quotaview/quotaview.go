@@ -94,6 +94,9 @@ func (m *Model) fetchQuotas() tea.Cmd {
 	projectID := m.projectID
 
 	return func() tea.Msg {
+		if projectID == "" {
+			return quotaLoadedMsg{err: fmt.Errorf("no project selected")}
+		}
 		ctx := context.Background()
 		var (
 			computeQuotas []quota.QuotaUsage
