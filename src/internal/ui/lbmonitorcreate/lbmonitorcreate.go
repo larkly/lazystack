@@ -161,6 +161,7 @@ func NewEdit(client *gophercloud.ServiceClient, monitorID string, current *loadb
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[lbmonitorcreate] Init() poolName=%q editMode=%v", m.poolName, m.editMode)
 	return nil
 }
 
@@ -179,12 +180,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.editMode {
 			action = "Updated monitor on"
 		}
+		shared.Debugf("[lbmonitorcreate] success poolName=%q", m.poolName)
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: action, Name: m.poolName}
 		}
 	case monitorCreateErrMsg:
 		m.submitting = false
 		m.err = shared.SanitizeAPIError(msg.err)
+		shared.Debugf("[lbmonitorcreate] error: %v", msg.err)
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting {
@@ -395,6 +398,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		})
 	}
 
+	shared.Debugf("[lbmonitorcreate] submit type=%s delay=%d timeout=%d", typeOpts[m.selectedType], delay, timeout)
 	poolID := m.poolID
 	monType := typeOpts[m.selectedType]
 	if m.isHTTPType() {

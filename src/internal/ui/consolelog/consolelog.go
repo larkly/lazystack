@@ -52,6 +52,7 @@ func New(client *gophercloud.ServiceClient, serverID, serverName string) Model {
 
 // Init fetches console output.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[consolelog] Init() serverID=%s serverName=%q", m.serverID, m.serverName)
 	return tea.Batch(m.spinner.Tick, m.fetchConsole())
 }
 
@@ -64,11 +65,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.err = ""
 		// Scroll to bottom
 		m.scroll = m.maxScroll()
+		shared.Debugf("[consolelog] output loaded %d lines", len(m.lines))
 		return m, nil
 
 	case consoleErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
+		shared.Debugf("[consolelog] error: %v", msg.err)
 		return m, nil
 
 	case spinner.TickMsg:
@@ -186,6 +189,7 @@ func (m Model) fetchConsole() tea.Cmd {
 
 // ForceRefresh triggers a manual reload of the console output.
 func (m *Model) ForceRefresh() tea.Cmd {
+	shared.Debugf("[consolelog] ForceRefresh()")
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchConsole())
 }

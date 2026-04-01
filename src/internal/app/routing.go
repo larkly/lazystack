@@ -169,6 +169,7 @@ func (m Model) updateModal(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleDetailNavigation(msg shared.NavigateToDetailMsg) (Model, tea.Cmd) {
+	shared.Debugf("[app] handleDetailNavigation: resource=%s id=%s", msg.Resource, msg.ID)
 	switch msg.Resource {
 	case "volume":
 		m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, msg.ID)
@@ -191,6 +192,7 @@ func (m Model) handleDetailNavigation(msg shared.NavigateToDetailMsg) (Model, te
 }
 
 func (m Model) handleResourceNavigation(msg shared.NavigateToResourceMsg) (Model, tea.Cmd) {
+	shared.Debugf("[app] handleResourceNavigation: tab=%s", msg.Tab)
 	// Find the target tab index
 	tabIdx := -1
 	for i, td := range m.tabs {
@@ -220,6 +222,7 @@ func (m Model) handleResourceNavigation(msg shared.NavigateToResourceMsg) (Model
 }
 
 func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
+	shared.Debugf("[app] handleViewChange: target=%s", msg.View)
 	switch msg.View {
 	case "serverlist":
 		// If returning from a cross-resource jump, go back to the originating view
@@ -342,6 +345,7 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
+	shared.Debugf("[app] forceRefreshActiveView: view=%d", m.view)
 	switch m.view {
 	case viewServerList:
 		return m, m.serverList.ForceRefresh()

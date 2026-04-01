@@ -7,6 +7,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
 	"github.com/gophercloud/gophercloud/v2/pagination"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Flavor is a simplified representation of a Nova flavor.
@@ -20,6 +21,7 @@ type Flavor struct {
 
 // ListFlavors fetches all available flavors.
 func ListFlavors(ctx context.Context, client *gophercloud.ServiceClient) ([]Flavor, error) {
+	shared.Debugf("[compute] listing flavors")
 	opts := flavors.ListOpts{}
 
 	var result []Flavor
@@ -40,7 +42,9 @@ func ListFlavors(ctx context.Context, client *gophercloud.ServiceClient) ([]Flav
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[compute] list flavors: %v", err)
 		return nil, fmt.Errorf("listing flavors: %w", err)
 	}
+	shared.Debugf("[compute] listed %d flavors", len(result))
 	return result, nil
 }

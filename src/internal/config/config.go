@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/larkly/lazystack/internal/shared"
 	"gopkg.in/yaml.v3"
 )
 
@@ -151,6 +152,7 @@ func DefaultKeybindings() map[string]string {
 
 // Load reads config from DefaultPath. Returns Defaults() if file does not exist.
 func Load() (Config, error) {
+	shared.Debugf("[config] Load: start path=%s", DefaultPath())
 	return LoadFrom(DefaultPath())
 }
 
@@ -173,22 +175,28 @@ type rawConfig struct {
 
 // LoadFrom reads config from the given path.
 func LoadFrom(path string) (Config, error) {
+	shared.Debugf("[config] LoadFrom: start path=%s", path)
 	defaults := Defaults()
 	if path == "" {
+		shared.Debugf("[config] LoadFrom: empty path, using defaults")
 		return defaults, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			shared.Debugf("[config] LoadFrom: file not found, using defaults")
 			return defaults, nil
 		}
+		shared.Debugf("[config] LoadFrom: error reading file: %v", err)
 		return defaults, err
 	}
 
 	var raw rawConfig
 	if err := yaml.Unmarshal(data, &raw); err != nil {
+		shared.Debugf("[config] LoadFrom: error parsing YAML: %v", err)
 		return defaults, err
 	}
+	shared.Debugf("[config] LoadFrom: loaded config from %s", path)
 
 	file := Config{
 		General: GeneralConfig{
@@ -306,20 +314,30 @@ func Merge(file Config, flags CLIFlags) Config {
 
 // Save writes config to DefaultPath, creating directories as needed.
 func (c *Config) Save() error {
+	shared.Debugf("[config] Save: start path=%s", DefaultPath())
 	return c.SaveTo(DefaultPath())
 }
 
 // SaveTo writes config to the given path.
 func (c *Config) SaveTo(path string) error {
+	shared.Debugf("[config] SaveTo: start path=%s", path)
 	if path == "" {
+		shared.Debugf("[config] SaveTo: error empty path")
 		return errors.New("config: empty path")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		shared.Debugf("[config] SaveTo: error creating dir: %v", err)
 		return err
 	}
 	data, err := yaml.Marshal(c)
 	if err != nil {
+		shared.Debugf("[config] SaveTo: error marshaling: %v", err)
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		shared.Debugf("[config] SaveTo: error writing: %v", err)
+		return err
+	}
+	shared.Debugf("[config] SaveTo: success")
+	return nil
 }

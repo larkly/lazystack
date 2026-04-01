@@ -300,6 +300,7 @@ func (m *Model) Open(view string) {
 	}
 	m.scroll = 0
 	m.Visible = m.tier != tierClosed
+	shared.Debugf("[help] Open view=%s tier=%d visible=%v", view, m.tier, m.Visible)
 	if m.Visible {
 		m.buildLines()
 	}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/larkly/lazystack/internal/shared"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,6 +18,7 @@ type cloudsFile struct {
 
 // ListCloudNames parses clouds.yaml and returns sorted cloud names.
 func ListCloudNames() ([]string, error) {
+	shared.Debugf("[cloud] ListCloudNames: starting")
 	paths := CloudsYamlPaths()
 
 	for _, p := range paths {
@@ -26,6 +29,7 @@ func ListCloudNames() ([]string, error) {
 
 		var cf cloudsFile
 		if err := yaml.Unmarshal(data, &cf); err != nil {
+			shared.Debugf("[cloud] ListCloudNames: error parsing %s: %v", p, err)
 			return nil, fmt.Errorf("parsing %s: %w", p, err)
 		}
 
@@ -34,9 +38,11 @@ func ListCloudNames() ([]string, error) {
 			names = append(names, name)
 		}
 		sort.Strings(names)
+		shared.Debugf("[cloud] ListCloudNames: success, count=%d from=%s", len(names), p)
 		return names, nil
 	}
 
+	shared.Debugf("[cloud] ListCloudNames: no clouds.yaml found")
 	return nil, fmt.Errorf("no clouds.yaml found (searched: %v)", paths)
 }
 

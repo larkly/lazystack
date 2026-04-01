@@ -28,6 +28,7 @@ func New(clouds []string, err error) Model {
 
 // Init returns no initial command.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[cloudpicker] Init() clouds=%d err=%v", len(m.clouds), m.err)
 	return nil
 }
 
@@ -46,6 +47,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, shared.Keys.Enter):
 			if len(m.clouds) > 0 {
+				shared.Debugf("[cloudpicker] selected cloud=%q", m.clouds[m.cursor])
 				return m, func() tea.Msg {
 					return shared.CloudSelectedMsg{CloudName: m.clouds[m.cursor]}
 				}

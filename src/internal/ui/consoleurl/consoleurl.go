@@ -24,6 +24,7 @@ type Model struct {
 
 // New creates a console URL modal.
 func New(url, serverName string) Model {
+	shared.Debugf("[consoleurl] Init() server=%q url=%q", serverName, url)
 	return Model{
 		Active:     true,
 		url:        url,

@@ -108,6 +108,7 @@ type volumeNamesResolvedMsg struct {
 
 // Init resolves volume names async, then kicks off creation.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[cloneprogress] clone start server=%q volumes=%d", m.serverName, len(m.volumes))
 	client := m.volumeClient
 	ops := m.volumes
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
@@ -184,10 +185,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.err != nil {
 			m.volumes[msg.idx].Status = "error"
 			m.volumes[msg.idx].Err = msg.err
+			shared.Debugf("[cloneprogress] error creating volume idx=%d: %v", msg.idx, msg.err)
 			return m.startRollback()
 		}
 		m.volumes[msg.idx].CloneVolID = msg.volID
 		m.volumes[msg.idx].Status = "creating"
+		shared.Debugf("[cloneprogress] volume created idx=%d volID=%s", msg.idx, msg.volID)
 		// Only schedule poll if not already polling
 		if !m.polling {
 			m.polling = true
@@ -265,11 +268,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.err != nil {
 			m.volumes[msg.idx].Status = "error"
 			m.volumes[msg.idx].Err = msg.err
+			shared.Debugf("[cloneprogress] error attaching volume idx=%d: %v", msg.idx, msg.err)
 			return m.startRollback()
 		}
 		m.volumes[msg.idx].Status = "done"
+		shared.Debugf("[cloneprogress] volume attached idx=%d", msg.idx)
 		if m.allDone() {
 			m.running = false
+			shared.Debugf("[cloneprogress] all volumes cloned and attached successfully")
 			return m, func() tea.Msg { return AllCompleteMsg{} }
 		}
 		return m, nil

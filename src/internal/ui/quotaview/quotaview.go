@@ -77,6 +77,7 @@ func (m *Model) SetProjectID(id string) {
 
 // Open triggers a fetch if cache is stale. Returns a command.
 func (m *Model) Open() tea.Cmd {
+	shared.Debugf("[quotaview] open projectID=%s", m.projectID)
 	m.Visible = true
 	m.scroll = 0
 	if time.Since(m.lastFetch) > cacheDuration {
@@ -192,12 +193,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err.Error()
+			shared.Debugf("[quotaview] error: %v", msg.err)
 		} else {
 			m.err = ""
 			m.compute = msg.compute
 			m.network = msg.network
 			m.volume = msg.volume
 			m.lastFetch = time.Now()
+			shared.Debugf("[quotaview] quotas loaded compute=%d network=%d volume=%d", len(msg.compute), len(msg.network), len(msg.volume))
 		}
 		m.buildLines()
 		return m, nil

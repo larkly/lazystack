@@ -56,6 +56,7 @@ func New(computeClient, blockClient *gophercloud.ServiceClient, serverID, server
 
 // Init fetches available volumes.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[volumepicker] Init() serverID=%s serverName=%q", m.serverID, m.serverName)
 	return tea.Batch(m.spinner.Tick, m.fetchVolumes())
 }
 
@@ -66,11 +67,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.volumes = msg.volumes
 		m.applyFilter()
+		shared.Debugf("[volumepicker] loaded %d volumes", len(msg.volumes))
 		return m, nil
 
 	case fetchErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
+		shared.Debugf("[volumepicker] error: %v", msg.err)
 		return m, nil
 
 	case attachDoneMsg:
@@ -122,6 +125,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Enter):
 			if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
 				vol := m.filtered[m.cursor]
+				shared.Debugf("[volumepicker] selected volume=%q id=%s", vol.Name, vol.ID)
 				m.submitting = true
 				return m, tea.Batch(m.spinner.Tick, m.attachVolume(vol))
 			}

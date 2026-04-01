@@ -135,6 +135,7 @@ func New(client *gophercloud.ServiceClient, imageID, name, visibility string,
 
 // Init returns initial commands.
 func (m Model) Init() tea.Cmd {
+	shared.Debugf("[imageedit] Init() imageID=%s", m.imageID)
 	return m.nameInput.Focus()
 }
 
@@ -152,6 +153,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case imageEditedMsg:
 		m.Active = false
 		m.submitting = false
+		shared.Debugf("[imageedit] update success imageID=%s name=%q", m.imageID, m.nameInput.Value())
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: "Updated image", Name: m.nameInput.Value()}
 		}
@@ -159,6 +161,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case imageEditErrMsg:
 		m.submitting = false
 		m.err = msg.err.Error()
+		shared.Debugf("[imageedit] error: %v", msg.err)
 		return m, nil
 
 	case spinner.TickMsg:
@@ -345,6 +348,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	m.submitting = true
 	m.err = ""
+	shared.Debugf("[imageedit] update submit imageID=%s", m.imageID)
 	client := m.client
 	imageID := m.imageID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {

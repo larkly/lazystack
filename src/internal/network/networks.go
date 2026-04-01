@@ -10,6 +10,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
 	"github.com/gophercloud/gophercloud/v2/pagination"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Network is a simplified representation of a Neutron network.
@@ -60,6 +61,7 @@ type SubnetPool struct {
 
 // ListNetworks fetches all available networks.
 func ListNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Network, error) {
+	shared.Debugf("[network] listing networks")
 	opts := networks.ListOpts{}
 
 	var result []Network
@@ -80,13 +82,16 @@ func ListNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Net
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[network] list networks: %v", err)
 		return nil, fmt.Errorf("listing networks: %w", err)
 	}
+	shared.Debugf("[network] listed %d networks", len(result))
 	return result, nil
 }
 
 // ListSubnets fetches all subnets.
 func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subnet, error) {
+	shared.Debugf("[network] listing subnets")
 	var result []Subnet
 	err := subnets.List(client, subnets.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := subnets.ExtractSubnets(page)
@@ -122,13 +127,16 @@ func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subn
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[network] list subnets: %v", err)
 		return nil, fmt.Errorf("listing subnets: %w", err)
 	}
+	shared.Debugf("[network] listed %d subnets", len(result))
 	return result, nil
 }
 
 // ListSubnetPools fetches all subnet pools.
 func ListSubnetPools(ctx context.Context, client *gophercloud.ServiceClient) ([]SubnetPool, error) {
+	shared.Debugf("[network] listing subnet pools")
 	var result []SubnetPool
 	err := subnetpools.List(client, subnetpools.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := subnetpools.ExtractSubnetPools(page)
@@ -147,21 +155,26 @@ func ListSubnetPools(ctx context.Context, client *gophercloud.ServiceClient) ([]
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[network] list subnet pools: %v", err)
 		return nil, fmt.Errorf("listing subnet pools: %w", err)
 	}
+	shared.Debugf("[network] listed %d subnet pools", len(result))
 	return result, nil
 }
 
 // CreateNetwork creates a new network.
 func CreateNetwork(ctx context.Context, client *gophercloud.ServiceClient, name string, adminStateUp bool) (*Network, error) {
+	shared.Debugf("[network] creating network %q", name)
 	r := networks.Create(ctx, client, networks.CreateOpts{
 		Name:         name,
 		AdminStateUp: &adminStateUp,
 	})
 	n, err := r.Extract()
 	if err != nil {
+		shared.Debugf("[network] create network %q: %v", name, err)
 		return nil, fmt.Errorf("creating network: %w", err)
 	}
+	shared.Debugf("[network] created network %q (ID: %s)", n.Name, n.ID)
 	return &Network{
 		ID:     n.ID,
 		Name:   n.Name,
@@ -172,10 +185,13 @@ func CreateNetwork(ctx context.Context, client *gophercloud.ServiceClient, name 
 
 // DeleteNetwork deletes a network.
 func DeleteNetwork(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[network] deleting network %s", id)
 	r := networks.Delete(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[network] delete network %s: %v", id, r.Err)
 		return fmt.Errorf("deleting network %s: %w", id, r.Err)
 	}
+	shared.Debugf("[network] deleted network %s", id)
 	return nil
 }
 
@@ -195,6 +211,7 @@ type SubnetCreateOpts struct {
 
 // CreateSubnet creates a new subnet.
 func CreateSubnet(ctx context.Context, client *gophercloud.ServiceClient, opts SubnetCreateOpts) (*Subnet, error) {
+	shared.Debugf("[network] creating subnet %q on network %s (CIDR: %s, IPv%d)", opts.Name, opts.NetworkID, opts.CIDR, opts.IPVersion)
 	createOpts := subnets.CreateOpts{
 		NetworkID:  opts.NetworkID,
 		Name:       opts.Name,
@@ -220,8 +237,10 @@ func CreateSubnet(ctx context.Context, client *gophercloud.ServiceClient, opts S
 	r := subnets.Create(ctx, client, createOpts)
 	s, err := r.Extract()
 	if err != nil {
+		shared.Debugf("[network] create subnet %q: %v", opts.Name, err)
 		return nil, fmt.Errorf("creating subnet: %w", err)
 	}
+	shared.Debugf("[network] created subnet %q (ID: %s, CIDR: %s)", s.Name, s.ID, s.CIDR)
 	sub := &Subnet{
 		ID:         s.ID,
 		Name:       s.Name,
@@ -242,10 +261,13 @@ func CreateSubnet(ctx context.Context, client *gophercloud.ServiceClient, opts S
 
 // DeleteSubnet deletes a subnet.
 func DeleteSubnet(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[network] deleting subnet %s", id)
 	r := subnets.Delete(ctx, client, id)
 	if r.Err != nil {
+		shared.Debugf("[network] delete subnet %s: %v", id, r.Err)
 		return fmt.Errorf("deleting subnet %s: %w", id, r.Err)
 	}
+	shared.Debugf("[network] deleted subnet %s", id)
 	return nil
 }
 
@@ -261,6 +283,7 @@ type SubnetUpdateOpts struct {
 
 // UpdateSubnet updates a subnet.
 func UpdateSubnet(ctx context.Context, client *gophercloud.ServiceClient, id string, opts SubnetUpdateOpts) error {
+	shared.Debugf("[network] updating subnet %s", id)
 	updateOpts := subnets.UpdateOpts{}
 	if opts.Name != nil {
 		updateOpts.Name = opts.Name
@@ -296,13 +319,16 @@ func UpdateSubnet(ctx context.Context, client *gophercloud.ServiceClient, id str
 	}
 	_, err := subnets.Update(ctx, client, id, updateOpts).Extract()
 	if err != nil {
+		shared.Debugf("[network] update subnet %s: %v", id, err)
 		return fmt.Errorf("updating subnet %s: %w", id, err)
 	}
+	shared.Debugf("[network] updated subnet %s", id)
 	return nil
 }
 
 // ListExternalNetworks fetches networks where router:external is true.
 func ListExternalNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Network, error) {
+	shared.Debugf("[network] listing external networks")
 	url := client.ServiceURL("networks") + "?router:external=true"
 	var body struct {
 		Networks []struct {
@@ -313,6 +339,7 @@ func ListExternalNetworks(ctx context.Context, client *gophercloud.ServiceClient
 	}
 	resp, err := client.Get(ctx, url, &body, nil)
 	if err != nil {
+		shared.Debugf("[network] list external networks: %v", err)
 		return nil, fmt.Errorf("listing external networks: %w", err)
 	}
 	resp.Body.Close()
@@ -321,11 +348,13 @@ func ListExternalNetworks(ctx context.Context, client *gophercloud.ServiceClient
 	for i, n := range body.Networks {
 		result[i] = Network{ID: n.ID, Name: n.Name, Status: n.Status}
 	}
+	shared.Debugf("[network] listed %d external networks", len(result))
 	return result, nil
 }
 
 // FindServerPortID returns the first port ID for the given server (device_id).
 func FindServerPortID(ctx context.Context, client *gophercloud.ServiceClient, serverID string) (string, error) {
+	shared.Debugf("[network] finding port for server %s", serverID)
 	var portID string
 	err := ports.List(client, ports.ListOpts{DeviceID: serverID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := ports.ExtractPorts(page)
@@ -339,10 +368,13 @@ func FindServerPortID(ctx context.Context, client *gophercloud.ServiceClient, se
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[network] find server port %s: %v", serverID, err)
 		return "", fmt.Errorf("finding port for server %s: %w", serverID, err)
 	}
 	if portID == "" {
+		shared.Debugf("[network] find server port: no ports found for server %s", serverID)
 		return "", fmt.Errorf("no ports found for server %s", serverID)
 	}
+	shared.Debugf("[network] found port %s for server %s", portID, serverID)
 	return portID, nil
 }

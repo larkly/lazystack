@@ -8,6 +8,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/portsecurity"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/v2/pagination"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Port is a simplified representation of a Neutron port.
@@ -113,17 +114,21 @@ func extractPortsWithExt(page pagination.Page) ([]portWithExt, error) {
 
 // GetPort fetches a single port by ID.
 func GetPort(ctx context.Context, client *gophercloud.ServiceClient, portID string) (*Port, error) {
+	shared.Debugf("[network] getting port %s", portID)
 	var result portWithExt
 	err := ports.Get(ctx, client, portID).ExtractInto(&result)
 	if err != nil {
+		shared.Debugf("[network] get port %s: %v", portID, err)
 		return nil, fmt.Errorf("getting port %s: %w", portID, err)
 	}
+	shared.Debugf("[network] got port %s (name: %q, network: %s)", portID, result.Name, result.NetworkID)
 	port := mapPort(result)
 	return &port, nil
 }
 
 // FindRouterPortOnNetwork returns the router interface port on a given network, if any.
 func FindRouterPortOnNetwork(ctx context.Context, client *gophercloud.ServiceClient, routerID, networkID string) (*Port, error) {
+	shared.Debugf("[network] finding router port for router %s on network %s", routerID, networkID)
 	var result *Port
 	err := ports.List(client, ports.ListOpts{
 		DeviceID:    routerID,
@@ -141,13 +146,20 @@ func FindRouterPortOnNetwork(ctx context.Context, client *gophercloud.ServiceCli
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[network] find router port on network %s: %v", networkID, err)
 		return nil, fmt.Errorf("finding router port on network %s: %w", networkID, err)
+	}
+	if result != nil {
+		shared.Debugf("[network] found router port %s on network %s", result.ID, networkID)
+	} else {
+		shared.Debugf("[network] no router port found for router %s on network %s", routerID, networkID)
 	}
 	return result, nil
 }
 
 // AddFixedIPToPort adds a fixed IP to an existing port.
 func AddFixedIPToPort(ctx context.Context, client *gophercloud.ServiceClient, portID string, existing []FixedIP, subnetID, ipAddress string) error {
+	shared.Debugf("[network] adding fixed IP to port %s (subnet: %s, ip: %s)", portID, subnetID, ipAddress)
 	fixedIPs := make([]ports.IP, 0, len(existing)+1)
 	for _, ip := range existing {
 		fixedIPs = append(fixedIPs, ports.IP{
@@ -165,16 +177,20 @@ func AddFixedIPToPort(ctx context.Context, client *gophercloud.ServiceClient, po
 		FixedIPs: fixedIPs,
 	}).Extract()
 	if err != nil {
+		shared.Debugf("[network] add fixed IP to port %s: %v", portID, err)
 		return fmt.Errorf("adding fixed IP to port %s: %w", portID, err)
 	}
+	shared.Debugf("[network] added fixed IP to port %s", portID)
 	return nil
 }
 
 // RemoveFixedIPFromPort removes a single fixed IP (by subnet ID) from a port,
 // keeping all other fixed IPs intact.
 func RemoveFixedIPFromPort(ctx context.Context, client *gophercloud.ServiceClient, portID, subnetID string) error {
+	shared.Debugf("[network] removing fixed IP from port %s (subnet: %s)", portID, subnetID)
 	p, err := ports.Get(ctx, client, portID).Extract()
 	if err != nil {
+		shared.Debugf("[network] remove fixed IP from port %s: get port: %v", portID, err)
 		return fmt.Errorf("getting port %s: %w", portID, err)
 	}
 
@@ -192,13 +208,16 @@ func RemoveFixedIPFromPort(ctx context.Context, client *gophercloud.ServiceClien
 		FixedIPs: remaining,
 	}).Extract()
 	if err != nil {
+		shared.Debugf("[network] remove fixed IP from port %s: %v", portID, err)
 		return fmt.Errorf("removing fixed IP from port %s: %w", portID, err)
 	}
+	shared.Debugf("[network] removed fixed IP from port %s (subnet: %s)", portID, subnetID)
 	return nil
 }
 
 // ListPortsByDevice fetches all ports attached to a given device (e.g. server).
 func ListPortsByDevice(ctx context.Context, client *gophercloud.ServiceClient, deviceID string) ([]Port, error) {
+	shared.Debugf("[network] listing ports for device %s", deviceID)
 	var result []Port
 	err := ports.List(client, ports.ListOpts{DeviceID: deviceID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := extractPortsWithExt(page)
@@ -211,13 +230,16 @@ func ListPortsByDevice(ctx context.Context, client *gophercloud.ServiceClient, d
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[network] list ports for device %s: %v", deviceID, err)
 		return nil, fmt.Errorf("listing ports for device %s: %w", deviceID, err)
 	}
+	shared.Debugf("[network] listed %d ports for device %s", len(result), deviceID)
 	return result, nil
 }
 
 // ListPortsBySecurityGroup fetches all ports that have a given security group.
 func ListPortsBySecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, sgID string) ([]Port, error) {
+	shared.Debugf("[network] listing ports for security group %s", sgID)
 	var result []Port
 	err := ports.List(client, ports.ListOpts{SecurityGroups: []string{sgID}}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := extractPortsWithExt(page)
@@ -230,14 +252,17 @@ func ListPortsBySecurityGroup(ctx context.Context, client *gophercloud.ServiceCl
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[network] list ports for security group %s: %v", sgID, err)
 		return nil, fmt.Errorf("listing ports for security group %s: %w", sgID, err)
 	}
+	shared.Debugf("[network] listed %d ports for security group %s", len(result), sgID)
 	return result, nil
 }
 
 // CreatePort creates a port on the given subnet. If ipAddress is empty,
 // Neutron allocates automatically (required for SLAAC/DHCPv6 subnets).
 func CreatePort(ctx context.Context, client *gophercloud.ServiceClient, networkID, subnetID, ipAddress string) (*Port, error) {
+	shared.Debugf("[network] creating port on network %s (subnet: %s, ip: %s)", networkID, subnetID, ipAddress)
 	fixedIP := ports.IP{SubnetID: subnetID}
 	if ipAddress != "" {
 		fixedIP.IPAddress = ipAddress
@@ -248,8 +273,10 @@ func CreatePort(ctx context.Context, client *gophercloud.ServiceClient, networkI
 	}
 	p, err := ports.Create(ctx, client, opts).Extract()
 	if err != nil {
+		shared.Debugf("[network] create port on network %s: %v", networkID, err)
 		return nil, fmt.Errorf("creating port on network %s: %w", networkID, err)
 	}
+	shared.Debugf("[network] created port %s on network %s", p.ID, networkID)
 	port := mapPortBasic(*p)
 	return &port, nil
 }
@@ -268,6 +295,7 @@ type PortCreateOpts struct {
 
 // CreatePortFull creates a port with all available options including port security.
 func CreatePortFull(ctx context.Context, client *gophercloud.ServiceClient, opts PortCreateOpts) (*Port, error) {
+	shared.Debugf("[network] creating port (full) on network %s (name: %q)", opts.NetworkID, opts.Name)
 	baseOpts := ports.CreateOpts{
 		NetworkID:    opts.NetworkID,
 		Name:         opts.Name,
@@ -300,8 +328,10 @@ func CreatePortFull(ctx context.Context, client *gophercloud.ServiceClient, opts
 	var result portWithExt
 	err := ports.Create(ctx, client, createOpts).ExtractInto(&result)
 	if err != nil {
+		shared.Debugf("[network] create port (full) on network %s: %v", opts.NetworkID, err)
 		return nil, fmt.Errorf("creating port on network %s: %w", opts.NetworkID, err)
 	}
+	shared.Debugf("[network] created port (full) %s on network %s", result.ID, opts.NetworkID)
 	port := mapPort(result)
 	return &port, nil
 }
@@ -318,6 +348,7 @@ type PortUpdateOpts struct {
 
 // UpdatePort updates a port with the given options.
 func UpdatePort(ctx context.Context, client *gophercloud.ServiceClient, portID string, opts PortUpdateOpts) error {
+	shared.Debugf("[network] updating port %s", portID)
 	baseOpts := ports.UpdateOpts{}
 	if opts.Name != nil {
 		baseOpts.Name = opts.Name
@@ -346,22 +377,28 @@ func UpdatePort(ctx context.Context, client *gophercloud.ServiceClient, portID s
 
 	_, err := ports.Update(ctx, client, portID, updateOpts).Extract()
 	if err != nil {
+		shared.Debugf("[network] update port %s: %v", portID, err)
 		return fmt.Errorf("updating port %s: %w", portID, err)
 	}
+	shared.Debugf("[network] updated port %s", portID)
 	return nil
 }
 
 // DeletePort deletes a port by ID.
 func DeletePort(ctx context.Context, client *gophercloud.ServiceClient, portID string) error {
+	shared.Debugf("[network] deleting port %s", portID)
 	r := ports.Delete(ctx, client, portID)
 	if r.Err != nil {
+		shared.Debugf("[network] delete port %s: %v", portID, r.Err)
 		return fmt.Errorf("deleting port %s: %w", portID, r.Err)
 	}
+	shared.Debugf("[network] deleted port %s", portID)
 	return nil
 }
 
 // ListPorts fetches all ports for a given network.
 func ListPorts(ctx context.Context, client *gophercloud.ServiceClient, networkID string) ([]Port, error) {
+	shared.Debugf("[network] listing ports for network %s", networkID)
 	var result []Port
 	err := ports.List(client, ports.ListOpts{NetworkID: networkID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := extractPortsWithExt(page)
@@ -374,7 +411,9 @@ func ListPorts(ctx context.Context, client *gophercloud.ServiceClient, networkID
 		return true, nil
 	})
 	if err != nil {
+		shared.Debugf("[network] list ports for network %s: %v", networkID, err)
 		return nil, fmt.Errorf("listing ports for network %s: %w", networkID, err)
 	}
+	shared.Debugf("[network] listed %d ports for network %s", len(result), networkID)
 	return result, nil
 }

@@ -75,6 +75,7 @@ func (m *Model) Cfg() *config.Config {
 
 // Open shows the config overlay.
 func (m *Model) Open() {
+	shared.Debugf("[configview] open")
 	m.Visible = true
 	m.cursor = 0
 	m.editing = false
@@ -361,6 +362,9 @@ func (m *Model) applyAndSave() tea.Cmd {
 	config.ApplyAll(*m.cfg)
 	if err := m.cfg.Save(); err != nil {
 		m.errMsg = "save failed: " + err.Error()
+		shared.Debugf("[configview] save error: %s", err.Error())
+	} else {
+		shared.Debugf("[configview] saved config")
 	}
 	return func() tea.Msg { return shared.ConfigChangedMsg{} }
 }
