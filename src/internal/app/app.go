@@ -287,7 +287,7 @@ func (m Model) Init() tea.Cmd {
 		ver := m.version
 		ttl := m.updateCheckInterval
 		cmds = append(cmds, func() tea.Msg {
-			latest, dlURL, csURL, err := selfupdate.CheckLatestCached(ver, ttl)
+			latest, dlURL, csURL, err := selfupdate.CheckLatestCached(context.Background(), ver, ttl)
 			if err != nil || latest == "" {
 				return nil
 			}

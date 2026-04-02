@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -80,13 +81,13 @@ func TestCheckLatestCached_UsesCacheWithinTTL(t *testing.T) {
 	// Override checkFn to track if CheckLatest is called
 	called := false
 	origCheckFn := checkFn
-	checkFn = func(ver string) (string, string, string, error) {
+	checkFn = func(_ context.Context, ver string) (string, string, string, error) {
 		called = true
 		return "", "", "", nil
 	}
 	defer func() { checkFn = origCheckFn }()
 
-	latest, _, _, err := CheckLatestCached("v1.0.0", 24*time.Hour)
+	latest, _, _, err := CheckLatestCached(context.Background(), "v1.0.0", 24*time.Hour)
 	if err != nil {
 		t.Fatalf("CheckLatestCached: %v", err)
 	}
@@ -116,13 +117,13 @@ func TestCheckLatestCached_RefreshesExpiredCache(t *testing.T) {
 
 	called := false
 	origCheckFn := checkFn
-	checkFn = func(ver string) (string, string, string, error) {
+	checkFn = func(_ context.Context, ver string) (string, string, string, error) {
 		called = true
 		return "v2.0.0", "https://example.com/bin2", "https://example.com/SHA256SUMS2", nil
 	}
 	defer func() { checkFn = origCheckFn }()
 
-	latest, _, _, err := CheckLatestCached("v1.0.0", 24*time.Hour)
+	latest, _, _, err := CheckLatestCached(context.Background(), "v1.0.0", 24*time.Hour)
 	if err != nil {
 		t.Fatalf("CheckLatestCached: %v", err)
 	}
@@ -152,13 +153,13 @@ func TestCheckLatestCached_InvalidatesOnVersionChange(t *testing.T) {
 
 	called := false
 	origCheckFn := checkFn
-	checkFn = func(ver string) (string, string, string, error) {
+	checkFn = func(_ context.Context, ver string) (string, string, string, error) {
 		called = true
 		return "v2.0.0", "https://example.com/bin", "", nil
 	}
 	defer func() { checkFn = origCheckFn }()
 
-	_, _, _, err := CheckLatestCached("v1.5.0", 24*time.Hour)
+	_, _, _, err := CheckLatestCached(context.Background(), "v1.5.0", 24*time.Hour)
 	if err != nil {
 		t.Fatalf("CheckLatestCached: %v", err)
 	}

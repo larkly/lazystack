@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -43,7 +44,9 @@ func main() {
 	}
 
 	if *doUpdate {
-		latest, downloadURL, checksumsURL, err := selfupdate.CheckLatest(version)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		latest, downloadURL, checksumsURL, err := selfupdate.CheckLatest(ctx, version)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -53,7 +56,7 @@ func main() {
 			return
 		}
 		fmt.Printf("Updating lazystack %s → %s...\n", version, latest)
-		if err := selfupdate.Apply(downloadURL, checksumsURL); err != nil {
+		if err := selfupdate.Apply(ctx, downloadURL, checksumsURL); err != nil {
 			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
 			os.Exit(1)
 		}

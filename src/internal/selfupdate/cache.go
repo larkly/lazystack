@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -31,7 +32,7 @@ var CachePath = func() string {
 
 // checkFn is the function used to query for the latest version.
 // It is a variable so tests can override it.
-var checkFn = CheckLatest
+var checkFn func(context.Context, string) (string, string, string, error) = CheckLatest // overridable for tests
 
 // LoadCache reads the cached update-check result from disk.
 // Returns nil, nil if the file does not exist.
@@ -90,7 +91,7 @@ func SaveCache(entry CacheEntry) error {
 // if the cache is missing, expired (older than ttl), or was written
 // for a different binary version (i.e. the user upgraded via their
 // package manager).
-func CheckLatestCached(currentVersion string, ttl time.Duration) (latest, downloadURL, checksumsURL string, err error) {
+func CheckLatestCached(ctx context.Context, currentVersion string, ttl time.Duration) (latest, downloadURL, checksumsURL string, err error) {
 	shared.Debugf("[selfupdate] CheckLatestCached: start currentVersion=%s ttl=%s", currentVersion, ttl)
 	cache, _ := LoadCache()
 	if cache != nil && cache.CurrentVersion == currentVersion && time.Since(cache.CheckedAt) < ttl {
@@ -104,7 +105,7 @@ func CheckLatestCached(currentVersion string, ttl time.Duration) (latest, downlo
 	}
 
 	shared.Debugf("[selfupdate] CheckLatestCached: cache miss or expired, querying API")
-	latest, downloadURL, checksumsURL, err = checkFn(currentVersion)
+	latest, downloadURL, checksumsURL, err = checkFn(ctx, currentVersion)
 	if err != nil {
 		shared.Debugf("[selfupdate] CheckLatestCached: error from API: %v", err)
 		return "", "", "", err

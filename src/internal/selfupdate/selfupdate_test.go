@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"context"
 	"testing"
 )
 
@@ -84,48 +85,8 @@ func TestParseVersion_Invalid(t *testing.T) {
 	}
 }
 
-func TestJsonString(t *testing.T) {
-	json := `{"tag_name": "v0.1.1", "name": "Release v0.1.1"}`
-	tests := []struct {
-		key, want string
-	}{
-		{"tag_name", "v0.1.1"},
-		{"name", "Release v0.1.1"},
-		{"missing", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.key, func(t *testing.T) {
-			got := jsonString(json, tt.key)
-			if got != tt.want {
-				t.Errorf("jsonString(json, %q) = %q, want %q", tt.key, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestJsonArray(t *testing.T) {
-	json := `{"assets": [{"name": "bin-linux"}, {"name": "bin-darwin"}]}`
-	items := jsonArray(json, "assets")
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items))
-	}
-	if got := jsonString(items[0], "name"); got != "bin-linux" {
-		t.Errorf("first asset name = %q, want %q", got, "bin-linux")
-	}
-	if got := jsonString(items[1], "name"); got != "bin-darwin" {
-		t.Errorf("second asset name = %q, want %q", got, "bin-darwin")
-	}
-}
-
-func TestJsonArray_Missing(t *testing.T) {
-	items := jsonArray(`{"other": []}`, "assets")
-	if items != nil {
-		t.Errorf("expected nil for missing key, got %v", items)
-	}
-}
-
 func TestCheckLatest_DevBuild(t *testing.T) {
-	_, _, _, err := CheckLatest("dev")
+	_, _, _, err := CheckLatest(context.Background(), "dev")
 	if err == nil {
 		t.Error("expected error for dev build")
 	}
