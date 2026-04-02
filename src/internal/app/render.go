@@ -78,6 +78,8 @@ func (m Model) viewContent() string {
 		return m.help.Render()
 	}
 
+	// Overlay priority chain — overlays are mutually exclusive by design
+	// (each action activates at most one), so first-match ordering is safe.
 	if m.activeModal == modalConfirm {
 		return m.confirm.View()
 	}
