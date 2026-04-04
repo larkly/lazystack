@@ -208,7 +208,7 @@ func RebuildStyles() {
 		"RESIZE":            ColorWarning,
 		"VERIFY_RESIZE":     ColorWarning,
 		"MIGRATING":         ColorWarning,
-		"PAUSED":            ColorMuted,
+		"PAUSED":            ColorWarning,
 		"SUSPENDED":         ColorMuted,
 		"DELETED":           ColorError,
 		"SOFT_DELETED":      ColorError,
@@ -218,7 +218,7 @@ func RebuildStyles() {
 
 	PowerColors = map[string]color.Color{
 		"RUNNING":   ColorSuccess,
-		"PAUSED":    ColorMuted,
+		"PAUSED":    ColorWarning,
 		"SHUTDOWN":  ColorMuted,
 		"CRASHED":   ColorError,
 		"SUSPENDED": ColorMuted,
