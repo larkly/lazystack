@@ -99,6 +99,11 @@ type Model struct {
 	spinner         spinner.Model
 	err             string
 	refreshInterval time.Duration
+
+	// Adaptive polling state
+	detailRefreshInterval time.Duration  // Current adaptive interval for detail fetches
+	lastDetailFetch       time.Time      // When detail was last fetched
+	pollMode              string         // Current polling mode label ("fast", "medium", "slow", "capped")
 }
 
 // New creates a load balancer view model.
@@ -414,8 +419,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		cmds := []tea.Cmd{m.fetchLBs()}
-		if lb := m.SelectedLB(); lb != nil {
-			cmds = append(cmds, m.fetchDetail(lb.ID))
+		m, shouldRefresh := m.shouldRefreshDetail()
+		if shouldRefresh {
+			if lb := m.SelectedLB(); lb != nil {
+				cmds = append(cmds, m.fetchDetail(lb.ID))
+				m.lastDetailFetch = time.Now().UTC()
+			}
 		}
 		return m, tea.Batch(cmds...)
 
@@ -495,6 +504,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.searchInput.SetValue(m.searchFilter)
 			m.searchInput.Focus()
 			return m, m.searchInput.Focus()
+		}
+
+	case key.Matches(msg, shared.Keys.Refresh):
+		if !m.searchActive {
+			return m, m.ForceRefresh()
 		}
 	}
 	return m, nil
@@ -677,6 +691,65 @@ func (m *Model) resetDetailState() {
 	m.memberCursor = 0
 	m.memberScroll = 0
 	m.selectedMembers = make(map[string]bool)
+}
+
+// shouldRefreshDetail returns true if enough time has elapsed since the last
+// detail fetch based on the selected LB's provisioning/operating status.
+// Updates the adaptive interval and poll mode on the returned model.
+func (m Model) shouldRefreshDetail() (Model, bool) {
+	lb := m.SelectedLB()
+	if lb == nil {
+		return m, false
+	}
+
+	var interval time.Duration
+	var mode string
+
+	switch {
+	case hasPrefixAny(lb.ProvisioningStatus, "PENDING_CREATE", "PENDING_UPDATE", "PENDING_DELETE"):
+		interval = 2 * time.Second
+		mode = "fast"
+	case strings.HasPrefix(lb.OperatingStatus, "ERROR") || strings.HasPrefix(lb.OperatingStatus, "DEGRADED"):
+		interval = 5 * time.Second
+		mode = "medium"
+	case lb.OperatingStatus == "ONLINE":
+		interval = 15 * time.Second
+		mode = "slow"
+	case lb.OperatingStatus == "OFFLINE" || lb.OperatingStatus == "NO_MONITOR":
+		interval = 10 * time.Second
+		mode = "medium"
+	default:
+		// ACTIVE provisioning with unknown operating status
+		if lb.ProvisioningStatus == "ACTIVE" {
+			interval = 15 * time.Second
+			mode = "slow"
+		} else {
+			interval = 5 * time.Second
+			mode = "medium"
+		}
+	}
+
+	// Cap at 30s
+	if interval > 30*time.Second {
+		interval = 30 * time.Second
+		mode = "capped"
+	}
+
+	m.pollMode = mode
+	m.detailRefreshInterval = interval
+	if m.lastDetailFetch.IsZero() || time.Since(m.lastDetailFetch) >= interval {
+		return m, true
+	}
+	return m, false
+}
+
+func hasPrefixAny(s string, prefix string, prefixes ...string) bool {
+	for _, p := range append([]string{prefix}, prefixes...) {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Filter/search ---
@@ -1327,6 +1400,14 @@ func (m Model) renderInfoContent(maxWidth int) string {
 	summaryStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
 	rows = append(rows, summaryStyle.Render(fmt.Sprintf("%d listeners, %d pools", len(m.listeners), len(m.pools))))
 
+	// Poll status line
+	if !m.lastDetailFetch.IsZero() && m.pollMode != "" {
+		pollStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+		intervalStr := m.detailRefreshInterval.Round(time.Second).String()
+		when := m.lastDetailFetch.Local().Format("15:04:05")
+		rows = append(rows, pollStyle.Render(fmt.Sprintf("Poll: %s (every %s) · Refreshed: %s", m.pollMode, intervalStr, when)))
+	}
+
 	return strings.Join(rows, "\n")
 }
 
@@ -1955,6 +2036,9 @@ func (m *Model) ForceRefresh() tea.Cmd {
 		m.detailLoading = true
 		cmds = append(cmds, m.fetchDetail(lb.ID))
 	}
+	m.lastDetailFetch = time.Now().UTC()
+	// Reset adaptive interval so next TickMsg recalculates
+	m.detailRefreshInterval = 0
 	return tea.Batch(cmds...)
 }
 
