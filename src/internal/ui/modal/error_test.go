@@ -13,8 +13,21 @@ func TestNewError(t *testing.T) {
 	if m.Context != "deleting server" {
 		t.Errorf("Context = %q, want %q", m.Context, "deleting server")
 	}
-	if m.Err != "connection refused" {
-		t.Errorf("Err = %q, want %q", m.Err, "connection refused")
+	if m.FriendlyError == "" {
+		t.Error("expected non-empty FriendlyError")
+	}
+	if m.RawError == "" {
+		t.Error("expected non-empty RawError")
+	}
+	if m.ShowDetails != false {
+		t.Error("expected ShowDetails to be false initially")
+	}
+}
+
+func TestErrorCategories(t *testing.T) {
+	m := NewError("test network", errors.New("connection refused"))
+	if m.FriendlyError != "Network error — check connectivity and try again." {
+		t.Errorf("expected network error message, got %q", m.FriendlyError)
 	}
 }
 
@@ -41,6 +54,45 @@ func TestEscDismisses(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(ErrorDismissedMsg); !ok {
 		t.Fatalf("expected ErrorDismissedMsg, got %T", msg)
+	}
+}
+
+func TestDToggleDetails(t *testing.T) {
+	m := NewError("test", errors.New("fail"))
+
+	// Initial state: not expanded.
+	if m.ShowDetails != false {
+		t.Error("expected ShowDetails to be false initially")
+	}
+
+	// Press 'd' to expand.
+	m, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
+	if cmd != nil {
+		t.Error("expected nil cmd for d key")
+	}
+	if m.ShowDetails != true {
+		t.Error("expected ShowDetails to be true after pressing d")
+	}
+
+	// Press 'd' again to collapse.
+	m, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
+	if cmd != nil {
+		t.Error("expected nil cmd for d key")
+	}
+	if m.ShowDetails != false {
+		t.Error("expected ShowDetails to be false after second d")
+	}
+}
+
+func TestUpperDToggleDetails(t *testing.T) {
+	m := NewError("test", errors.New("fail"))
+
+	m, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'D', Text: "D"}))
+	if cmd != nil {
+		t.Error("expected nil cmd for D key")
+	}
+	if m.ShowDetails != true {
+		t.Error("expected ShowDetails to be true after pressing D")
 	}
 }
 

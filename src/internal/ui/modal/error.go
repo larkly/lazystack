@@ -1,6 +1,8 @@
 package modal
 
 import (
+	"strings"
+
 	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
@@ -12,18 +14,25 @@ type ErrorDismissedMsg struct{}
 
 // ErrorModel is an error display modal.
 type ErrorModel struct {
-	Context string
-	Err     string
-	Width   int
-	Height  int
+	Context        string
+	FriendlyError  string // User-friendly message
+	RawError       string // Full raw error (expandable)
+	ShowDetails    bool   // Whether details are expanded
+	HTTPStatusCode int    // For display
+	Width          int
+	Height         int
 }
 
 // NewError creates an error modal.
 func NewError(context string, err error) ErrorModel {
 	shared.Debugf("[error] shown context=%s err=%v", context, err)
+	parsed := shared.ParseError(err)
 	return ErrorModel{
-		Context: context,
-		Err:     err.Error(),
+		Context:       context,
+		FriendlyError: parsed.FriendlyMessage,
+		RawError:      parsed.RawError,
+		HTTPStatusCode: parsed.HTTPStatusCode,
+		ShowDetails:   false,
 	}
 }
 
@@ -37,6 +46,11 @@ func (m ErrorModel) Update(msg tea.Msg) (ErrorModel, tea.Cmd) {
 			shared.Debugf("[error] dismissed context=%s", m.Context)
 			return m, func() tea.Msg {
 				return ErrorDismissedMsg{}
+			}
+		default:
+			if strings.ToLower(msg.String()) == "d" {
+				m.ShowDetails = !m.ShowDetails
+				return m, nil
 			}
 		}
 	case tea.WindowSizeMsg:
@@ -56,7 +70,17 @@ func (m ErrorModel) View() string {
 
 	body := lipgloss.NewStyle().
 		Foreground(shared.ColorFg).
-		Render(m.Err)
+		Render(m.FriendlyError)
+
+	// Build details section if expanded.
+	details := ""
+	if m.ShowDetails {
+		detailStyle := lipgloss.NewStyle().
+			Foreground(shared.ColorMuted).
+			MarginTop(1).
+			Padding(0, 1)
+		details = detailStyle.Render("Raw: " + m.RawError)
+	}
 
 	btnStyle := lipgloss.NewStyle().
 		Padding(0, 3).
@@ -65,7 +89,13 @@ func (m ErrorModel) View() string {
 		Bold(true)
 	button := btnStyle.Render("[enter] OK")
 
-	content := title + "\n\n" + body + "\n\n" + button
+	detailLabel := "[d] Details"
+	if m.ShowDetails {
+		detailLabel = "[d] Hide"
+	}
+	help := detailLabel
+
+	content := title + "\n\n" + body + details + "\n\n" + button + "  " + help
 	box := shared.StyleErrorModal.Width(60).Render(content)
 
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, box)
