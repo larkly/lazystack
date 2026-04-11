@@ -8,7 +8,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 )
 
-var urlPattern = regexp.MustCompile(`https?://[^\s"']+`)
+var urlPattern = regexp.MustCompile(`https?://[^\\s\"']+`)
 
 // Network error patterns to detect connectivity issues.
 var networkPatterns = []string{"timeout", "connection refused", "dial", "network"}
@@ -80,8 +80,19 @@ func ParseError(err error) *ParsedError {
 		}
 	}
 
-	// Check for network-related error patterns.
 	lowerRaw := strings.ToLower(raw)
+
+	// Check for quota-related patterns in raw error if status code wasn't enough.
+	if strings.Contains(lowerRaw, "quota exceeded") || strings.Contains(lowerRaw, "limit exceeded") {
+		return &ParsedError{
+			FriendlyMessage: "Quota exceeded — free up resources or contact your cloud admin.",
+			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
+			HTTPStatusCode:  0,
+			Category:        "quota",
+		}
+	}
+
+	// Check for network-related error patterns.
 	for _, pattern := range networkPatterns {
 		if strings.Contains(lowerRaw, pattern) {
 			return &ParsedError{
