@@ -26,7 +26,7 @@ func EnableDebug() error {
 		return err
 	}
 	path := filepath.Join(dir, "debug.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
