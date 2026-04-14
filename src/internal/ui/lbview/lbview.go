@@ -706,7 +706,7 @@ func (m Model) shouldRefreshDetail() (Model, bool) {
 	var mode string
 
 	switch {
-	case hasPrefixAny(lb.ProvisioningStatus, "PENDING_CREATE", "PENDING_UPDATE", "PENDING_DELETE"):
+	case strings.HasPrefix(lb.ProvisioningStatus, "PENDING_"):
 		interval = 2 * time.Second
 		mode = "fast"
 	case strings.HasPrefix(lb.OperatingStatus, "ERROR") || strings.HasPrefix(lb.OperatingStatus, "DEGRADED"):
@@ -729,27 +729,12 @@ func (m Model) shouldRefreshDetail() (Model, bool) {
 		}
 	}
 
-	// Cap at 30s
-	if interval > 30*time.Second {
-		interval = 30 * time.Second
-		mode = "capped"
-	}
-
 	m.pollMode = mode
 	m.detailRefreshInterval = interval
 	if m.lastDetailFetch.IsZero() || time.Since(m.lastDetailFetch) >= interval {
 		return m, true
 	}
 	return m, false
-}
-
-func hasPrefixAny(s string, prefix string, prefixes ...string) bool {
-	for _, p := range append([]string{prefix}, prefixes...) {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-	return false
 }
 
 // --- Filter/search ---
