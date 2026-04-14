@@ -18,15 +18,27 @@ type QuotaUsage struct {
 	Limit    int
 }
 
+// requireProjectID guards against empty project IDs, which would otherwise
+// produce a malformed /os-quota-sets//detail URL at the OpenStack API layer.
+func requireProjectID(projectID string) error {
+	if projectID == "" {
+		return fmt.Errorf("projectID is required")
+	}
+	return nil
+}
+
 // GetComputeQuotas returns compute quota usage.
 func GetComputeQuotas(ctx context.Context, client *gophercloud.ServiceClient, projectID string) ([]QuotaUsage, error) {
 	shared.Debugf("[quota] GetComputeQuotas: start projectID=%s", projectID)
+	if err := requireProjectID(projectID); err != nil {
+		shared.Debugf("[quota] GetComputeQuotas: %v", err)
+		return nil, err
+	}
 	detail, err := computequotas.GetDetail(ctx, client, projectID).Extract()
 	if err != nil {
 		shared.Debugf("[quota] GetComputeQuotas: error: %v", err)
 		return nil, fmt.Errorf("compute quotas: %w", err)
 	}
-	shared.Debugf("[quota] GetComputeQuotas: success count=5")
 	return []QuotaUsage{
 		{Resource: "Instances", Used: detail.Instances.InUse, Limit: detail.Instances.Limit},
 		{Resource: "Cores", Used: detail.Cores.InUse, Limit: detail.Cores.Limit},
@@ -39,12 +51,15 @@ func GetComputeQuotas(ctx context.Context, client *gophercloud.ServiceClient, pr
 // GetNetworkQuotas returns network quota usage.
 func GetNetworkQuotas(ctx context.Context, client *gophercloud.ServiceClient, projectID string) ([]QuotaUsage, error) {
 	shared.Debugf("[quota] GetNetworkQuotas: start projectID=%s", projectID)
+	if err := requireProjectID(projectID); err != nil {
+		shared.Debugf("[quota] GetNetworkQuotas: %v", err)
+		return nil, err
+	}
 	detail, err := networkquotas.GetDetail(ctx, client, projectID).Extract()
 	if err != nil {
 		shared.Debugf("[quota] GetNetworkQuotas: error: %v", err)
 		return nil, fmt.Errorf("network quotas: %w", err)
 	}
-	shared.Debugf("[quota] GetNetworkQuotas: success count=6")
 	return []QuotaUsage{
 		{Resource: "Floating IPs", Used: detail.FloatingIP.Used, Limit: detail.FloatingIP.Limit},
 		{Resource: "Networks", Used: detail.Network.Used, Limit: detail.Network.Limit},
@@ -58,12 +73,15 @@ func GetNetworkQuotas(ctx context.Context, client *gophercloud.ServiceClient, pr
 // GetVolumeQuotas returns block storage quota usage.
 func GetVolumeQuotas(ctx context.Context, client *gophercloud.ServiceClient, projectID string) ([]QuotaUsage, error) {
 	shared.Debugf("[quota] GetVolumeQuotas: start projectID=%s", projectID)
+	if err := requireProjectID(projectID); err != nil {
+		shared.Debugf("[quota] GetVolumeQuotas: %v", err)
+		return nil, err
+	}
 	usage, err := bsquotas.GetUsage(ctx, client, projectID).Extract()
 	if err != nil {
 		shared.Debugf("[quota] GetVolumeQuotas: error: %v", err)
 		return nil, fmt.Errorf("volume quotas: %w", err)
 	}
-	shared.Debugf("[quota] GetVolumeQuotas: success count=4")
 	return []QuotaUsage{
 		{Resource: "Volumes", Used: usage.Volumes.InUse, Limit: usage.Volumes.Limit},
 		{Resource: "Gigabytes", Used: usage.Gigabytes.InUse, Limit: usage.Gigabytes.Limit},
