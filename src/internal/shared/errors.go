@@ -8,7 +8,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 )
 
-var urlPattern = regexp.MustCompile(`https?://[^\\s\"']+`)
+var urlPattern = regexp.MustCompile(`https?://[^\s"']+`)
 
 // Network error patterns to detect connectivity issues.
 var networkPatterns = []string{"timeout", "connection refused", "dial", "network"}
@@ -108,7 +108,7 @@ func ParseError(err error) *ParsedError {
 	sanitized := urlPattern.ReplaceAllString(raw, "[endpoint]")
 	return &ParsedError{
 		FriendlyMessage: sanitized,
-		RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
+		RawError:        sanitized,
 		HTTPStatusCode:  0,
 		Category:        "unknown",
 	}

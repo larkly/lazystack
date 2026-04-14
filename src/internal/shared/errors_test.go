@@ -179,6 +179,43 @@ func TestParseError_URLSanitization(t *testing.T) {
 	}
 }
 
+// Test that text surrounding a URL is preserved after sanitization.
+// Regression: a broken regex (`[^\\s\"']+` in a raw string) greedily consumed
+// past whitespace and mangled the text following the URL.
+func TestParseError_PreservesTextAfterURL(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		wantSub string
+	}{
+		{
+			name:    "keystone auth error with trailing text",
+			input:   "Got 401 from https://keystone.foo.com:5000/v3/auth/tokens when authenticating user",
+			wantSub: "when authenticating user",
+		},
+		{
+			name:    "network reach error with trailing text",
+			input:   "failed to reach https://network.example.com:9696 because the server is down",
+			wantSub: "because the server is down",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed := ParseError(errors.New(tc.input))
+			if !strings.Contains(parsed.RawError, tc.wantSub) {
+				t.Errorf("text after URL lost: got RawError=%q, want to contain %q",
+					parsed.RawError, tc.wantSub)
+			}
+			if strings.Contains(parsed.RawError, "https://") {
+				t.Errorf("URL not sanitized: %q", parsed.RawError)
+			}
+			if !strings.Contains(parsed.RawError, "[endpoint]") {
+				t.Errorf("expected [endpoint] replacement: %q", parsed.RawError)
+			}
+		})
+	}
+}
+
 // Test nil error handling.
 func TestParseError_Nil(t *testing.T) {
 	parsed := ParseError(nil)
