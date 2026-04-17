@@ -20,6 +20,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/cloneprogress"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
 	"github.com/larkly/lazystack/internal/ui/configview"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/consoleurl"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
@@ -122,6 +123,7 @@ type Model struct {
 	height              int
 	client              *cloud.Client
 	cloudPicker         cloudpicker.Model
+	copyPicker          copypicker.Model
 	serverList          serverlist.Model
 	serverDetail        serverdetail.Model
 	serverCreate        servercreate.Model
@@ -316,6 +318,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.serverSnapshot.SetSize(m.width, m.height)
 		m.serverResize.SetSize(m.width, m.height)
 		m.sshPrompt.SetSize(m.width, m.height)
+		m.copyPicker.SetSize(m.width, m.height)
 		m.consoleURL.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
 		m.serverPicker.SetSize(m.width, m.height)
@@ -413,6 +416,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sshPrompt.Active {
 			var cmd tea.Cmd
 			m.sshPrompt, cmd = m.sshPrompt.Update(msg)
+			return m, cmd
+		}
+
+		// Copy picker modal intercepts all keys when active
+		if m.copyPicker.Active {
+			var cmd tea.Cmd
+			m.copyPicker, cmd = m.copyPicker.Update(msg)
 			return m, cmd
 		}
 
@@ -634,6 +644,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Global force refresh
 		if key.Matches(msg, shared.Keys.Refresh) && m.view != viewCloudPicker {
 			return m.forceRefreshActiveView()
+		}
+
+		// Global copy-field picker
+		if key.Matches(msg, shared.Keys.Copy) && m.view != viewCloudPicker {
+			return m.openCopyPicker()
 		}
 
 		if m.view == viewServerList || m.view == viewServerDetail {
@@ -1198,6 +1213,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case modal.ErrorDismissedMsg:
 		m.activeModal = modalNone
+		return m, nil
+
+	case copypicker.ChosenMsg:
+		return m.copyToClipboard(msg.Label, msg.Value), nil
+
+	case copypicker.CancelledMsg:
 		return m, nil
 
 	case sshprompt.SSHConnectMsg:

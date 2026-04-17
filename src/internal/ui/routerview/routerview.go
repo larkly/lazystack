@@ -9,6 +9,7 @@ import (
 
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
@@ -132,6 +133,32 @@ func (m Model) SelectedInterfaceSubnetID() string {
 		return ""
 	}
 	return m.interfaces[m.interfaceCursor].SubnetID
+}
+
+// CopyEntries returns the title and copyable fields for the selected
+// router. When the interfaces pane is focused, the focused interface's
+// subnet ID and IP are added.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	r := m.selectedRouter()
+	if r == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("ID", r.ID).
+		Add("Name", r.Name).
+		Add("External Gateway IPv4", r.ExternalGatewayIPv4).
+		Add("External Gateway IPv6", r.ExternalGatewayIPv6).
+		Add("External Network ID", r.ExternalGatewayNetworkID)
+	if iface := m.SelectedInterface(); iface != nil {
+		b.Add("Interface Subnet ID", iface.SubnetID).
+			Add("Interface Port ID", iface.PortID).
+			Add("Interface IP", iface.IPAddress)
+	}
+	name := r.Name
+	if name == "" {
+		name = r.ID
+	}
+	return "Copy — router " + name, b.Entries()
 }
 
 // SelectedInterface returns the full RouterInterface for the selected interface.

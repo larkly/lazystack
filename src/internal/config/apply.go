@@ -114,6 +114,7 @@ var keybindingFieldMap = map[string]func(b key.Binding){
 	"jump_networks":   func(b key.Binding) { shared.Keys.JumpNetworks = b },
 	"ssh":             func(b key.Binding) { shared.Keys.SSH = b },
 	"copy_ssh":        func(b key.Binding) { shared.Keys.CopySSH = b },
+	"copy":            func(b key.Binding) { shared.Keys.Copy = b },
 	"console_url":     func(b key.Binding) { shared.Keys.ConsoleURL = b },
 	"config":          func(b key.Binding) { shared.Keys.Config = b },
 }
@@ -172,6 +173,7 @@ var defaultHelpText = map[string]string{
 	"jump_networks":   "jump to networks",
 	"ssh":             "SSH into server",
 	"copy_ssh":        "copy SSH command",
+	"copy":            "copy field...",
 	"console_url":     "console URL (noVNC)",
 	"config":          "config",
 }

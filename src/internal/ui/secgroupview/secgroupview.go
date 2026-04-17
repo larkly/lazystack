@@ -10,6 +10,7 @@ import (
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
@@ -131,6 +132,27 @@ func (m Model) SelectedGroupName() string {
 		return sg.Name
 	}
 	return ""
+}
+
+// CopyEntries returns the title and copyable fields for the selected
+// security group, with extras for the focused rule or attached server
+// when one of those panes has focus.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	sg := m.selectedSG()
+	if sg == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("ID", sg.ID).Add("Name", sg.Name)
+	if m.focus == FocusRules {
+		if r := m.SelectedRule(); r != nil {
+			b.Add("Rule ID", r.ID)
+		}
+	}
+	if m.focus == focusServers {
+		b.Add("Attached server ID", m.SelectedServerID())
+	}
+	return "Copy — security group " + sg.Name, b.Entries()
 }
 
 // SGDescription returns the description of the currently selected group.

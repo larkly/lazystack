@@ -10,6 +10,7 @@ import (
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
@@ -177,6 +178,33 @@ func (m Model) SelectedSubnet() *network.Subnet {
 // FocusedPane returns the currently focused pane.
 func (m Model) FocusedPane() focusPane {
 	return m.focus
+}
+
+// CopyEntries returns the title and copyable fields for the selected
+// network, with extras for the focused subnet/port when that pane is in
+// focus.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	n := m.selectedNetwork()
+	if n == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("Network ID", n.ID).Add("Network Name", n.Name)
+	if sub := m.SelectedSubnet(); sub != nil {
+		b.Add("Subnet ID", sub.ID).
+			Add("Subnet Name", sub.Name).
+			Add("CIDR", sub.CIDR).
+			Add("Gateway", sub.GatewayIP)
+	}
+	if p := m.SelectedPort(); p != nil {
+		b.Add("Port ID", p.ID).
+			Add("Port Name", p.Name).
+			Add("MAC", p.MACAddress)
+		for _, ip := range p.FixedIPs {
+			b.Add("Fixed IP", ip.IPAddress)
+		}
+	}
+	return "Copy — network " + n.Name, b.Entries()
 }
 
 // InSubnets returns true when the subnets pane is focused.

@@ -170,6 +170,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `c` | Clone server |
 | `x` | SSH into server |
 | `y` | Copy SSH command |
+| `Y` | Copy field (ID, IP, name, …) |
 | `V` | Console URL (noVNC) |
 | `L` | Console log |
 | `a` | Action history |
@@ -197,6 +198,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `c` | Clone server |
 | `x` | SSH into server |
 | `y` | Copy SSH command |
+| `Y` | Copy field (ID, IP, name, …) |
 | `V` | Console URL (noVNC) |
 | `v` | Jump to volumes |
 | `g` | Jump to security groups |
@@ -214,6 +216,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+D` | Delete |
 | `Ctrl+A` | Attach to server (from detail) |
 | `Ctrl+T` | Detach (from detail) |
+| `Y` | Copy field (ID, name) |
 
 ### Floating IPs
 
@@ -222,6 +225,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+N` | Allocate |
 | `Ctrl+T` | Disassociate |
 | `Ctrl+D` | Release |
+| `Y` | Copy field (ID, floating IP, fixed IP, port ID) |
 
 ### Security groups
 
@@ -230,6 +234,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Enter` | Expand / collapse rules |
 | `Ctrl+N` | Create group (or add rule when in rules) |
 | `Ctrl+D` | Delete group (or rule when in rules) |
+| `Y` | Copy field (ID, name, rule/server ID when focused) |
 
 ### Networks
 
@@ -238,6 +243,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Enter` | Expand / collapse subnets |
 | `Ctrl+N` | Create network (or subnet when expanded) |
 | `Ctrl+D` | Delete network (or subnet in subnets) |
+| `Y` | Copy field (network/subnet/port ID, CIDR, IP, MAC) |
 
 ### Routers
 
@@ -248,6 +254,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+D` | Delete router |
 | `Ctrl+A` | Add interface (from detail) |
 | `Ctrl+T` | Remove interface (from detail) |
+| `Y` | Copy field (ID, name, gateway IP, interface subnet/port/IP) |
 
 ### Key pairs
 
@@ -256,6 +263,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Enter` | View detail (public key) |
 | `Ctrl+N` | Create / import |
 | `Ctrl+D` | Delete |
+| `Y` | Copy field (name, public key in detail) |
 
 ### Load balancers
 
@@ -263,6 +271,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 |-----|--------|
 | `Enter` | View detail tree |
 | `Ctrl+D` | Delete (cascade) |
+| `Y` | Copy field (LB ID/name/VIP, listener/pool/member ID when focused) |
 
 ### Images
 
@@ -270,6 +279,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 |-----|--------|
 | `Enter` | View detail |
 | `Ctrl+D` | Delete image |
+| `Y` | Copy field (ID, name, checksum, owner, attached server ID) |
 
 ### Create form
 
