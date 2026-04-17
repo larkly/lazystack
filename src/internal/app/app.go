@@ -1160,7 +1160,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latestVersion = msg.Latest
 		m.downloadURL = msg.DownloadURL
 		m.checksumsURL = msg.ChecksumsURL
-		m.statusBar.Hint = fmt.Sprintf("Upgrade available: %s", msg.Latest)
+		if msg.ChecksumsURL == "" {
+			m.statusBar.StickyHint = fmt.Sprintf("update %s skipped: checksums unavailable", msg.Latest)
+		} else {
+			m.statusBar.Hint = fmt.Sprintf("Upgrade available: %s", msg.Latest)
+		}
 		return m, nil
 
 	case shared.ConfigChangedMsg:

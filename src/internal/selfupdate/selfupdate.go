@@ -145,14 +145,16 @@ func Apply(ctx context.Context, downloadURL, checksumsURL string) error {
 
 	got := hex.EncodeToString(hasher.Sum(nil))
 
-	if checksumsURL != "" {
-		shared.Debugf("[selfupdate] Apply: verifying checksum")
-		if err := verifyChecksum(ctx, checksumsURL, got); err != nil {
-			shared.Debugf("[selfupdate] Apply: error checksum verification: %v", err)
-			return err
-		}
-		shared.Debugf("[selfupdate] Apply: checksum verified")
+	if checksumsURL == "" {
+		shared.Debugf("[selfupdate] Apply: refusing to install without checksums")
+		return fmt.Errorf("refusing to apply update: release has no SHA256SUMS asset")
 	}
+	shared.Debugf("[selfupdate] Apply: verifying checksum")
+	if err := verifyChecksum(ctx, checksumsURL, got); err != nil {
+		shared.Debugf("[selfupdate] Apply: error checksum verification: %v", err)
+		return err
+	}
+	shared.Debugf("[selfupdate] Apply: checksum verified")
 
 	if err := os.Chmod(tmpPath, 0755); err != nil {
 		shared.Debugf("[selfupdate] Apply: error setting permissions: %v", err)
