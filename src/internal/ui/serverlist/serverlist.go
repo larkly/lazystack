@@ -171,7 +171,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.columns = ComputeWidths(m.columns, m.width)
+		m.recomputeColumns()
 		return m, nil
 
 	case sortClearMsg:
@@ -351,6 +351,28 @@ func (m *Model) applyFilter() {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
 	m.scrollOff = 0
+	m.recomputeColumns()
+}
+
+// maxContentWidths returns the longest rendered value (in bytes, matching
+// the truncation logic in renderServerRow) for each column key across the
+// current filtered set. Keys with no data are omitted, which leaves those
+// columns uncapped in ComputeWidths.
+func (m Model) maxContentWidths() map[string]int {
+	result := make(map[string]int, len(m.columns))
+	for _, s := range m.filtered {
+		values := serverValues(s)
+		for k, v := range values {
+			if n := len(v); n > result[k] {
+				result[k] = n
+			}
+		}
+	}
+	return result
+}
+
+func (m *Model) recomputeColumns() {
+	m.columns = ComputeWidths(m.columns, m.width, m.maxContentWidths())
 }
 
 func (m Model) visibleColCount() int {
@@ -546,25 +568,17 @@ func (m Model) renderRow(render func(Column) string) string {
 	return "  " + strings.Join(parts, " ")
 }
 
-func (m Model) renderServerRow(s compute.Server, cursor bool) string {
-	// Build combined status: "ACTIVE/RUNNING"
-	statusVal := shared.StatusIcon(s.Status) + s.Status + "/" + s.PowerState
-
-	// Selection and lock indicators on name
+// serverValues returns the rendered string for each column key for the given
+// server. Shared by row rendering and content-width measurement so the two
+// stay in sync.
+func serverValues(s compute.Server) map[string]string {
 	nameVal := s.Name
 	if s.Locked {
 		nameVal = "🔒 " + nameVal
 	}
-
-	// Row prefix: selection marker
-	prefix := "  "
-	if m.selected[s.ID] {
-		prefix = "● "
-	}
-
-	values := map[string]string{
+	return map[string]string{
 		"name":     nameVal,
-		"status":   statusVal,
+		"status":   shared.StatusIcon(s.Status) + s.Status + "/" + s.PowerState,
 		"ipv4":     strings.Join(s.IPv4, ", "),
 		"ipv6":     strings.Join(s.IPv6, ", "),
 		"floating": strings.Join(s.FloatingIP, ", "),
@@ -573,6 +587,16 @@ func (m Model) renderServerRow(s compute.Server, cursor bool) string {
 		"age":      formatAge(s.Created),
 		"key":      s.KeyName,
 		"id":       s.ID,
+	}
+}
+
+func (m Model) renderServerRow(s compute.Server, cursor bool) string {
+	values := serverValues(s)
+
+	// Row prefix: selection marker
+	prefix := "  "
+	if m.selected[s.ID] {
+		prefix = "● "
 	}
 
 	isSelected := m.selected[s.ID]
@@ -596,7 +620,11 @@ func (m Model) renderServerRow(s compute.Server, cursor bool) string {
 		val := values[col.Key]
 		w := col.Width()
 		if len(val) > w && w > 1 {
-			val = val[:w-1] + "…"
+			if col.Key == "ipv6" {
+				val = "…" + val[len(val)-(w-1):]
+			} else {
+				val = val[:w-1] + "…"
+			}
 		}
 
 		style := lipgloss.NewStyle().Width(w)
@@ -792,5 +820,5 @@ func (m *Model) SetClient(client *gophercloud.ServiceClient) {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	m.columns = ComputeWidths(m.columns, w)
+	m.recomputeColumns()
 }

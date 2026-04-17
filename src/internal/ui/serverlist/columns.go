@@ -19,10 +19,10 @@ type Column struct {
 // DefaultColumns returns the standard server list columns, ordered by display position.
 func DefaultColumns() []Column {
 	return []Column{
-		{Title: "Name", MinWidth: 10, Flex: 2, Priority: 0, Key: "name"},
-		{Title: "Status", MinWidth: 20, Flex: 0, Priority: 0, Key: "status"},
+		{Title: "Name", MinWidth: 20, Flex: 4, Priority: 0, Key: "name"},
+		{Title: "Status", MinWidth: 16, Flex: 1, Priority: 0, Key: "status"},
 		{Title: "IPv4", MinWidth: 12, Flex: 1, Priority: 1, Key: "ipv4"},
-		{Title: "IPv6", MinWidth: 20, Flex: 4, Priority: 5, Key: "ipv6"},
+		{Title: "IPv6", MinWidth: 15, Flex: 1, Priority: 5, Key: "ipv6"},
 		{Title: "Floating IP", MinWidth: 12, Flex: 1, Priority: 3, Key: "floating"},
 		{Title: "Flavor", MinWidth: 10, Flex: 2, Priority: 1, Key: "flavor"},
 		{Title: "Image", MinWidth: 10, Flex: 2, Priority: 2, Key: "image"},
@@ -33,7 +33,13 @@ func DefaultColumns() []Column {
 
 // ComputeWidths distributes available width across visible columns,
 // hiding low-priority columns when there isn't enough space.
-func ComputeWidths(columns []Column, totalWidth int) []Column {
+//
+// maxContent optionally caps each column's growth to the longest actual value
+// in the current data (keyed by Column.Key). When a column would otherwise
+// grow past its content max, it stops at the cap and the leftover space
+// redistributes to other flex columns. Pass nil (or an empty map) to disable
+// capping and fall back to pure flex distribution.
+func ComputeWidths(columns []Column, totalWidth int, maxContent map[string]int) []Column {
 	// Reset visibility
 	for i := range columns {
 		columns[i].hidden = false
@@ -61,17 +67,15 @@ func ComputeWidths(columns []Column, totalWidth int) []Column {
 		}
 	}
 
-	// Now distribute space among visible columns
+	// Compute visible column stats.
 	gaps := -1 // spaces between columns
 	totalMin := 0
-	totalFlex := 0
 	for _, c := range columns {
 		if c.hidden {
 			continue
 		}
 		gaps++
 		totalMin += c.MinWidth
-		totalFlex += c.Flex
 	}
 	if gaps < 0 {
 		gaps = 0
@@ -83,14 +87,75 @@ func ComputeWidths(columns []Column, totalWidth int) []Column {
 	}
 
 	remaining := available - totalMin
-	if remaining > 0 && totalFlex > 0 {
-		for i := range columns {
-			if columns[i].hidden || columns[i].Flex == 0 {
+	if remaining <= 0 {
+		return columns
+	}
+
+	// Content-aware growth cap per column. -1 means no cap (unbounded).
+	cap := func(col Column) int {
+		if maxContent == nil {
+			return -1
+		}
+		v, ok := maxContent[col.Key]
+		if !ok || v <= 0 {
+			return -1
+		}
+		if v < col.MinWidth {
+			return col.MinWidth
+		}
+		return v
+	}
+
+	// Iteratively distribute remaining space by flex. Columns that would
+	// exceed their content cap lock to the cap; their excess goes back into
+	// the pool for other columns.
+	locked := make([]bool, len(columns))
+	for {
+		totalFlex := 0
+		for i, c := range columns {
+			if c.hidden || c.Flex == 0 || locked[i] {
 				continue
 			}
-			extra := remaining * columns[i].Flex / totalFlex
-			columns[i].width += extra
+			totalFlex += c.Flex
 		}
+		if totalFlex == 0 || remaining <= 0 {
+			break
+		}
+
+		newlyLocked := false
+		for i, c := range columns {
+			if c.hidden || c.Flex == 0 || locked[i] {
+				continue
+			}
+			share := remaining * c.Flex / totalFlex
+			ceiling := cap(c)
+			maxGrow := -1
+			if ceiling >= 0 {
+				maxGrow = ceiling - columns[i].width
+				if maxGrow < 0 {
+					maxGrow = 0
+				}
+			}
+			if maxGrow >= 0 && share >= maxGrow {
+				columns[i].width += maxGrow
+				remaining -= maxGrow
+				locked[i] = true
+				newlyLocked = true
+			}
+		}
+
+		if newlyLocked {
+			continue
+		}
+
+		// No more caps hit: distribute the rest by flex to uncapped columns.
+		for i, c := range columns {
+			if c.hidden || c.Flex == 0 || locked[i] {
+				continue
+			}
+			columns[i].width += remaining * c.Flex / totalFlex
+		}
+		break
 	}
 
 	return columns
