@@ -657,6 +657,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Volume detach from server detail volumes pane
 			if m.view == viewServerDetail && m.serverDetail.FocusedOnVolumes() {
 				if key.Matches(msg, shared.Keys.Detach) {
+					if !m.blockStorageAvailable() {
+						m.statusBar.StickyHint = "Block storage unavailable in this cloud"
+						return m, nil
+					}
 					return m.openServerVolumeDetach()
 				}
 			}
@@ -720,6 +724,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.doRevertResize()
 			}
 			if key.Matches(msg, shared.Keys.Attach) {
+				if !m.blockStorageAvailable() {
+					m.statusBar.StickyHint = "Block storage unavailable in this cloud"
+					return m, nil
+				}
 				return m.openServerVolumeAttach()
 			}
 			if key.Matches(msg, shared.Keys.AssignFIP) {

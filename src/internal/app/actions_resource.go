@@ -79,7 +79,18 @@ func (m Model) openVolumeDeleteConfirm() (Model, tea.Cmd) {
 	return m, nil
 }
 
+// blockStorageAvailable reports whether the connected cloud exposes a
+// Cinder (block storage) endpoint. Volume attach/detach/create/delete flows
+// depend on this client being non-nil; callers must gate on this before
+// invoking any volume action.
+func (m Model) blockStorageAvailable() bool {
+	return m.client.BlockStorage != nil
+}
+
 func (m Model) openVolumeAttach() (Model, tea.Cmd) {
+	if !m.blockStorageAvailable() {
+		return m, nil
+	}
 	var id, name string
 	switch m.view {
 	case viewVolumeDetail:
@@ -102,6 +113,9 @@ func (m Model) openVolumeAttach() (Model, tea.Cmd) {
 }
 
 func (m Model) openVolumeDetach() (Model, tea.Cmd) {
+	if !m.blockStorageAvailable() {
+		return m, nil
+	}
 	var id, name string
 	switch m.view {
 	case viewVolumeDetail:
@@ -130,6 +144,9 @@ func (m Model) openVolumeDetach() (Model, tea.Cmd) {
 }
 
 func (m Model) openServerVolumeAttach() (Model, tea.Cmd) {
+	if !m.blockStorageAvailable() {
+		return m, nil
+	}
 	var serverID, serverName string
 	switch m.view {
 	case viewServerDetail:
@@ -152,6 +169,9 @@ func (m Model) openServerVolumeAttach() (Model, tea.Cmd) {
 }
 
 func (m Model) openServerVolumeDetach() (Model, tea.Cmd) {
+	if !m.blockStorageAvailable() {
+		return m, nil
+	}
 	if m.view != viewServerDetail {
 		return m, nil
 	}
