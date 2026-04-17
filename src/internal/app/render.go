@@ -173,6 +173,9 @@ func (m Model) viewContent() string {
 	if m.consoleURL.Active {
 		return m.consoleURL.View()
 	}
+	if m.vmPassword.Active {
+		return m.vmPassword.View()
+	}
 
 	var content string
 	switch m.view {

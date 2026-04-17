@@ -64,6 +64,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/subnetedit"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
+	"github.com/larkly/lazystack/internal/ui/vmpassword"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
@@ -135,6 +136,7 @@ type Model struct {
 	serverResize        serverresize.Model
 	sshPrompt           sshprompt.Model
 	consoleURL          consoleurl.Model
+	vmPassword          vmpassword.Model
 	fipPicker           fippicker.Model
 	serverPicker        serverpicker.Model
 	volumePicker        volumepicker.Model
@@ -320,6 +322,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sshPrompt.SetSize(m.width, m.height)
 		m.copyPicker.SetSize(m.width, m.height)
 		m.consoleURL.SetSize(m.width, m.height)
+		m.vmPassword.SetSize(m.width, m.height)
 		m.fipPicker.SetSize(m.width, m.height)
 		m.serverPicker.SetSize(m.width, m.height)
 		m.volumePicker.SetSize(m.width, m.height)
@@ -430,6 +433,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.consoleURL.Active {
 			var cmd tea.Cmd
 			m.consoleURL, cmd = m.consoleURL.Update(msg)
+			return m, cmd
+		}
+
+		// VM password modal intercepts all keys when active
+		if m.vmPassword.Active {
+			var cmd tea.Cmd
+			m.vmPassword, cmd = m.vmPassword.Update(msg)
 			return m, cmd
 		}
 
@@ -661,6 +671,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, shared.Keys.ConsoleURL) {
 				return m.openConsoleURL()
+			}
+			if key.Matches(msg, shared.Keys.GetPassword) {
+				return m.openVMPassword()
 			}
 			if key.Matches(msg, shared.Keys.Console) {
 				return m.openConsoleLog()
@@ -1249,6 +1262,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shared.ConsoleURLErrMsg:
 		m.statusBar.StickyHint = "Console URL error: " + msg.Err.Error()
+		return m, nil
+
+	case shared.VMPasswordMsg:
+		m.statusBar.StickyHint = ""
+		m.vmPassword = vmpassword.New(msg.ServerName, msg.KeyName, msg.KeyPath, msg.Plain, msg.Encrypted, msg.Note)
+		m.vmPassword.SetSize(m.width, m.height)
+		return m, nil
+
+	case shared.VMPasswordErrMsg:
+		m.statusBar.StickyHint = "Password error: " + msg.Err.Error()
 		return m, nil
 
 	case shared.ServerActionMsg:

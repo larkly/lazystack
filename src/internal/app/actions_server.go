@@ -1216,6 +1216,52 @@ func (m Model) copySSHCommand() (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) openVMPassword() (Model, tea.Cmd) {
+	var id, name, keyName string
+	switch m.view {
+	case viewServerList:
+		if s := m.serverList.SelectedServer(); s != nil {
+			id, name, keyName = s.ID, s.Name, s.KeyName
+		}
+	case viewServerDetail:
+		id = m.serverDetail.ServerID()
+		name = m.serverDetail.ServerName()
+		keyName = m.serverDetail.ServerKeyName()
+	}
+	if id == "" {
+		return m, nil
+	}
+	m.statusBar.StickyHint = "Fetching admin password..."
+	client := m.client.Compute
+	serverName := name
+	kn := keyName
+	return m, func() tea.Msg {
+		keyPath := ssh.FindKeyPath(kn)
+		plain, encrypted, err := compute.GetPassword(context.Background(), client, id, keyPath)
+		if err != nil && encrypted == "" {
+			return shared.VMPasswordErrMsg{Err: err, ServerName: serverName}
+		}
+		msg := shared.VMPasswordMsg{
+			ServerName: serverName,
+			KeyName:    kn,
+			KeyPath:    keyPath,
+			Plain:      plain,
+			Encrypted:  encrypted,
+		}
+		switch {
+		case encrypted == "":
+			msg.Note = "No password set (Linux instance, or not yet generated)."
+		case kn == "":
+			msg.Note = "Server has no keypair — cannot decrypt."
+		case keyPath == "":
+			msg.Note = "No private key found in ~/.ssh/ matching keypair \"" + kn + "\"."
+		case err != nil:
+			msg.Note = "Decryption failed: " + err.Error()
+		}
+		return msg
+	}
+}
+
 func (m Model) openConsoleURL() (Model, tea.Cmd) {
 	var id, name string
 	switch m.view {

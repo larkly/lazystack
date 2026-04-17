@@ -1,6 +1,12 @@
 package compute
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -125,4 +131,77 @@ func TestFormatAge(t *testing.T) {
 			t.Errorf("unexpected empty result for %v", tt.created)
 		}
 	}
+}
+
+func TestLoadRSAPrivateKey(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	write := func(t *testing.T, name string, block *pem.Block) string {
+		t.Helper()
+		dir := t.TempDir()
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, pem.EncodeToMemory(block), 0o600); err != nil {
+			t.Fatalf("write key: %v", err)
+		}
+		return p
+	}
+
+	t.Run("pkcs1", func(t *testing.T) {
+		path := write(t, "pkcs1.pem", &pem.Block{
+			Type:  "RSA PRIVATE KEY",
+			Bytes: x509.MarshalPKCS1PrivateKey(key),
+		})
+		got, err := loadRSAPrivateKey(path)
+		if err != nil {
+			t.Fatalf("loadRSAPrivateKey: %v", err)
+		}
+		if got.N.Cmp(key.N) != 0 {
+			t.Fatalf("key mismatch")
+		}
+	})
+
+	t.Run("pkcs8", func(t *testing.T) {
+		der, err := x509.MarshalPKCS8PrivateKey(key)
+		if err != nil {
+			t.Fatalf("marshal pkcs8: %v", err)
+		}
+		path := write(t, "pkcs8.pem", &pem.Block{Type: "PRIVATE KEY", Bytes: der})
+		got, err := loadRSAPrivateKey(path)
+		if err != nil {
+			t.Fatalf("loadRSAPrivateKey: %v", err)
+		}
+		if got.N.Cmp(key.N) != 0 {
+			t.Fatalf("key mismatch")
+		}
+	})
+
+	t.Run("openssh rejected", func(t *testing.T) {
+		path := write(t, "openssh.pem", &pem.Block{
+			Type:  "OPENSSH PRIVATE KEY",
+			Bytes: []byte("ignored"),
+		})
+		if _, err := loadRSAPrivateKey(path); err == nil {
+			t.Fatal("expected error for OpenSSH-format key")
+		}
+	})
+
+	t.Run("encrypted rejected", func(t *testing.T) {
+		path := write(t, "enc.pem", &pem.Block{
+			Type:    "RSA PRIVATE KEY",
+			Headers: map[string]string{"DEK-Info": "AES-128-CBC,X"},
+			Bytes:   x509.MarshalPKCS1PrivateKey(key),
+		})
+		if _, err := loadRSAPrivateKey(path); err == nil {
+			t.Fatal("expected error for encrypted PEM")
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		if _, err := loadRSAPrivateKey(filepath.Join(t.TempDir(), "nope")); err == nil {
+			t.Fatal("expected error for missing file")
+		}
+	})
 }
