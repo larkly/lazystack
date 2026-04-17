@@ -110,7 +110,7 @@ func New(client *gophercloud.ServiceClient) Model {
 
 	pi := textinput.New()
 	pi.Prompt = ""
-	pi.Placeholder = "/path/to/image.qcow2"
+	pi.Placeholder = "/path/to/image.qcow2 (enter to browse)"
 	pi.CharLimit = 512
 	pi.SetWidth(40)
 
@@ -261,10 +261,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.updateFocus()
 			return m, nil
 		case key.Matches(msg, shared.Keys.Enter):
-			// On path field, check if value is a directory → open picker
+			// On path field, open file picker for empty/directory values
 			if m.focusField == fieldPath && m.source == 0 {
-				p := strings.TrimSpace(m.pathInput.Value())
-				if info, err := os.Stat(p); err == nil && info.IsDir() {
+				p := expandHome(strings.TrimSpace(m.pathInput.Value()))
+				if p == "" {
+					if cwd, err := os.Getwd(); err == nil {
+						return m.openPicker(cwd)
+					}
+					if home, err := os.UserHomeDir(); err == nil {
+						return m.openPicker(home)
+					}
+				} else if info, err := os.Stat(p); err == nil && info.IsDir() {
 					return m.openPicker(p)
 				}
 			}
@@ -306,7 +313,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldSource:
 			m.source = (m.source + 1) % len(sourceOpts)
 			if m.source == 0 {
-				m.pathInput.Placeholder = "/path/to/image.qcow2"
+				m.pathInput.Placeholder = "/path/to/image.qcow2 (enter to browse)"
 			} else {
 				m.pathInput.Placeholder = "https://example.com/image.qcow2"
 			}
@@ -323,7 +330,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldSource:
 			m.source = (m.source - 1 + len(sourceOpts)) % len(sourceOpts)
 			if m.source == 0 {
-				m.pathInput.Placeholder = "/path/to/image.qcow2"
+				m.pathInput.Placeholder = "/path/to/image.qcow2 (enter to browse)"
 			} else {
 				m.pathInput.Placeholder = "https://example.com/image.qcow2"
 			}
@@ -398,6 +405,8 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	if m.source == 0 {
 		// Local file: check existence and size
+		path = expandHome(path)
+		m.pathInput.SetValue(path)
 		info, err := os.Stat(path)
 		if err != nil {
 			m.err = "File not found: " + path
@@ -719,6 +728,23 @@ func (m Model) doURLImport() (Model, tea.Cmd) {
 	})
 }
 
+func expandHome(p string) string {
+	if p == "" || p[0] != '~' {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home, p[2:])
+	}
+	return p
+}
+
 func parseIntOr(s string, def int) int {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -741,6 +767,9 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) Hints() string {
 	if m.uploading {
 		return "b background • esc cancel"
+	}
+	if m.source == 0 && m.focusField == fieldPath {
+		return "enter browse files • tab/↑↓ navigate • ctrl+s submit • esc cancel"
 	}
 	return "tab/↑↓ navigate • ←→ cycle • ctrl+s submit • esc cancel"
 }
