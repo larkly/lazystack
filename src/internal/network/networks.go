@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/subnetpools"
@@ -326,27 +327,47 @@ func UpdateSubnet(ctx context.Context, client *gophercloud.ServiceClient, id str
 	return nil
 }
 
-// ListExternalNetworks fetches networks where router:external is true.
+// externalListOpts wraps networks.ListOpts to add the router:external=true
+// filter that the standard ListOpts does not expose directly.
+type externalListOpts struct {
+	networks.ListOpts
+}
+
+func (o externalListOpts) ToNetworkListQuery() (string, error) {
+	q, err := o.ListOpts.ToNetworkListQuery()
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(q, "?") {
+		return q + "&router:external=true", nil
+	}
+	return q + "?router:external=true", nil
+}
+
+// ListExternalNetworks fetches networks where router:external is true,
+// following pagination so large deployments are not silently truncated.
 func ListExternalNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Network, error) {
 	shared.Debugf("[network] listing external networks")
-	url := client.ServiceURL("networks") + "?router:external=true"
-	var body struct {
-		Networks []struct {
-			ID     string `json:"id"`
-			Name   string `json:"name"`
-			Status string `json:"status"`
-		} `json:"networks"`
-	}
-	resp, err := client.Get(ctx, url, &body, nil)
+	var result []Network
+	err := networks.List(client, externalListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+		extracted, err := networks.ExtractNetworks(page)
+		if err != nil {
+			return false, err
+		}
+		for _, n := range extracted {
+			result = append(result, Network{
+				ID:        n.ID,
+				Name:      n.Name,
+				Status:    n.Status,
+				Shared:    n.Shared,
+				SubnetIDs: n.Subnets,
+			})
+		}
+		return true, nil
+	})
 	if err != nil {
 		shared.Debugf("[network] list external networks: %v", err)
 		return nil, fmt.Errorf("listing external networks: %w", err)
-	}
-	resp.Body.Close()
-
-	result := make([]Network, len(body.Networks))
-	for i, n := range body.Networks {
-		result[i] = Network{ID: n.ID, Name: n.Name, Status: n.Status}
 	}
 	shared.Debugf("[network] listed %d external networks", len(result))
 	return result, nil

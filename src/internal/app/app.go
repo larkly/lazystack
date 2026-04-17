@@ -657,6 +657,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Volume detach from server detail volumes pane
 			if m.view == viewServerDetail && m.serverDetail.FocusedOnVolumes() {
 				if key.Matches(msg, shared.Keys.Detach) {
+					if !m.blockStorageAvailable() {
+						m.statusBar.StickyHint = "Block storage unavailable in this cloud"
+						return m, nil
+					}
 					return m.openServerVolumeDetach()
 				}
 			}
@@ -720,6 +724,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.doRevertResize()
 			}
 			if key.Matches(msg, shared.Keys.Attach) {
+				if !m.blockStorageAvailable() {
+					m.statusBar.StickyHint = "Block storage unavailable in this cloud"
+					return m, nil
+				}
 				return m.openServerVolumeAttach()
 			}
 			if key.Matches(msg, shared.Keys.AssignFIP) {
@@ -863,7 +871,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					key.Matches(msg, shared.Keys.Enter) ||
 					key.Matches(msg, shared.Keys.StopStart) ||
 					msg.String() == "ctrl+h" {
-					m.statusBar.Error = "Load balancer is " + lb.ProvisioningStatus + ", please wait..."
+					m.statusBar.StickyHint = "Load balancer is " + lb.ProvisioningStatus + ", please wait..."
 					return m, nil
 				}
 			}
@@ -1160,7 +1168,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latestVersion = msg.Latest
 		m.downloadURL = msg.DownloadURL
 		m.checksumsURL = msg.ChecksumsURL
-		m.statusBar.Hint = fmt.Sprintf("Upgrade available: %s", msg.Latest)
+		if msg.ChecksumsURL == "" {
+			m.statusBar.StickyHint = fmt.Sprintf("update %s skipped: checksums unavailable", msg.Latest)
+		} else {
+			m.statusBar.Hint = fmt.Sprintf("Upgrade available: %s", msg.Latest)
+		}
 		return m, nil
 
 	case shared.ConfigChangedMsg:
