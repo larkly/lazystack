@@ -57,6 +57,7 @@ type KeyMap struct {
 	CopySSH     key.Binding
 	Copy        key.Binding
 	ConsoleURL  key.Binding
+	GetPassword key.Binding
 	Config       key.Binding
 }
 
@@ -276,6 +277,10 @@ var Keys = KeyMap{
 	ConsoleURL: key.NewBinding(
 		key.WithKeys("V"),
 		key.WithHelp("V", "console URL (noVNC)"),
+	),
+	GetPassword: key.NewBinding(
+		key.WithKeys("W"),
+		key.WithHelp("W", "admin password"),
 	),
 	Config: key.NewBinding(
 		key.WithKeys("ctrl+k"),

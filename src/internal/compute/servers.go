@@ -2,7 +2,12 @@ package compute
 
 import (
 	"context"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -375,6 +380,78 @@ func GetRemoteConsole(ctx context.Context, client *gophercloud.ServiceClient, id
 	}
 	shared.Debugf("[compute] got remote console for server %s", id)
 	return rc.URL, nil
+}
+
+// GetPassword fetches the Windows admin password for a server.
+//
+// encrypted is always the base64-encoded blob returned by Nova (empty if the
+// server has no generated password — e.g. a Linux instance or one not yet
+// booted). When privKeyPath points to an unencrypted RSA PEM key that matches
+// the keypair used at launch, plain is the decrypted cleartext; otherwise
+// plain is empty. Decryption failures are returned as the error along with a
+// non-empty encrypted so callers can still surface the blob for manual
+// decryption.
+func GetPassword(ctx context.Context, client *gophercloud.ServiceClient, id, privKeyPath string) (plain, encrypted string, err error) {
+	shared.Debugf("[compute] getting password for server %s", id)
+	r := servers.GetPassword(ctx, client, id)
+	encrypted, err = r.ExtractPassword(nil)
+	if err != nil {
+		shared.Debugf("[compute] get password server %s: %v", id, err)
+		return "", "", fmt.Errorf("getting password for %s: %w", id, err)
+	}
+	if encrypted == "" {
+		shared.Debugf("[compute] get password server %s: no password set", id)
+		return "", "", nil
+	}
+	if privKeyPath == "" {
+		return "", encrypted, nil
+	}
+	key, err := loadRSAPrivateKey(privKeyPath)
+	if err != nil {
+		shared.Debugf("[compute] load private key %s: %v", privKeyPath, err)
+		return "", encrypted, err
+	}
+	plain, err = r.ExtractPassword(key)
+	if err != nil {
+		shared.Debugf("[compute] decrypt password server %s: %v", id, err)
+		return "", encrypted, fmt.Errorf("decrypting password: %w", err)
+	}
+	shared.Debugf("[compute] got password for server %s", id)
+	return plain, encrypted, nil
+}
+
+// loadRSAPrivateKey reads an unencrypted RSA private key from a PEM file.
+func loadRSAPrivateKey(path string) (*rsa.PrivateKey, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading key file: %w", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, errors.New("no PEM block found in key file")
+	}
+	// x509.IsEncryptedPEMBlock is deprecated but the header check still works.
+	if _, ok := block.Headers["DEK-Info"]; ok {
+		return nil, errors.New("encrypted PEM keys are not supported")
+	}
+	switch block.Type {
+	case "RSA PRIVATE KEY":
+		return x509.ParsePKCS1PrivateKey(block.Bytes)
+	case "PRIVATE KEY":
+		k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		rk, ok := k.(*rsa.PrivateKey)
+		if !ok {
+			return nil, errors.New("key is not RSA")
+		}
+		return rk, nil
+	case "OPENSSH PRIVATE KEY":
+		return nil, errors.New("OpenSSH-format keys are not supported; convert to PEM with: ssh-keygen -p -m PEM -f <key>")
+	default:
+		return nil, fmt.Errorf("unsupported PEM type %q", block.Type)
+	}
 }
 
 // GetConsoleOutput retrieves console output for a server.

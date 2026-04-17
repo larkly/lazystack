@@ -127,3 +127,19 @@ type ConsoleURLErrMsg struct {
 
 // ConfigChangedMsg is sent after the config is modified and saved at runtime.
 type ConfigChangedMsg struct{}
+
+// VMPasswordMsg is sent when the admin password for a server has been fetched.
+type VMPasswordMsg struct {
+	ServerName string
+	KeyName    string
+	KeyPath    string // empty = no key located on disk
+	Plain      string // empty = not decrypted
+	Encrypted  string // base64 blob returned by Nova (may be empty)
+	Note       string // user-facing explanation of any degraded state
+}
+
+// VMPasswordErrMsg is sent when fetching the admin password fails.
+type VMPasswordErrMsg struct {
+	ServerName string
+	Err        error
+}
