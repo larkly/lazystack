@@ -7,6 +7,7 @@ import (
 
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
@@ -162,6 +163,16 @@ func (m Model) Hints() string {
 // KeyPairName returns the name of the displayed keypair.
 func (m Model) KeyPairName() string {
 	return m.name
+}
+
+// CopyEntries returns the title and copyable fields for the loaded keypair.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	if m.kp == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("Name", m.kp.Name).Add("Public key", m.kp.PublicKey)
+	return "Copy — keypair " + m.kp.Name, b.Entries()
 }
 
 func (m Model) fetchKeypair() tea.Cmd {

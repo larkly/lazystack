@@ -167,6 +167,9 @@ func (m Model) viewContent() string {
 	if m.sshPrompt.Active {
 		return m.sshPrompt.View()
 	}
+	if m.copyPicker.Active {
+		return m.copyPicker.View()
+	}
 	if m.consoleURL.Active {
 		return m.consoleURL.View()
 	}

@@ -16,7 +16,7 @@
 | Phase 2: Extended Compute | ✓ Complete | All actions, console log, resize, bulk ops, action history |
 | Phase 3: Additional Resources | ✓ Complete | Tabbed navigation, volumes, floating IPs, security groups, key pairs, networks (CRUD), routers (CRUD) |
 | Phase 4: Refactor, Octavia, Projects, Quotas | ✓ Complete | App refactor, dynamic tabs, Octavia LB tab, project switching, quota overlay |
-| Phase 5: Quality of Life | Mostly Complete | Server rename, rebuild, snapshot, rescue/unrescue, image management (combined view with upload/download/edit), cloud-init/user data, port CRUD, subnet edit, search/filter on all views, confirmation dialogs, SSH integration, console access (noVNC), server cloning, cross-resource navigation — done. Clipboard (general), config file, DNS — not started |
+| Phase 5: Quality of Life | Mostly Complete | Server rename, rebuild, snapshot, rescue/unrescue, image management (combined view with upload/download/edit), cloud-init/user data, port CRUD, subnet edit, search/filter on all views, confirmation dialogs, SSH integration, console access (noVNC), server cloning, cross-resource navigation, copy-to-clipboard picker — done. Config file, DNS — not started |
 | Phase 6: Operational | Not started | Admin views, hypervisor view, service catalog browser |
 
 ## Concerns and Considerations
@@ -558,6 +558,22 @@ src/
 - Copy SSH command to clipboard (`y` key)
 - Option to ignore host key checking
 
+#### Copy-to-Clipboard (`Y`)
+- `Y` opens a copy-field picker modal on every list/detail view
+- Arrow keys + Enter to copy; `1`-`9` number row for quick-pick
+- Fields surfaced per resource:
+  - Server: ID, Name, each IPv4/IPv6/Floating IP (one row per address)
+  - Volume: ID, Name
+  - Floating IP: ID, Floating Address, Fixed IP, Port ID
+  - Network: Network ID/Name; focused subnet's ID/Name/CIDR/Gateway; focused port's ID/Name/MAC/Fixed IPs
+  - Router: ID, Name, External Gateway IPv4/IPv6/Network ID; focused interface's Subnet/Port/IP
+  - Security group: ID, Name; focused rule's ID; focused attached server ID
+  - Load balancer: LB ID/Name/VIP; focused listener/pool/member ID/Name (and member Address)
+  - Image: ID, Name, Checksum, Owner; focused attached server ID
+  - Keypair: Name (list); Name + Public key (detail)
+- Empty fields are skipped so the menu never shows placeholders
+- Clipboard writes emit `"Copied <label>: <value>"` to the status bar; errors surface as `"Clipboard error: …"`
+
 #### Server Cloning (`c`)
 - Clone a server with its configuration (flavor, network, key pair, security groups)
 - Progress view showing clone status
@@ -628,6 +644,7 @@ src/
 | `a` | Action history |
 | `x` | SSH to server |
 | `y` | Copy SSH command to clipboard |
+| `Y` | Copy field picker (ID, IP, floating IP, …) |
 | `V` | Open VNC console in browser |
 | `c` | Clone server |
 | `/` | Filter |
@@ -655,6 +672,7 @@ src/
 | `a` | Action history |
 | `x` | SSH to server |
 | `y` | Copy SSH command to clipboard |
+| `Y` | Copy field picker (ID, IP, floating IP, …) |
 | `V` | Open VNC console in browser |
 | `Esc` | Back to list |
 
@@ -674,6 +692,7 @@ src/
 | `Enter` | View detail |
 | `Ctrl+N` | Create volume |
 | `Ctrl+D` | Delete volume |
+| `Y` | Copy field picker |
 | `/` | Filter |
 
 #### Volume Detail
@@ -683,6 +702,7 @@ src/
 | `Ctrl+D` | Delete volume |
 | `Ctrl+A` | Attach to server (server picker modal) |
 | `Ctrl+T` | Detach from server |
+| `Y` | Copy field picker |
 | `Esc` | Back to list |
 
 #### Floating IP List
@@ -692,6 +712,7 @@ src/
 | `Ctrl+N` | Allocate new floating IP |
 | `Ctrl+T` | Disassociate from port |
 | `Ctrl+D` | Release floating IP |
+| `Y` | Copy field picker |
 | `/` | Filter |
 
 #### Security Groups
@@ -701,6 +722,7 @@ src/
 | `Enter` | Expand / collapse group |
 | `Ctrl+N` | Create group (or add rule when in rules) |
 | `Ctrl+D` | Delete group (or rule when in rules) |
+| `Y` | Copy field picker |
 | `Esc` | Back to group level (from rules) |
 
 #### Key Pairs
@@ -710,6 +732,7 @@ src/
 | `Enter` | View detail (public key) |
 | `Ctrl+N` | Create / import key pair |
 | `Ctrl+D` | Delete key pair |
+| `Y` | Copy field picker |
 | `/` | Filter |
 
 #### Networks
@@ -720,6 +743,7 @@ src/
 | `Ctrl+N` | Create network (or subnet/port contextually) |
 | `Ctrl+D` | Delete network (or subnet/port contextually) |
 | `e` | Edit subnet (when on subnet) |
+| `Y` | Copy field picker |
 | `/` | Filter |
 
 #### Routers
@@ -731,6 +755,7 @@ src/
 | `Ctrl+D` | Delete router |
 | `Ctrl+A` | Add interface (from detail, with optional custom IP) |
 | `Ctrl+T` | Remove interface (from detail) |
+| `Y` | Copy field picker |
 | `/` | Filter |
 | `Esc` | Back to list (from detail) |
 
@@ -742,6 +767,7 @@ src/
 | `Ctrl+N` | Create (LB / listener / pool / member / monitor, contextual) |
 | `e` | Edit (member, pool, listener) |
 | `Ctrl+D` | Delete (cascade for LBs, individual for children) |
+| `Y` | Copy field picker |
 | `/` | Filter |
 | `Esc` | Collapse / back |
 
@@ -754,6 +780,7 @@ src/
 | `d` | Download image to local file |
 | `e` | Edit image properties |
 | `Ctrl+D` | Delete image |
+| `Y` | Copy field picker |
 | `/` | Filter |
 
 #### Console Log / Action History
@@ -821,7 +848,7 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 - Saved filters
 - Server name templates for create
 - ✅ SSH integration (launch SSH session to selected server) — Done (#27)
-- Copy-to-clipboard for IDs, IPs (general — SSH command copy done via `y`)
+- ✅ Copy-to-clipboard for IDs, IPs — Done (#28): `Y` opens a field picker on every list/detail view (server, volume, network, subnet, router, port, LB + listener/pool/member, floating IP, security group, keypair, image). `y` still copies the SSH command on server views.
 - Log/audit trail of actions taken
 - Designate (DNS) tab
 - ✅ Console access (noVNC URL retrieval and browser launch) — Done (#50)

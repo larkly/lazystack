@@ -15,6 +15,7 @@ import (
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
@@ -1394,6 +1395,21 @@ func (m Model) ServerImageID() string {
 // Server returns the full server object, or nil if not loaded.
 func (m Model) Server() *compute.Server {
 	return m.server
+}
+
+// CopyEntries returns the title and copyable fields for the loaded server.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	s := m.server
+	if s == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("ID", s.ID).
+		Add("Name", s.Name).
+		AddEach("IPv4", s.IPv4).
+		AddEach("IPv6", s.IPv6).
+		AddEach("Floating IP", s.FloatingIP)
+	return "Copy — server " + s.Name, b.Entries()
 }
 
 // ServerLocked returns whether the server is locked.

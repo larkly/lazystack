@@ -16,6 +16,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
 // FocusPane identifies a pane in the load balancer view.
@@ -174,6 +175,37 @@ func (m Model) LBName() string {
 		return lb.ID
 	}
 	return ""
+}
+
+// CopyEntries returns the title and copyable fields for the selected
+// load balancer, with extras for the focused listener/pool/member when
+// one of those panes has focus.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	lb := m.SelectedLB()
+	if lb == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("ID", lb.ID).Add("Name", lb.Name).Add("VIP Address", lb.VipAddress)
+	switch m.focus {
+	case FocusListeners:
+		if l := m.SelectedListener(); l != nil {
+			b.Add("Listener ID", l.ID).Add("Listener Name", l.Name)
+		}
+	case FocusPools:
+		if p := m.SelectedPool(); p != nil {
+			b.Add("Pool ID", p.ID).Add("Pool Name", p.Name)
+		}
+	case FocusMembers:
+		if mem := m.SelectedMember(); mem != nil {
+			b.Add("Member ID", mem.ID).Add("Member Name", mem.Name).Add("Member Address", mem.Address)
+		}
+	}
+	name := lb.Name
+	if name == "" {
+		name = lb.ID
+	}
+	return "Copy — load balancer " + name, b.Entries()
 }
 
 // SelectedListenerID returns the ID of the currently selected listener.

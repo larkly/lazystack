@@ -17,6 +17,7 @@ import (
 	"github.com/larkly/lazystack/internal/compute"
 	img "github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
 // FocusPane identifies a pane in the image view.
@@ -251,6 +252,24 @@ func (m Model) SelectedServerID() string {
 		return srvs[m.serversCursor].ID
 	}
 	return ""
+}
+
+// CopyEntries returns the title and copyable fields for the selected image.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	i := m.SelectedImage()
+	if i == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("ID", i.ID).Add("Name", i.Name).Add("Checksum", i.Checksum).Add("Owner", i.Owner)
+	if m.focus == FocusServers {
+		b.Add("Attached server ID", m.SelectedServerID())
+	}
+	name := i.Name
+	if name == "" {
+		name = i.ID
+	}
+	return "Copy — image " + name, b.Entries()
 }
 
 // --- Update ---

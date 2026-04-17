@@ -11,6 +11,7 @@ import (
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/compute"
 	img "github.com/larkly/lazystack/internal/image"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -105,6 +106,21 @@ func (m Model) SelectedServer() *compute.Server {
 // IsFiltering reports whether the list is currently in filter input mode.
 func (m Model) IsFiltering() bool {
 	return m.filtering
+}
+
+// CopyEntries returns the title and copyable fields for the selected server.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	s := m.SelectedServer()
+	if s == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("ID", s.ID).
+		Add("Name", s.Name).
+		AddEach("IPv4", s.IPv4).
+		AddEach("IPv6", s.IPv6).
+		AddEach("Floating IP", s.FloatingIP)
+	return "Copy — server " + s.Name, b.Entries()
 }
 
 // Update handles messages for the server list.

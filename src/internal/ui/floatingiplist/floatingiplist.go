@@ -9,6 +9,7 @@ import (
 
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
@@ -66,6 +67,20 @@ func (m Model) SelectedFIP() *network.FloatingIP {
 		return &f
 	}
 	return nil
+}
+
+// CopyEntries returns the title and copyable fields for the selected floating IP.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	f := m.SelectedFIP()
+	if f == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("ID", f.ID).
+		Add("Floating IP", f.FloatingIP).
+		Add("Fixed IP", f.FixedIP).
+		Add("Port ID", f.PortID)
+	return "Copy — floating IP " + f.FloatingIP, b.Entries()
 }
 
 // Update handles messages.

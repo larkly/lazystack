@@ -55,6 +55,7 @@ type KeyMap struct {
 	JumpNetworks key.Binding
 	SSH         key.Binding
 	CopySSH     key.Binding
+	Copy        key.Binding
 	ConsoleURL  key.Binding
 	Config       key.Binding
 }
@@ -267,6 +268,10 @@ var Keys = KeyMap{
 	CopySSH: key.NewBinding(
 		key.WithKeys("y"),
 		key.WithHelp("y", "copy SSH command"),
+	),
+	Copy: key.NewBinding(
+		key.WithKeys("Y"),
+		key.WithHelp("Y", "copy field..."),
 	),
 	ConsoleURL: key.NewBinding(
 		key.WithKeys("V"),

@@ -10,6 +10,7 @@ import (
 
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"github.com/larkly/lazystack/internal/volume"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -172,6 +173,21 @@ func (m Model) SelectedVolume() *volume.Volume {
 		return &v
 	}
 	return nil
+}
+
+// CopyEntries returns the title and copyable fields for the selected volume.
+func (m Model) CopyEntries() (string, []copypicker.Entry) {
+	v := m.SelectedVolume()
+	if v == nil {
+		return "", nil
+	}
+	b := copypicker.Builder{}
+	b.Add("ID", v.ID).Add("Name", v.Name)
+	name := v.Name
+	if name == "" {
+		name = v.ID
+	}
+	return "Copy — volume " + name, b.Entries()
 }
 
 // Update handles messages.
