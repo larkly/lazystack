@@ -863,7 +863,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					key.Matches(msg, shared.Keys.Enter) ||
 					key.Matches(msg, shared.Keys.StopStart) ||
 					msg.String() == "ctrl+h" {
-					m.statusBar.Error = "Load balancer is " + lb.ProvisioningStatus + ", please wait..."
+					m.statusBar.StickyHint = "Load balancer is " + lb.ProvisioningStatus + ", please wait..."
 					return m, nil
 				}
 			}
