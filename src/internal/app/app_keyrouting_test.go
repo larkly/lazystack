@@ -5,15 +5,16 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/ui/serverlist"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
+	"github.com/larkly/lazystack/internal/ui/serverlist"
 )
 
 func TestServerDetailCtrlAOpensVolumePicker(t *testing.T) {
 	m := newTestModel("dev", false)
-	m.client = &cloud.Client{}
+	m.client = &cloud.Client{BlockStorage: &gophercloud.ServiceClient{}}
 	m.view = viewServerDetail
 	m.serverDetail = testServerDetailWithServer("srv-1", "srv-1")
 
@@ -21,6 +22,22 @@ func TestServerDetailCtrlAOpensVolumePicker(t *testing.T) {
 	updated := res.(Model)
 	if !updated.volumePicker.Active {
 		t.Fatalf("volume picker should be active after ctrl+a on server detail")
+	}
+}
+
+func TestServerDetailCtrlAWithoutBlockStorageIsGated(t *testing.T) {
+	m := newTestModel("dev", false)
+	m.client = &cloud.Client{}
+	m.view = viewServerDetail
+	m.serverDetail = testServerDetailWithServer("srv-1", "srv-1")
+
+	res, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModCtrl}))
+	updated := res.(Model)
+	if updated.volumePicker.Active {
+		t.Fatalf("volume picker should not open when block storage is unavailable")
+	}
+	if updated.statusBar.StickyHint == "" {
+		t.Fatalf("expected a sticky hint explaining block storage is unavailable")
 	}
 }
 
