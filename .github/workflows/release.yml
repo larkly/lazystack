@@ -17,8 +17,23 @@ env:
   VERSION: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+
+      - name: Run tests
+        run: make test
+
   validate:
     if: github.event_name == 'workflow_dispatch'
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +48,7 @@ jobs:
           fi
 
   build:
-    needs: [validate]
+    needs: [test]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     strategy:
