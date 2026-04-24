@@ -409,7 +409,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 			sharedTotal.Store(contentLength)
 		}
 
-		f, err := os.Create(path)
+		// Use 0600 to match the rest of the codebase (debug log, selfupdate
+		// cache, keypair private keys). Downloaded images can contain golden
+		// images or cloud-init userdata that users may reasonably expect to
+		// stay private to their account; os.Create would leave them 0644.
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 		if err != nil {
 			return downloadErrMsg{err: fmt.Errorf("creating file: %w", err)}
 		}
