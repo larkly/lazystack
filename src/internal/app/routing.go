@@ -3,11 +3,11 @@ package app
 import (
 	"time"
 
+	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
-	"charm.land/bubbletea/v2"
 )
 
 // refreshTickCmd returns a single tea.Tick that fires shared.TickMsg after
@@ -174,7 +174,7 @@ func (m Model) handleDetailNavigation(msg shared.NavigateToDetailMsg) (Model, te
 	case "volume":
 		m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, msg.ID)
 		m.volumeDetail.SetSize(m.width, m.height)
-		m.returnToView = m.view
+		m.nav.Push(m.view, m.activeTab)
 		m.view = viewVolumeDetail
 		m.statusBar.CurrentView = "volumedetail"
 		m.statusBar.Hint = m.volumeDetail.Hints()
@@ -254,19 +254,11 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
 
 	case "serverdetail":
-		// If coming back from console/resize, return to previous view
-		if m.view == viewConsoleLog || m.view == viewActionLog {
-			if m.previousView == viewServerDetail && m.serverDetail.ServerID() != "" {
-				m.view = viewServerDetail
-				m.statusBar.CurrentView = "serverdetail"
-				m.statusBar.Hint = m.serverDetail.Hints()
-				return m, m.serverDetail.Init()
-			}
-			// Came from list or no valid detail, go to list
-			m.view = viewServerList
-			m.statusBar.CurrentView = "serverlist"
-			m.statusBar.Hint = m.serverList.Hints()
-			return m, func() tea.Msg { return shared.RefreshServersMsg{} }
+		if entry, ok := m.nav.Pop(); ok {
+			m.view = entry.View
+			m.activeTab = entry.Tab
+			m.statusBar.CurrentView = m.viewName()
+			return m, nil
 		}
 		if s := m.serverList.SelectedServer(); s != nil {
 			m.serverDetail = serverdetail.New(m.client.Compute, m.client.Network, m.client.BlockStorage, s.ID, m.refreshInterval)

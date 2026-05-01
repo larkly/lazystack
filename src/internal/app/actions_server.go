@@ -348,7 +348,7 @@ func (m Model) openConsoleLog() (Model, tea.Cmd) {
 	}
 	m.consoleLog = consolelog.New(m.client.Compute, id, name)
 	m.consoleLog.SetSize(m.width, m.height)
-	m.previousView = m.view
+	m.nav.Push(m.view, m.activeTab)
 	m.view = viewConsoleLog
 	m.statusBar.CurrentView = "consolelog"
 	m.statusBar.Hint = m.consoleLog.Hints()
@@ -371,7 +371,7 @@ func (m Model) openActionLog() (Model, tea.Cmd) {
 	}
 	m.actionLog = actionlog.New(m.client.Compute, id, name)
 	m.actionLog.SetSize(m.width, m.height)
-	m.previousView = m.view
+	m.nav.Push(m.view, m.activeTab)
 	m.view = viewActionLog
 	m.statusBar.CurrentView = "actionlog"
 	m.statusBar.Hint = m.actionLog.Hints()
