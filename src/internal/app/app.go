@@ -20,9 +20,9 @@ import (
 	"github.com/larkly/lazystack/internal/ui/cloneprogress"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
 	"github.com/larkly/lazystack/internal/ui/configview"
-	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/consoleurl"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/help"
@@ -34,11 +34,11 @@ import (
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/lbcreate"
-	"github.com/larkly/lazystack/internal/ui/lbview"
 	"github.com/larkly/lazystack/internal/ui/lblistenercreate"
 	"github.com/larkly/lazystack/internal/ui/lbmembercreate"
 	"github.com/larkly/lazystack/internal/ui/lbmonitorcreate"
 	"github.com/larkly/lazystack/internal/ui/lbpoolcreate"
+	"github.com/larkly/lazystack/internal/ui/lbview"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/networkcreate"
 	"github.com/larkly/lazystack/internal/ui/networkview"
@@ -187,6 +187,7 @@ type Model struct {
 	autoCloud           string
 	previousView        activeView
 	returnToView        activeView // for cross-resource navigation back-nav
+	nav                 NavStack   // explicit navigation stack (H2)
 	refreshInterval     time.Duration
 	minWidth            int
 	minHeight           int
@@ -309,34 +310,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.tooSmall = m.width < m.minWidth || m.height < m.minHeight
 		m.cloudPicker.SetSize(m.width, m.height)
-		m.confirm.SetSize(m.width, m.height)
-		m.errModal.SetSize(m.width, m.height)
+		m.setSizeAllModals(m.width, m.height)
 		m.help.Width = m.width
 		m.help.Height = m.height
 		m.quotaView.Width = m.width
 		m.quotaView.Height = m.height
-		m.serverRename.SetSize(m.width, m.height)
-		m.serverRebuild.SetSize(m.width, m.height)
-		m.serverSnapshot.SetSize(m.width, m.height)
-		m.serverResize.SetSize(m.width, m.height)
-		m.sshPrompt.SetSize(m.width, m.height)
-		m.copyPicker.SetSize(m.width, m.height)
-		m.consoleURL.SetSize(m.width, m.height)
-		m.vmPassword.SetSize(m.width, m.height)
-		m.fipPicker.SetSize(m.width, m.height)
-		m.serverPicker.SetSize(m.width, m.height)
-		m.volumePicker.SetSize(m.width, m.height)
-		m.sgCreate.SetSize(m.width, m.height)
-		m.sgRuleCreate.SetSize(m.width, m.height)
-		m.networkCreate.SetSize(m.width, m.height)
-		m.subnetCreate.SetSize(m.width, m.height)
-		m.subnetEdit.SetSize(m.width, m.height)
-		m.portCreate.SetSize(m.width, m.height)
-		m.portEdit.SetSize(m.width, m.height)
-		m.routerCreate.SetSize(m.width, m.height)
-		m.subnetPicker.SetSize(m.width, m.height)
-		m.projectPicker.SetSize(m.width, m.height)
-		m.cloneProgress.SetSize(m.width, m.height)
 		m.configView.Width = m.width
 		m.configView.Height = m.height
 		m.statusBar.Width = m.width
@@ -380,207 +358,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateModal(msg)
 		}
 
-		// Clone progress modal intercepts all keys when active
-		if m.cloneProgress.Active {
-			var cmd tea.Cmd
-			m.cloneProgress, cmd = m.cloneProgress.Update(msg)
-			return m, cmd
-		}
-
-		// Rename modal intercepts all keys when active
-		if m.serverRename.Active {
-			var cmd tea.Cmd
-			m.serverRename, cmd = m.serverRename.Update(msg)
-			return m, cmd
-		}
-
-		// Rebuild modal intercepts all keys when active
-		if m.serverRebuild.Active {
-			var cmd tea.Cmd
-			m.serverRebuild, cmd = m.serverRebuild.Update(msg)
-			return m, cmd
-		}
-
-		// Snapshot modal intercepts all keys when active
-		if m.serverSnapshot.Active {
-			var cmd tea.Cmd
-			m.serverSnapshot, cmd = m.serverSnapshot.Update(msg)
-			return m, cmd
-		}
-
-		// Resize modal intercepts all keys when active
-		if m.serverResize.Active {
-			var cmd tea.Cmd
-			m.serverResize, cmd = m.serverResize.Update(msg)
-			return m, cmd
-		}
-
-		// SSH prompt modal intercepts all keys when active
-		if m.sshPrompt.Active {
-			var cmd tea.Cmd
-			m.sshPrompt, cmd = m.sshPrompt.Update(msg)
-			return m, cmd
-		}
-
-		// Copy picker modal intercepts all keys when active
-		if m.copyPicker.Active {
-			var cmd tea.Cmd
-			m.copyPicker, cmd = m.copyPicker.Update(msg)
-			return m, cmd
-		}
-
-		// Console URL modal intercepts all keys when active
-		if m.consoleURL.Active {
-			var cmd tea.Cmd
-			m.consoleURL, cmd = m.consoleURL.Update(msg)
-			return m, cmd
-		}
-
-		// VM password modal intercepts all keys when active
-		if m.vmPassword.Active {
-			var cmd tea.Cmd
-			m.vmPassword, cmd = m.vmPassword.Update(msg)
-			return m, cmd
-		}
-
-		// FIP picker modal intercepts all keys when active
-		if m.fipPicker.Active {
-			var cmd tea.Cmd
-			m.fipPicker, cmd = m.fipPicker.Update(msg)
-			return m, cmd
-		}
-
-		// Server picker modal intercepts all keys when active
-		if m.serverPicker.Active {
-			var cmd tea.Cmd
-			m.serverPicker, cmd = m.serverPicker.Update(msg)
-			return m, cmd
-		}
-
-		// Volume picker modal intercepts all keys when active
-		if m.volumePicker.Active {
-			var cmd tea.Cmd
-			m.volumePicker, cmd = m.volumePicker.Update(msg)
-			return m, cmd
-		}
-
-		// Router create modal intercepts all keys when active
-		if m.routerCreate.Active {
-			var cmd tea.Cmd
-			m.routerCreate, cmd = m.routerCreate.Update(msg)
-			return m, cmd
-		}
-
-		// Subnet picker modal intercepts all keys when active
-		if m.subnetPicker.Active {
-			var cmd tea.Cmd
-			m.subnetPicker, cmd = m.subnetPicker.Update(msg)
-			return m, cmd
-		}
-
-		// Network create modal intercepts all keys when active
-		if m.networkCreate.Active {
-			var cmd tea.Cmd
-			m.networkCreate, cmd = m.networkCreate.Update(msg)
-			return m, cmd
-		}
-
-		// Subnet create modal intercepts all keys when active
-		if m.subnetCreate.Active {
-			var cmd tea.Cmd
-			m.subnetCreate, cmd = m.subnetCreate.Update(msg)
-			return m, cmd
-		}
-
-		// Subnet edit modal intercepts all keys when active
-		if m.subnetEdit.Active {
-			var cmd tea.Cmd
-			m.subnetEdit, cmd = m.subnetEdit.Update(msg)
-			return m, cmd
-		}
-
-		// Port create/edit modals intercept all keys when active
-		if m.portCreate.Active {
-			var cmd tea.Cmd
-			m.portCreate, cmd = m.portCreate.Update(msg)
-			return m, cmd
-		}
-		if m.portEdit.Active {
-			var cmd tea.Cmd
-			m.portEdit, cmd = m.portEdit.Update(msg)
-			return m, cmd
-		}
-
-		// SG create modal intercepts all keys when active
-		if m.sgCreate.Active {
-			var cmd tea.Cmd
-			m.sgCreate, cmd = m.sgCreate.Update(msg)
-			return m, cmd
-		}
-
-		// SG rule create modal intercepts all keys when active
-		if m.sgRuleCreate.Active {
-			var cmd tea.Cmd
-			m.sgRuleCreate, cmd = m.sgRuleCreate.Update(msg)
-			return m, cmd
-		}
-
-		// Image modals intercept all keys when active
-		if m.imageEdit.Active {
-			var cmd tea.Cmd
-			m.imageEdit, cmd = m.imageEdit.Update(msg)
-			return m, cmd
-		}
-		if m.imageCreate.Active {
-			var cmd tea.Cmd
-			m.imageCreate, cmd = m.imageCreate.Update(msg)
-			return m, cmd
-		}
-		if m.imageDownload.Active {
-			var cmd tea.Cmd
-			m.imageDownload, cmd = m.imageDownload.Update(msg)
-			return m, cmd
-		}
-
-		// LB create/edit modal intercepts all keys when active
-		if m.lbCreate.Active {
-			var cmd tea.Cmd
-			m.lbCreate, cmd = m.lbCreate.Update(msg)
-			return m, cmd
-		}
-
-		// LB listener create modal intercepts all keys when active
-		if m.lbListenerCreate.Active {
-			var cmd tea.Cmd
-			m.lbListenerCreate, cmd = m.lbListenerCreate.Update(msg)
-			return m, cmd
-		}
-
-		// LB pool create modal intercepts all keys when active
-		if m.lbPoolCreate.Active {
-			var cmd tea.Cmd
-			m.lbPoolCreate, cmd = m.lbPoolCreate.Update(msg)
-			return m, cmd
-		}
-
-		// LB member create modal intercepts all keys when active
-		if m.lbMemberCreate.Active {
-			var cmd tea.Cmd
-			m.lbMemberCreate, cmd = m.lbMemberCreate.Update(msg)
-			return m, cmd
-		}
-
-		// LB monitor create modal intercepts all keys when active
-		if m.lbMonitorCreate.Active {
-			var cmd tea.Cmd
-			m.lbMonitorCreate, cmd = m.lbMonitorCreate.Update(msg)
-			return m, cmd
-		}
-
-		// Project picker modal intercepts all keys when active
-		if m.projectPicker.Active {
-			var cmd tea.Cmd
-			m.projectPicker, cmd = m.projectPicker.Update(msg)
+		if ok, cmd := m.updateAnyModal(msg); ok {
 			return m, cmd
 		}
 
@@ -1433,137 +1211,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quotaView, cmd = m.quotaView.Update(msg)
 			return m, tea.Batch(viewCmd, cmd)
 		}
-		// Also route to active modals (for spinner, loaded msgs)
-		if m.serverRename.Active {
-			var cmd tea.Cmd
-			m.serverRename, cmd = m.serverRename.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.serverRebuild.Active {
-			var cmd tea.Cmd
-			m.serverRebuild, cmd = m.serverRebuild.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.serverSnapshot.Active {
-			var cmd tea.Cmd
-			m.serverSnapshot, cmd = m.serverSnapshot.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.serverResize.Active {
-			var cmd tea.Cmd
-			m.serverResize, cmd = m.serverResize.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.fipPicker.Active {
-			var cmd tea.Cmd
-			m.fipPicker, cmd = m.fipPicker.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.serverPicker.Active {
-			var cmd tea.Cmd
-			m.serverPicker, cmd = m.serverPicker.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.volumePicker.Active {
-			var cmd tea.Cmd
-			m.volumePicker, cmd = m.volumePicker.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.routerCreate.Active {
-			var cmd tea.Cmd
-			m.routerCreate, cmd = m.routerCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.subnetPicker.Active {
-			var cmd tea.Cmd
-			m.subnetPicker, cmd = m.subnetPicker.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.networkCreate.Active {
-			var cmd tea.Cmd
-			m.networkCreate, cmd = m.networkCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.subnetCreate.Active {
-			var cmd tea.Cmd
-			m.subnetCreate, cmd = m.subnetCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.subnetEdit.Active {
-			var cmd tea.Cmd
-			m.subnetEdit, cmd = m.subnetEdit.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.portCreate.Active {
-			var cmd tea.Cmd
-			m.portCreate, cmd = m.portCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.portEdit.Active {
-			var cmd tea.Cmd
-			m.portEdit, cmd = m.portEdit.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.sgCreate.Active {
-			var cmd tea.Cmd
-			m.sgCreate, cmd = m.sgCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.sgRuleCreate.Active {
-			var cmd tea.Cmd
-			m.sgRuleCreate, cmd = m.sgRuleCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.imageEdit.Active {
-			var cmd tea.Cmd
-			m.imageEdit, cmd = m.imageEdit.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.imageCreate.Active {
-			var cmd tea.Cmd
-			m.imageCreate, cmd = m.imageCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.imageDownload.Active {
-			var cmd tea.Cmd
-			m.imageDownload, cmd = m.imageDownload.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.lbCreate.Active {
-			var cmd tea.Cmd
-			m.lbCreate, cmd = m.lbCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.lbListenerCreate.Active {
-			var cmd tea.Cmd
-			m.lbListenerCreate, cmd = m.lbListenerCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.lbPoolCreate.Active {
-			var cmd tea.Cmd
-			m.lbPoolCreate, cmd = m.lbPoolCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.lbMemberCreate.Active {
-			var cmd tea.Cmd
-			m.lbMemberCreate, cmd = m.lbMemberCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.lbMonitorCreate.Active {
-			var cmd tea.Cmd
-			m.lbMonitorCreate, cmd = m.lbMonitorCreate.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		if m.projectPicker.Active {
-			var cmd tea.Cmd
-			m.projectPicker, cmd = m.projectPicker.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
-		}
-		// Route non-key messages to clone progress when running (even if dismissed)
-		if m.cloneProgress.Running() {
-			var cmd tea.Cmd
-			m.cloneProgress, cmd = m.cloneProgress.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
+		// Route to any active modals for background messages
+		if modalCmd := m.updateAnyModalBackground(msg); modalCmd != nil {
+			return m, tea.Batch(viewCmd, modalCmd)
 		}
 		return m, viewCmd
 	}

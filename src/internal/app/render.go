@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 func (m Model) viewName() string {
@@ -78,103 +78,8 @@ func (m Model) viewContent() string {
 		return m.help.Render()
 	}
 
-	// Overlay priority chain — overlays are mutually exclusive by design
-	// (each action activates at most one), so first-match ordering is safe.
-	if m.activeModal == modalConfirm {
-		return m.confirm.View()
-	}
-	if m.activeModal == modalError {
-		return m.errModal.View()
-	}
-	if m.fipPicker.Active {
-		return m.fipPicker.View()
-	}
-	if m.serverPicker.Active {
-		return m.serverPicker.View()
-	}
-	if m.volumePicker.Active {
-		return m.volumePicker.View()
-	}
-	if m.routerCreate.Active {
-		return m.routerCreate.View()
-	}
-	if m.subnetPicker.Active {
-		return m.subnetPicker.View()
-	}
-	if m.networkCreate.Active {
-		return m.networkCreate.View()
-	}
-	if m.subnetCreate.Active {
-		return m.subnetCreate.View()
-	}
-	if m.subnetEdit.Active {
-		return m.subnetEdit.View()
-	}
-	if m.portCreate.Active {
-		return m.portCreate.View()
-	}
-	if m.portEdit.Active {
-		return m.portEdit.View()
-	}
-	if m.sgCreate.Active {
-		return m.sgCreate.View()
-	}
-	if m.sgRuleCreate.Active {
-		return m.sgRuleCreate.View()
-	}
-	if m.imageEdit.Active {
-		return m.imageEdit.View()
-	}
-	if m.imageCreate.Active {
-		return m.imageCreate.View()
-	}
-	if m.imageDownload.Active {
-		return m.imageDownload.View()
-	}
-	if m.lbCreate.Active {
-		return m.lbCreate.View()
-	}
-	if m.lbListenerCreate.Active {
-		return m.lbListenerCreate.View()
-	}
-	if m.lbPoolCreate.Active {
-		return m.lbPoolCreate.View()
-	}
-	if m.lbMemberCreate.Active {
-		return m.lbMemberCreate.View()
-	}
-	if m.lbMonitorCreate.Active {
-		return m.lbMonitorCreate.View()
-	}
-	if m.projectPicker.Active {
-		return m.projectPicker.View()
-	}
-	if m.serverRename.Active {
-		return m.serverRename.View()
-	}
-	if m.serverRebuild.Active {
-		return m.serverRebuild.View()
-	}
-	if m.serverSnapshot.Active {
-		return m.serverSnapshot.View()
-	}
-	if m.serverResize.Active {
-		return m.serverResize.View()
-	}
-	if m.cloneProgress.Active {
-		return m.cloneProgress.View()
-	}
-	if m.sshPrompt.Active {
-		return m.sshPrompt.View()
-	}
-	if m.copyPicker.Active {
-		return m.copyPicker.View()
-	}
-	if m.consoleURL.Active {
-		return m.consoleURL.View()
-	}
-	if m.vmPassword.Active {
-		return m.vmPassword.View()
+	if v, ok := m.activeModalView(); ok {
+		return v
 	}
 
 	var content string
