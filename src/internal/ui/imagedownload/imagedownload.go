@@ -409,7 +409,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 			sharedTotal.Store(contentLength)
 		}
 
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 		if err != nil {
 			return downloadErrMsg{err: fmt.Errorf("creating file: %w", err)}
 		}
