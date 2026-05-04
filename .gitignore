@@ -1,3 +1,4 @@
 src/lazystack
 .worktrees
 .claude/worktrees
+coverage.out

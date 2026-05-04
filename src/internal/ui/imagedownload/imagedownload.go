@@ -327,7 +327,7 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) renderDirPicker() string {
-	title := shared.StyleModalTitle.Render("Download Image \u2014 Choose Directory")
+	title := shared.StyleModalTitle.Render("Download Image — Choose Directory")
 
 	dirStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
 	var rows []string
@@ -348,7 +348,7 @@ func (m Model) renderDirPicker() string {
 		e := m.pickerEntries[i]
 		cursor := "  "
 		if i == m.pickerCursor {
-			cursor = "\u25b8 "
+			cursor = "▸ "
 		}
 
 		nameStyle := lipgloss.NewStyle().Foreground(shared.ColorCyan)
@@ -364,7 +364,7 @@ func (m Model) renderDirPicker() string {
 	}
 
 	rows = append(rows, "")
-	rows = append(rows, shared.StyleHelp.Render("\u2191\u2193 navigate \u2022 enter save here \u2022 esc back"))
+	rows = append(rows, shared.StyleHelp.Render("↑↓ navigate • enter save here • esc back"))
 
 	content := title + "\n\n" + strings.Join(rows, "\n")
 	box := shared.StyleModal.Width(m.formWidth()).Render(content)
@@ -409,7 +409,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 			sharedTotal.Store(contentLength)
 		}
 
-		f, err := os.Create(path)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 		if err != nil {
 			return downloadErrMsg{err: fmt.Errorf("creating file: %w", err)}
 		}
@@ -436,9 +436,9 @@ func (m *Model) SetSize(w, h int) {
 // Hints returns key hints.
 func (m Model) Hints() string {
 	if m.downloading {
-		return "b background \u2022 downloading..."
+		return "b background • downloading..."
 	}
-	return "ctrl+s download \u2022 esc cancel"
+	return "ctrl+s download • esc cancel"
 }
 
 // View renders the modal.
@@ -506,7 +506,7 @@ func (m Model) renderProgress() string {
 			pct = 100
 		}
 		filled := barWidth * pct / 100
-		bar := strings.Repeat("\u2588", filled) + strings.Repeat("\u2591", barWidth-filled)
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 		barStyle := lipgloss.NewStyle().Foreground(shared.ColorSuccess)
 		rows = append(rows, barStyle.Render(bar))
 		rows = append(rows, fmt.Sprintf("%d%%  %s / %s",
