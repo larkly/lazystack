@@ -4,8 +4,8 @@ import (
 	"sync"
 )
 
-// NavStack is an explicit navigation stack for back-navigation.
-// Replaces the implicit previousView/returnToView fields on the Model.
+// NavStack is an explicit navigation stack for local back-navigation.
+// Cross-resource tab jumps still use Model.returnToView.
 type NavStack struct {
 	mu    sync.Mutex
 	items []NavEntry
@@ -76,4 +76,18 @@ func (ns *NavStack) Clear() {
 	ns.mu.Lock()
 	ns.items = nil
 	ns.mu.Unlock()
+}
+
+func (m *Model) pushNav(view activeView, tab int) {
+	if m.nav == nil {
+		m.nav = &NavStack{}
+	}
+	m.nav.Push(view, tab)
+}
+
+func (m *Model) popNav() (NavEntry, bool) {
+	if m.nav == nil {
+		return NavEntry{}, false
+	}
+	return m.nav.Pop()
 }

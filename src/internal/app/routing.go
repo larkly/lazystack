@@ -174,7 +174,7 @@ func (m Model) handleDetailNavigation(msg shared.NavigateToDetailMsg) (Model, te
 	case "volume":
 		m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, msg.ID)
 		m.volumeDetail.SetSize(m.width, m.height)
-		m.nav.Push(m.view, m.activeTab)
+		m.pushNav(m.view, m.activeTab)
 		m.view = viewVolumeDetail
 		m.statusBar.CurrentView = "volumedetail"
 		m.statusBar.Hint = m.volumeDetail.Hints()
@@ -254,11 +254,14 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
 
 	case "serverdetail":
-		if entry, ok := m.nav.Pop(); ok {
-			m.view = entry.View
-			m.activeTab = entry.Tab
-			m.statusBar.CurrentView = m.viewName()
-			return m, nil
+		if m.view == viewConsoleLog || m.view == viewActionLog {
+			if entry, ok := m.popNav(); ok {
+				return m.restoreNavEntry(entry)
+			}
+			m.view = viewServerList
+			m.statusBar.CurrentView = "serverlist"
+			m.statusBar.Hint = m.serverList.Hints()
+			return m, func() tea.Msg { return shared.RefreshServersMsg{} }
 		}
 		if s := m.serverList.SelectedServer(); s != nil {
 			m.serverDetail = serverdetail.New(m.client.Compute, m.client.Network, m.client.BlockStorage, s.ID, m.refreshInterval)
@@ -271,6 +274,11 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case "volumelist":
+		if m.view == viewVolumeDetail {
+			if entry, ok := m.popNav(); ok {
+				return m.restoreNavEntry(entry)
+			}
+		}
 		// If returning from a cross-resource jump, go back to server detail
 		if m.returnToView == viewServerDetail && m.serverDetail.ServerID() != "" {
 			m.returnToView = 0
@@ -332,6 +340,40 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 	case "consolelog":
 		return m, nil // handled by openConsoleLog
 
+	}
+	return m, nil
+}
+
+func (m Model) restoreNavEntry(entry NavEntry) (Model, tea.Cmd) {
+	m.view = entry.View
+	if entry.Tab >= 0 && entry.Tab < len(m.tabs) {
+		m.activeTab = entry.Tab
+	}
+	m.statusBar.CurrentView = m.viewName()
+
+	switch m.view {
+	case viewServerList:
+		m.statusBar.Hint = m.serverList.Hints()
+		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
+	case viewServerDetail:
+		if m.serverDetail.ServerID() == "" {
+			m.view = viewServerList
+			m.statusBar.CurrentView = "serverlist"
+			m.statusBar.Hint = m.serverList.Hints()
+			return m, func() tea.Msg { return shared.RefreshServersMsg{} }
+		}
+		m.statusBar.Hint = m.serverDetail.Hints()
+		return m, m.serverDetail.Init()
+	case viewVolumeList:
+		m.statusBar.Hint = m.volumeList.Hints()
+		return m, m.volumeList.Init()
+	case viewVolumeDetail:
+		m.statusBar.Hint = m.volumeDetail.Hints()
+		return m, m.volumeDetail.Init()
+	case viewConsoleLog:
+		m.statusBar.Hint = m.consoleLog.Hints()
+	case viewActionLog:
+		m.statusBar.Hint = m.actionLog.Hints()
 	}
 	return m, nil
 }
