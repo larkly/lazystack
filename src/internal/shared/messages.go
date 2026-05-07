@@ -17,6 +17,7 @@ type CloudConnectedMsg struct {
 	NetworkClient      *gophercloud.ServiceClient
 	BlockStorageClient *gophercloud.ServiceClient
 	LoadBalancerClient *gophercloud.ServiceClient
+	DNSClient          *gophercloud.ServiceClient
 	ProviderClient     *gophercloud.ProviderClient
 	EndpointOpts       gophercloud.EndpointOpts
 	Region             string

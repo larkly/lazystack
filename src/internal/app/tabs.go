@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/dnslist"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/imageview"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
@@ -38,7 +39,7 @@ func DefaultTabs() []TabDef {
 
 func (m Model) isTopLevelView() bool {
 	switch m.view {
-	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBView, viewNetworkList, viewRouterView, viewImageView:
+	case viewServerList, viewVolumeList, viewFloatingIPList, viewSecGroupView, viewKeypairList, viewLBView, viewNetworkList, viewRouterView, viewImageView, viewDNSList:
 		return true
 	}
 	return false
@@ -168,6 +169,19 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 		}
 		m.statusBar.Hint = m.imageView.Hints()
 		return m, m.imageView.ForceRefresh()
+
+	case "dns":
+		m.view = viewDNSList
+		m.statusBar.CurrentView = "dnslist"
+		if !m.tabInited[idx] {
+			m.dnsList = dnslist.New(m.client.DNS)
+			m.dnsList.SetSize(m.width, m.height)
+			m.tabInited[idx] = true
+			m.statusBar.Hint = m.dnsList.Hints()
+			return m, m.dnsList.Init()
+		}
+		m.statusBar.Hint = m.dnsList.Hints()
+		return m, m.dnsList.ForceRefresh()
 	}
 	return m, nil
 }

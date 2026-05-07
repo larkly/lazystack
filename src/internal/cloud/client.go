@@ -142,6 +142,7 @@ type Client struct {
 	Network              *gophercloud.ServiceClient
 	BlockStorage         *gophercloud.ServiceClient
 	LoadBalancer         *gophercloud.ServiceClient
+	DNS                  *gophercloud.ServiceClient
 	ProviderClient       *gophercloud.ProviderClient
 	EndpointOpts         gophercloud.EndpointOpts
 	NovaMicroversionMax  string // max supported by this deployment
@@ -221,6 +222,13 @@ func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gopherc
 		shared.Debugf("[cloud] connectWithOpts: load balancer client unavailable")
 	}
 
+	// DNS (Designate) — optional service
+	shared.Debugf("[cloud] connectWithOpts: creating DNS client")
+	dns := tryDNS(providerClient, eo)
+	if dns == nil {
+		shared.Debugf("[cloud] connectWithOpts: DNS client unavailable")
+	}
+
 	region := eo.Region
 	if region == "" {
 		region = "default"
@@ -238,6 +246,7 @@ func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gopherc
 		Network:              network,
 		BlockStorage:         blockStorage,
 		LoadBalancer:         loadBalancer,
+		DNS:                  dns,
 		ProviderClient:       providerClient,
 		EndpointOpts:         eo,
 		NovaMicroversionMax:  maxVersion,
@@ -247,6 +256,13 @@ func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gopherc
 
 func tryLoadBalancer(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) *gophercloud.ServiceClient {
 	if sc, err := openstack.NewLoadBalancerV2(pc, eo); err == nil {
+		return sc
+	}
+	return nil
+}
+
+func tryDNS(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) *gophercloud.ServiceClient {
+	if sc, err := openstack.NewDNSV2(pc, eo); err == nil {
 		return sc
 	}
 	return nil

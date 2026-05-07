@@ -46,6 +46,9 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewServiceCatalog:
 		m.serviceCatalog, cmd = m.serviceCatalog.Update(msg)
 		m.statusBar.Hint = m.serviceCatalog.Hints()
+	case viewDNSList:
+		m.dnsList, cmd = m.dnsList.Update(msg)
+		m.statusBar.Hint = m.dnsList.Hints()
 	case viewVolumeList:
 		m.volumeList, cmd = m.volumeList.Update(msg)
 		m.statusBar.Hint = m.volumeList.Hints()
@@ -125,6 +128,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		case "images":
 			m.imageView, cmd = m.imageView.Update(msg)
+			cmds = append(cmds, cmd)
+		case "dns":
+			m.dnsList, cmd = m.dnsList.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -385,6 +391,8 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.hypervisorList.ForceRefresh()
 	case viewServiceCatalog:
 		return m, m.serviceCatalog.ForceRefresh()
+	case viewDNSList:
+		return m, m.dnsList.ForceRefresh()
 	}
 	return m, nil
 }

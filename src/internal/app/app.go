@@ -23,6 +23,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/consoleurl"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
+	"github.com/larkly/lazystack/internal/ui/dnslist"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/help"
@@ -96,6 +97,7 @@ const (
 	viewImageView
 	viewHypervisorList
 	viewServiceCatalog
+	viewDNSList
 )
 
 type modalType int
@@ -185,6 +187,7 @@ type Model struct {
 	confirm             modal.ConfirmModel
 	hypervisorList      hypervisorlist.Model
 	serviceCatalog      servicecatalog.Model
+	dnsList             dnslist.Model
 	errModal            modal.ErrorModel
 	activeModal         modalType
 	projects            []shared.ProjectInfo
@@ -865,6 +868,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Network:        msg.NetworkClient,
 			BlockStorage:   msg.BlockStorageClient,
 			LoadBalancer:   msg.LoadBalancerClient,
+			DNS:            msg.DNSClient,
 			ProviderClient: msg.ProviderClient,
 			EndpointOpts:   msg.EndpointOpts,
 		}
@@ -880,6 +884,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tabs = append(m.tabs, TabDef{Name: "Routers", Key: "routers"})
 		if msg.LoadBalancerClient != nil {
 			m.tabs = append(m.tabs, TabDef{Name: "Load Balancers", Key: "loadbalancers"})
+		}
+		if msg.DNSClient != nil {
+			m.tabs = append(m.tabs, TabDef{Name: "DNS", Key: "dns"})
 		}
 		m.tabs = append(m.tabs, TabDef{Name: "Key Pairs", Key: "keypairs"})
 		m.tabInited = make([]bool, len(m.tabs))
