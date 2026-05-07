@@ -62,6 +62,7 @@ type KeyMap struct {
 	Hypervisors  key.Binding
 	SaveFilter   key.Binding
 	LoadFilter   key.Binding
+	Browse       key.Binding
 }
 
 var Keys = KeyMap{
@@ -300,5 +301,9 @@ var Keys = KeyMap{
 	LoadFilter: key.NewBinding(
 		key.WithKeys("F"),
 		key.WithHelp("F", "load filter"),
+	),
+	Browse: key.NewBinding(
+		key.WithKeys("B"),
+		key.WithHelp("B", "browse catalog"),
 	),
 }

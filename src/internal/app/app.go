@@ -53,6 +53,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/serverlist"
+	"github.com/larkly/lazystack/internal/ui/servicecatalog"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
@@ -94,6 +95,7 @@ const (
 	viewRouterView
 	viewImageView
 	viewHypervisorList
+	viewServiceCatalog
 )
 
 type modalType int
@@ -182,6 +184,7 @@ type Model struct {
 	configView          configview.Model
 	confirm             modal.ConfirmModel
 	hypervisorList      hypervisorlist.Model
+	serviceCatalog      servicecatalog.Model
 	errModal            modal.ErrorModel
 	activeModal         modalType
 	projects            []shared.ProjectInfo
@@ -398,6 +401,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case key.Matches(msg, shared.Keys.Hypervisors) && m.view != viewCloudPicker:
 				return m.openHypervisorList()
+			case key.Matches(msg, shared.Keys.Browse) && m.view != viewCloudPicker:
+				return m.openServiceCatalog()
 			}
 
 			// Back-navigation from cross-resource jump

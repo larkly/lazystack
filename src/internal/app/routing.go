@@ -43,6 +43,9 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewHypervisorList:
 		m.hypervisorList, cmd = m.hypervisorList.Update(msg)
 		m.statusBar.Hint = m.hypervisorList.Hints()
+	case viewServiceCatalog:
+		m.serviceCatalog, cmd = m.serviceCatalog.Update(msg)
+		m.statusBar.Hint = m.serviceCatalog.Hints()
 	case viewVolumeList:
 		m.volumeList, cmd = m.volumeList.Update(msg)
 		m.statusBar.Hint = m.volumeList.Hints()
@@ -143,6 +146,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case viewHypervisorList:
 		m.hypervisorList, cmd = m.hypervisorList.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewServiceCatalog:
+		m.serviceCatalog, cmd = m.serviceCatalog.Update(msg)
 		cmds = append(cmds, cmd)
 	case viewServerCreate:
 		m.serverCreate, cmd = m.serverCreate.Update(msg)
@@ -339,6 +345,9 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 	case "consolelog":
 		return m, nil // handled by openConsoleLog
 
+	case "servicecatalog":
+		return m.openServiceCatalog()
+
 	}
 	return m, nil
 }
@@ -374,6 +383,8 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.actionLog.ForceRefresh()
 	case viewHypervisorList:
 		return m, m.hypervisorList.ForceRefresh()
+	case viewServiceCatalog:
+		return m, m.serviceCatalog.ForceRefresh()
 	}
 	return m, nil
 }

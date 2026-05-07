@@ -27,6 +27,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
+	"github.com/larkly/lazystack/internal/ui/servicecatalog"
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
 	"github.com/larkly/lazystack/internal/volume"
 )
@@ -387,6 +388,16 @@ func (m Model) openHypervisorList() (Model, tea.Cmd) {
 	m.statusBar.CurrentView = "hypervisorlist"
 	m.statusBar.Hint = m.hypervisorList.Hints()
 	return m, m.hypervisorList.Init()
+}
+
+func (m Model) openServiceCatalog() (Model, tea.Cmd) {
+	m.serviceCatalog = servicecatalog.New(m.client.ProviderClient, m.client.EndpointOpts)
+	m.serviceCatalog.SetSize(m.width, m.height)
+	m.nav.Push(m.view, m.activeTab)
+	m.view = viewServiceCatalog
+	m.statusBar.CurrentView = "servicecatalog"
+	m.statusBar.Hint = m.serviceCatalog.Hints()
+	return m, m.serviceCatalog.Init()
 }
 
 func (m Model) openResize() (Model, tea.Cmd) {
