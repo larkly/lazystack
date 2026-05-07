@@ -26,6 +26,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/help"
+	"github.com/larkly/lazystack/internal/ui/hypervisorlist"
 	"github.com/larkly/lazystack/internal/ui/imagecreate"
 	"github.com/larkly/lazystack/internal/ui/imagedownload"
 	"github.com/larkly/lazystack/internal/ui/imageedit"
@@ -92,6 +93,7 @@ const (
 	viewKeypairDetail
 	viewRouterView
 	viewImageView
+	viewHypervisorList
 )
 
 type modalType int
@@ -179,6 +181,7 @@ type Model struct {
 	quotaView           quotaview.Model
 	configView          configview.Model
 	confirm             modal.ConfirmModel
+	hypervisorList      hypervisorlist.Model
 	errModal            modal.ErrorModel
 	activeModal         modalType
 	projects            []shared.ProjectInfo
@@ -393,6 +396,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.configView.Height = m.height
 				m.configView.Open()
 				return m, nil
+			case key.Matches(msg, shared.Keys.Hypervisors) && m.view != viewCloudPicker:
+				return m.openHypervisorList()
 			}
 
 			// Back-navigation from cross-resource jump

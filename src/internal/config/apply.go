@@ -117,6 +117,7 @@ var keybindingFieldMap = map[string]func(b key.Binding){
 	"copy":            func(b key.Binding) { shared.Keys.Copy = b },
 	"console_url":     func(b key.Binding) { shared.Keys.ConsoleURL = b },
 	"config":          func(b key.Binding) { shared.Keys.Config = b },
+	"hypervisors":     func(b key.Binding) { shared.Keys.Hypervisors = b },
 }
 
 // defaultHelpText maps config keybinding names to their help descriptions.

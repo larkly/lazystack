@@ -40,6 +40,9 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewActionLog:
 		m.actionLog, cmd = m.actionLog.Update(msg)
 		m.statusBar.Hint = m.actionLog.Hints()
+	case viewHypervisorList:
+		m.hypervisorList, cmd = m.hypervisorList.Update(msg)
+		m.statusBar.Hint = m.hypervisorList.Hints()
 	case viewVolumeList:
 		m.volumeList, cmd = m.volumeList.Update(msg)
 		m.statusBar.Hint = m.volumeList.Hints()
@@ -137,6 +140,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case viewActionLog:
 		m.actionLog, cmd = m.actionLog.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewHypervisorList:
+		m.hypervisorList, cmd = m.hypervisorList.Update(msg)
 		cmds = append(cmds, cmd)
 	case viewServerCreate:
 		m.serverCreate, cmd = m.serverCreate.Update(msg)
@@ -366,6 +372,8 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.consoleLog.ForceRefresh()
 	case viewActionLog:
 		return m, m.actionLog.ForceRefresh()
+	case viewHypervisorList:
+		return m, m.hypervisorList.ForceRefresh()
 	}
 	return m, nil
 }

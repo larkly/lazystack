@@ -59,6 +59,7 @@ type KeyMap struct {
 	ConsoleURL  key.Binding
 	GetPassword key.Binding
 	Config       key.Binding
+	Hypervisors  key.Binding
 }
 
 var Keys = KeyMap{
@@ -285,5 +286,9 @@ var Keys = KeyMap{
 	Config: key.NewBinding(
 		key.WithKeys("ctrl+k"),
 		key.WithHelp("ctrl+k", "config"),
+	),
+	Hypervisors: key.NewBinding(
+		key.WithKeys("H"),
+		key.WithHelp("H", "hypervisors"),
 	),
 }

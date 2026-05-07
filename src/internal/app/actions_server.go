@@ -20,6 +20,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
+	"github.com/larkly/lazystack/internal/ui/hypervisorlist"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
@@ -376,6 +377,16 @@ func (m Model) openActionLog() (Model, tea.Cmd) {
 	m.statusBar.CurrentView = "actionlog"
 	m.statusBar.Hint = m.actionLog.Hints()
 	return m, m.actionLog.Init()
+}
+
+func (m Model) openHypervisorList() (Model, tea.Cmd) {
+	m.hypervisorList = hypervisorlist.New(m.client.Compute)
+	m.hypervisorList.SetSize(m.width, m.height)
+	m.nav.Push(m.view, m.activeTab)
+	m.view = viewHypervisorList
+	m.statusBar.CurrentView = "hypervisorlist"
+	m.statusBar.Hint = m.hypervisorList.Hints()
+	return m, m.hypervisorList.Init()
 }
 
 func (m Model) openResize() (Model, tea.Cmd) {

@@ -47,6 +47,8 @@ func (m Model) viewName() string {
 		return "lbview"
 	case viewImageView:
 		return "imageview"
+	case viewHypervisorList:
+		return "hypervisorlist"
 	}
 	return ""
 }
