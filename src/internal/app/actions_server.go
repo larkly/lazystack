@@ -22,12 +22,14 @@ import (
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/hypervisorlist"
 	"github.com/larkly/lazystack/internal/ui/modal"
+	"github.com/larkly/lazystack/internal/ui/serveradminact"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/servicecatalog"
+	"github.com/larkly/lazystack/internal/ui/servermetadata"
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
 	"github.com/larkly/lazystack/internal/volume"
 )
@@ -1315,4 +1317,40 @@ func (m Model) openConsoleURL() (Model, tea.Cmd) {
 		}
 		return shared.ConsoleURLMsg{URL: url, ServerName: serverName}
 	}
+}
+
+func (m Model) openAdminActions() (Model, tea.Cmd) {
+	var id, name string
+	if m.view == viewServerDetail {
+		id = m.serverDetail.ServerID()
+		name = m.serverDetail.ServerName()
+	}
+	if id == "" {
+		return m, nil
+	}
+	m.serverAdminAct = serveradminact.New(m.client.Compute, id, name)
+	m.serverAdminAct.SetSize(m.width, m.height)
+	return m, m.serverAdminAct.Init()
+}
+
+func (m Model) openServerMetadata() (Model, tea.Cmd) {
+	var id, name string
+	var meta map[string]string
+	if m.view == viewServerDetail {
+		id = m.serverDetail.ServerID()
+		name = m.serverDetail.ServerName()
+		s := m.serverDetail.Server()
+		if s != nil {
+			meta = s.Metadata
+		}
+	}
+	if id == "" {
+		return m, nil
+	}
+	if meta == nil {
+		meta = make(map[string]string)
+	}
+	m.serverMetadata = servermetadata.New(m.client.Compute, id, name, meta)
+	m.serverMetadata.SetSize(m.width, m.height)
+	return m, m.serverMetadata.Init()
 }

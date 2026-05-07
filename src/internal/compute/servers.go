@@ -366,6 +366,73 @@ func RenameServer(ctx context.Context, client *gophercloud.ServiceClient, id, ne
 	return nil
 }
 
+// MigrateServer cold-migrates a server to a new compute host.
+func MigrateServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] migrating server %s", id)
+	r := servers.Migrate(ctx, client, id)
+	if r.Err != nil {
+		shared.Debugf("[compute] migrate server %s: %v", id, r.Err)
+		return fmt.Errorf("migrating server %s: %w", id, r.Err)
+	}
+	shared.Debugf("[compute] migrated server %s", id)
+	return nil
+}
+
+// LiveMigrateServer live-migrates a server to a target host.
+func LiveMigrateServer(ctx context.Context, client *gophercloud.ServiceClient, id, host string) error {
+	shared.Debugf("[compute] live-migrating server %s to host %s", id, host)
+	opts := servers.LiveMigrateOpts{Host: &host, BlockMigration: new(bool)}
+	*opts.BlockMigration = false
+	r := servers.LiveMigrate(ctx, client, id, opts)
+	if r.Err != nil {
+		shared.Debugf("[compute] live-migrate server %s: %v", id, r.Err)
+		return fmt.Errorf("live-migrating server %s: %w", id, r.Err)
+	}
+	shared.Debugf("[compute] live-migrated server %s", id)
+	return nil
+}
+
+// EvacuateServer evacuates a server from a failed host.
+func EvacuateServer(ctx context.Context, client *gophercloud.ServiceClient, id, targetHost string, onSharedStorage bool) (string, error) {
+	shared.Debugf("[compute] evacuating server %s to %s (shared=%v)", id, targetHost, onSharedStorage)
+	adminPass := ""
+	opts := servers.EvacuateOpts{
+		Host:            targetHost,
+		OnSharedStorage: onSharedStorage,
+	}
+	r := servers.Evacuate(ctx, client, id, opts)
+	if r.Err != nil {
+		shared.Debugf("[compute] evacuate server %s: %v", id, r.Err)
+		return "", fmt.Errorf("evacuating server %s: %w", id, r.Err)
+	}
+	shared.Debugf("[compute] evacuated server %s", id)
+	return adminPass, nil
+}
+
+// ForceDeleteServer forcefully deletes a server.
+func ForceDeleteServer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	shared.Debugf("[compute] force-deleting server %s", id)
+	r := servers.ForceDelete(ctx, client, id)
+	if r.Err != nil {
+		shared.Debugf("[compute] force-delete server %s: %v", id, r.Err)
+		return fmt.Errorf("force-deleting server %s: %w", id, r.Err)
+	}
+	shared.Debugf("[compute] force-deleted server %s", id)
+	return nil
+}
+
+// ResetServerState resets the state of a server.
+func ResetServerState(ctx context.Context, client *gophercloud.ServiceClient, id string, state string) error {
+	shared.Debugf("[compute] resetting state of server %s to %s", id, state)
+	r := servers.ResetState(ctx, client, id, servers.ServerState(state))
+	if r.Err != nil {
+		shared.Debugf("[compute] reset state server %s: %v", id, r.Err)
+		return fmt.Errorf("resetting state of server %s: %w", id, r.Err)
+	}
+	shared.Debugf("[compute] reset state of server %s to %s", id, state)
+	return nil
+}
+
 // GetRemoteConsole retrieves a noVNC console URL for a server.
 func GetRemoteConsole(ctx context.Context, client *gophercloud.ServiceClient, id string) (string, error) {
 	shared.Debugf("[compute] getting remote console for server %s", id)
