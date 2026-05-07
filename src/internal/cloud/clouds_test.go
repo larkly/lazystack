@@ -1,10 +1,15 @@
 package cloud
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gophercloud/gophercloud/v2"
 )
 
 func TestListCloudNames(t *testing.T) {
@@ -261,5 +266,119 @@ func TestListCloudNames_DetailedCloudsYaml(t *testing.T) {
 		if name != expected[i] {
 			t.Errorf("expected %s at index %d, got %s", expected[i], i, name)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests added for #37 Phase 4 — cloud config & discovery
+// ---------------------------------------------------------------------------
+
+func fakeProviderClient(handler http.Handler) *gophercloud.ProviderClient {
+	srv := httptest.NewServer(handler)
+	return &gophercloud.ProviderClient{
+		HTTPClient:       *srv.Client(),
+		IdentityBase:     srv.URL + "/",
+		IdentityEndpoint: srv.URL + "/",
+		TokenID:          "test-token",
+	}
+}
+
+func TestListAccessibleProjects(t *testing.T) {
+	projectsJSON := `{
+  "projects": [
+    {"id": "p1", "name": "production", "enabled": true},
+    {"id": "p2", "name": "staging", "enabled": true},
+    {"id": "p3", "name": "disabled-project", "enabled": false}
+  ]
+}`
+	var srvURL string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "auth/projects") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(projectsJSON))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	pc := fakeProviderClient(handler)
+	srvURL = pc.IdentityEndpoint // capture after creation
+	// Provide an EndpointLocator so NewIdentityV3 can resolve the endpoint.
+	// The locator must return a valid URL; we return the test server base.
+	pc.EndpointLocator = func(eo gophercloud.EndpointOpts) (string, error) {
+		return srvURL, nil
+	}
+	eo := gophercloud.EndpointOpts{}
+	ctx := context.Background()
+
+	projects, err := ListAccessibleProjects(ctx, pc, eo)
+	if err != nil {
+		t.Fatalf("ListAccessibleProjects() error: %v", err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("expected 2 enabled projects, got %d", len(projects))
+	}
+
+	if projects[0].ID != "p1" || projects[0].Name != "production" {
+		t.Errorf("first project: got %s/%s, want p1/production", projects[0].ID, projects[0].Name)
+	}
+	if projects[1].ID != "p2" || projects[1].Name != "staging" {
+		t.Errorf("second project: got %s/%s, want p2/staging", projects[1].ID, projects[1].Name)
+	}
+}
+
+func TestConnectionInvalidAuthURL(t *testing.T) {
+	dir := t.TempDir()
+	content := `clouds:
+  bad:
+    auth:
+      auth_url: "://invalid-url-that-cannot-be-parsed"
+`
+	path := filepath.Join(dir, "clouds.yaml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("OS_CLIENT_CONFIG_FILE", path)
+	t.Setenv("HOME", dir)
+
+	ctx := context.Background()
+	_, err := Connect(ctx, "bad")
+	if err == nil {
+		t.Error("expected error for invalid auth URL, got nil")
+	}
+	if !strings.Contains(err.Error(), "bad") {
+		t.Errorf("error should mention cloud name 'bad', got: %v", err)
+	}
+}
+
+func TestConnectionTimeout(t *testing.T) {
+	dir := t.TempDir()
+	content := `clouds:
+  unreachable:
+    auth:
+      auth_url: http://127.0.0.1:19999
+`
+	path := filepath.Join(dir, "clouds.yaml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("OS_CLIENT_CONFIG_FILE", path)
+	t.Setenv("HOME", dir)
+
+	ctx := context.Background()
+	_, err := Connect(ctx, "unreachable")
+	if err == nil {
+		t.Error("expected connection error for unreachable endpoint, got nil")
+	}
+	errStr := strings.ToLower(err.Error())
+	if !strings.Contains(errStr, "connect") &&
+		!strings.Contains(errStr, "refused") &&
+		!strings.Contains(errStr, "unreachable") &&
+		!strings.Contains(errStr, "dial") &&
+		!strings.Contains(errStr, "tcp") {
+		t.Logf("error was: %v (expected connection-related error)", err)
 	}
 }
