@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -16,6 +17,27 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/config/clouds"
 )
 
+// resolveMicroversion determines which Nova microversion to use.
+// It checks OS_COMPUTE_API_VERSION first (user override), then falls back
+// to runtime negotiation. Returns (maxVersion, usedVersion, degradationWarning).
+func resolveMicroversion(ctx context.Context, compute *gophercloud.ServiceClient) (string, string, string) {
+	// Check for user-specified microversion via environment variable
+	if userVersion := os.Getenv("OS_COMPUTE_API_VERSION"); userVersion != "" {
+		// Validate microversion format (X.Y or X.Y.Z)
+		if _, _, err := parseMicroversion(userVersion); err != nil {
+			shared.Debugf("[cloud] resolveMicroversion: invalid OS_COMPUTE_API_VERSION=%q: %v, ignoring", userVersion, err)
+		} else {
+			ceiling := "2.100"
+			used := minMicroversion(userVersion, ceiling)
+			if used != userVersion {
+				shared.Debugf("[cloud] resolveMicroversion: user requested %s, capped at %s", userVersion, used)
+			}
+			shared.Debugf("[cloud] resolveMicroversion: using user-specified microversion %s", used)
+			return "user-specified", used, ""
+		}
+	}
+	return negotiateNovaMicroversion(ctx, compute)
+}
 // negotiateNovaMicroversion queries the Nova API for the max supported microversion,
 // caps at 2.100 (our known-good ceiling), and returns the negotiated version.
 // Returns (maxVersion, usedVersion, degradationWarning).
@@ -86,8 +108,8 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 // minMicroversion returns the numerically lower of two microversion strings.
 // Microversions are formatted as "X.Y" — compare major then minor.
 func minMicroversion(a, b string) string {
-	ma, mi := parseMicroversion(a)
-	mb, mj := parseMicroversion(b)
+	ma, mi, _ := parseMicroversion(a)
+	mb, mj, _ := parseMicroversion(b)
 
 	if ma > mb || (ma == mb && mi > mj) {
 		return b
@@ -95,14 +117,20 @@ func minMicroversion(a, b string) string {
 	return a
 }
 
-func parseMicroversion(v string) (int, int) {
+func parseMicroversion(v string) (int, int, error) {
 	parts := strings.Split(v, ".")
 	if len(parts) < 2 {
-		return 0, 0
+		return 0, 0, fmt.Errorf("invalid microversion %q: expected format X.Y or X.Y.Z", v)
 	}
-	ma, _ := strconv.Atoi(parts[0])
-	mi, _ := strconv.Atoi(parts[1])
-	return ma, mi
+	ma, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid microversion major %q: %w", parts[0], err)
+	}
+	mi, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid microversion minor %q: %w", parts[1], err)
+	}
+	return ma, mi, nil
 }
 
 // Client holds authenticated OpenStack service clients.
@@ -160,8 +188,8 @@ func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gopherc
 	}
 	compute.Microversion = "2.100"
 
-	// Negotiate the actual Nova microversion supported by this deployment.
-	maxVersion, usedVersion, degradeWarning := negotiateNovaMicroversion(ctx, compute)
+	// Resolve the Nova microversion: check user override first, then negotiate.
+	maxVersion, usedVersion, degradeWarning := resolveMicroversion(ctx, compute)
 	compute.Microversion = usedVersion
 
 	shared.Debugf("[cloud] connectWithOpts: creating image client")
