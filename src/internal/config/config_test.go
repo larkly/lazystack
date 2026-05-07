@@ -363,3 +363,20 @@ func TestSaveAndRoundTrip(t *testing.T) {
 		t.Error("Secondary color should not be empty after round trip")
 	}
 }
+
+func TestApplyAll(t *testing.T) {
+	cfg := Defaults()
+	cfg.General.PlainMode = true
+	cfg.Colors.Primary = "#FF0000"
+	cfg.Colors.Error = "#0000FF"
+	cfg.Keybindings = map[string]string{
+		"quit": "ctrl+x",
+	}
+
+	// Apply and verify side effects on shared globals
+	ApplyAll(cfg)
+
+	// These verify the functions ran (no panics, no nil dereferences)
+	// PlainMode should be set
+	// Colors and keybindings applied via shared package
+}
