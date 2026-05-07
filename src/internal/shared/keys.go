@@ -60,6 +60,8 @@ type KeyMap struct {
 	GetPassword key.Binding
 	Config       key.Binding
 	Hypervisors  key.Binding
+	SaveFilter   key.Binding
+	LoadFilter   key.Binding
 }
 
 var Keys = KeyMap{
@@ -290,5 +292,13 @@ var Keys = KeyMap{
 	Hypervisors: key.NewBinding(
 		key.WithKeys("H"),
 		key.WithHelp("H", "hypervisors"),
+	),
+	SaveFilter: key.NewBinding(
+		key.WithKeys("f"),
+		key.WithHelp("f", "save filter"),
+	),
+	LoadFilter: key.NewBinding(
+		key.WithKeys("F"),
+		key.WithHelp("F", "load filter"),
 	),
 }

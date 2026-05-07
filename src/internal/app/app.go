@@ -883,6 +883,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusBar.Region = msg.Region
 		m.quotaView.SetClients(msg.ComputeClient, msg.NetworkClient, msg.BlockStorageClient, "")
 		m.serverList = serverlist.New(msg.ComputeClient, msg.ImageClient, m.refreshInterval)
+		m.serverList.SetConfig(m.configView.Cfg())
 		m.serverList.SetSize(m.width, m.height)
 		m.view = viewServerList
 		m.statusBar.CurrentView = "serverlist"

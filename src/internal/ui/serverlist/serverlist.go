@@ -10,6 +10,7 @@ import (
 
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/config"
 	img "github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
@@ -55,6 +56,9 @@ type Model struct {
 	sortAsc         bool
 	sortHighlight   bool
 	sortClearAt     time.Time
+	config          *config.Config // live reference to global config for saving filters
+	filterNameInput textinput.Model
+	namingFilter    bool // true when user is typing name for save
 }
 
 // New creates a new server list model.
@@ -195,6 +199,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.namingFilter {
+			return m.updateNamingFilter(msg)
+		}
 		if m.filtering {
 			return m.updateFilter(msg)
 		}
@@ -281,6 +288,17 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.filtering = true
 		m.filter.Focus()
 		return m, nil
+	case key.Matches(msg, shared.Keys.SaveFilter):
+		if m.filter.Value() != "" {
+			m.namingFilter = true
+			m.filterNameInput.Focus()
+			m.filterNameInput.SetValue("")
+			return m, nil
+		}
+	case key.Matches(msg, shared.Keys.LoadFilter):
+		if m.config != nil && len(m.config.SavedFilters) > 0 {
+			return m.loadNextFilter()
+		}
 	case key.Matches(msg, shared.Keys.Enter):
 		if s := m.SelectedServer(); s != nil {
 			return m, func() tea.Msg {
@@ -511,7 +529,9 @@ func (m Model) View() string {
 	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
 
 	// Filter bar
-	if m.filtering {
+	if m.namingFilter {
+		b.WriteString("  save: /" + m.filter.Value() + " as " + m.filterNameInput.View() + "\n")
+	} else if m.filtering {
 		b.WriteString("  / " + m.filter.View() + "\n")
 	} else if m.filter.Value() != "" {
 		b.WriteString(shared.StyleHelp.Render(fmt.Sprintf("  filter: %s (/ to edit, esc to clear)", m.filter.Value())) + "\n")
@@ -772,16 +792,75 @@ func (m Model) fetchMissingImageNames() tea.Cmd {
 	}
 }
 
+// SetConfig wires the live config reference for saving/loading filters.
+func (m *Model) SetConfig(cfg *config.Config) {
+	m.config = cfg
+	fn := textinput.New()
+	fn.Prompt = ""
+	fn.Placeholder = "filter name..."
+	fn.CharLimit = 32
+	m.filterNameInput = fn
+}
+
+func (m Model) updateNamingFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.namingFilter = false
+		m.filterNameInput.Blur()
+		m.filterNameInput.SetValue("")
+		return m, nil
+	case "enter":
+		name := strings.TrimSpace(m.filterNameInput.Value())
+		if name != "" && m.config != nil {
+			m.config.SavedFilters = append(m.config.SavedFilters, config.SavedFilter{
+				Name: name, Pattern: m.filter.Value(),
+			})
+			if err := m.config.Save(); err != nil {
+				shared.Debugf("[serverlist] failed to save filter: %v", err)
+			}
+		}
+		m.namingFilter = false
+		m.filterNameInput.Blur()
+		m.filterNameInput.SetValue("")
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.filterNameInput, cmd = m.filterNameInput.Update(msg)
+	return m, cmd
+}
+
+// cycleFilterIdx tracks which saved filter was last loaded.
+var cycleFilterIdx int
+
+func (m Model) loadNextFilter() (Model, tea.Cmd) {
+	if m.config == nil || len(m.config.SavedFilters) == 0 {
+		return m, nil
+	}
+	cycleFilterIdx = (cycleFilterIdx) % len(m.config.SavedFilters)
+	f := m.config.SavedFilters[cycleFilterIdx]
+	cycleFilterIdx++
+	m.filter.SetValue(f.Pattern)
+	m.applyFilter()
+	return m, nil
+}
 
 // Hints returns context-sensitive key hints for the status bar.
 func (m Model) Hints() string {
+	if m.namingFilter {
+		return "enter confirm • esc cancel • name your saved filter"
+	}
 	if m.filtering {
 		return "enter confirm • esc clear"
 	}
 	if len(m.selected) > 0 {
 		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^o reboot • esc clear • ? help", len(m.selected))
 	}
-	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • ^o reboot • ^a attach volume • ^b assign FIP • / filter • ? help"
+	h := "↑↓ navigate • space select • enter detail • ^n create • ^d delete • ^o reboot • / filter • f save filter • F load filter"
+	if m.filter.Value() != "" {
+		h += fmt.Sprintf(" [%s]", m.filter.Value())
+	}
+	h += " • ? help"
+	return h
 }
 
 // SelectedServers returns all selected servers, or the cursor server if none selected.

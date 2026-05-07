@@ -12,9 +12,16 @@ import (
 
 // Config is the full persisted configuration.
 type Config struct {
-	General     GeneralConfig     `yaml:"general"`
-	Colors      ColorConfig       `yaml:"colors"`
-	Keybindings map[string]string `yaml:"keybindings,omitempty"`
+	General      GeneralConfig     `yaml:"general"`
+	Colors       ColorConfig       `yaml:"colors"`
+	Keybindings  map[string]string `yaml:"keybindings,omitempty"`
+	SavedFilters []SavedFilter     `yaml:"saved_filters,omitempty"`
+}
+
+// SavedFilter is a named filter query for quick server list filtering.
+type SavedFilter struct {
+	Name    string `yaml:"name"`
+	Pattern string `yaml:"pattern"`
 }
 
 // GeneralConfig holds non-visual, non-keybinding settings.
