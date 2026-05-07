@@ -798,14 +798,21 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 				shared.Debugf("[action] detach volume %s failed: %s", name, err)
 				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: err}
 			}
-			if vol.AttachedServerID == "" {
+			if !vol.IsAttached() {
 				shared.Debugf("[action] detach volume %s failed: volume is not attached", name)
 				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: fmt.Errorf("volume is not attached")}
 			}
-			err = volume.DetachVolume(context.Background(), computeC, vol.AttachedServerID, volID)
-			if err != nil {
-				shared.Debugf("[action] detach volume %s failed: %s", name, err)
-				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: err}
+			var detachErrs []error
+			for _, att := range vol.Attachments {
+				err = volume.DetachVolume(context.Background(), computeC, att.ServerID, volID)
+				if err != nil {
+					shared.Debugf("[action] detach volume %s from server %s failed: %s", name, att.ServerID, err)
+					detachErrs = append(detachErrs, fmt.Errorf("server %s: %w", att.ServerID, err))
+				}
+			}
+			if len(detachErrs) > 0 {
+				shared.Debugf("[action] detach volume %s partially failed: %v", name, detachErrs)
+				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: fmt.Errorf("detach errors: %v", detachErrs)}
 			}
 			shared.Debugf("[action] detached volume %s", name)
 			return shared.ResourceActionMsg{Action: "Detached volume", Name: name}

@@ -12,6 +12,12 @@ import (
 	"github.com/gophercloud/gophercloud/v2/pagination"
 )
 
+// VolumeAttachment represents a single volume-to-server attachment.
+type VolumeAttachment struct {
+	ServerID string
+	Device   string
+}
+
 // Volume is a simplified block storage volume.
 type Volume struct {
 	ID               string
@@ -23,14 +29,41 @@ type Volume struct {
 	Bootable         string
 	Encrypted        bool
 	Multiattach      bool
-	AttachedServerID string
-	AttachedDevice   string
+	AttachedServerID string             // DEPRECATED: use Attachments + ServerID() instead
+	AttachedDevice   string             // DEPRECATED: use Attachments + Device() instead
+	Attachments      []VolumeAttachment // all current attachments (multiattach-aware)
 	Created          time.Time
 	Updated          time.Time
 	Description      string
 	Metadata         map[string]string
 	SnapshotID       string
 	SourceVolID      string
+}
+
+// ServerID returns the first attachment's server ID for backward compatibility.
+func (v Volume) ServerID() string {
+	if len(v.Attachments) > 0 {
+		return v.Attachments[0].ServerID
+	}
+	return ""
+}
+
+// Device returns the first attachment's device path for backward compatibility.
+func (v Volume) Device() string {
+	if len(v.Attachments) > 0 {
+		return v.Attachments[0].Device
+	}
+	return ""
+}
+
+// IsAttached returns whether the volume has any attachments.
+func (v Volume) IsAttached() bool {
+	return len(v.Attachments) > 0
+}
+
+// IsMultiAttached returns whether the volume is attached to multiple servers.
+func (v Volume) IsMultiAttached() bool {
+	return len(v.Attachments) > 1
 }
 
 // ListVolumes fetches all volumes.
@@ -60,10 +93,11 @@ func ListVolumes(ctx context.Context, client *gophercloud.ServiceClient) ([]Volu
 				SnapshotID:  v.SnapshotID,
 				SourceVolID: v.SourceVolID,
 			}
-			if len(v.Attachments) > 0 {
-				vol.AttachedServerID = v.Attachments[0].ServerID
-				vol.AttachedDevice = v.Attachments[0].Device
+			for _, att := range v.Attachments {
+				vol.Attachments = append(vol.Attachments, VolumeAttachment{ServerID: att.ServerID, Device: att.Device})
 			}
+			vol.AttachedServerID = vol.ServerID()
+			vol.AttachedDevice = vol.Device()
 			result = append(result, vol)
 		}
 		return true, nil
@@ -101,10 +135,11 @@ func GetVolume(ctx context.Context, client *gophercloud.ServiceClient, id string
 		SnapshotID:  v.SnapshotID,
 		SourceVolID: v.SourceVolID,
 	}
-	if len(v.Attachments) > 0 {
-		vol.AttachedServerID = v.Attachments[0].ServerID
-		vol.AttachedDevice = v.Attachments[0].Device
+	for _, att := range v.Attachments {
+		vol.Attachments = append(vol.Attachments, VolumeAttachment{ServerID: att.ServerID, Device: att.Device})
 	}
+	vol.AttachedServerID = vol.ServerID()
+	vol.AttachedDevice = vol.Device()
 	shared.Debugf("[volume] GetVolume: success, id=%s name=%s", vol.ID, vol.Name)
 	return vol, nil
 }
