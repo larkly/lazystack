@@ -12,6 +12,8 @@ func (m *Model) isAnyModalActive() bool {
 		m.serverRebuild.Active ||
 		m.serverSnapshot.Active ||
 		m.serverResize.Active ||
+		m.serverAdminAct.Active ||
+		m.serverMetadata.Active ||
 		m.sshPrompt.Active ||
 		m.copyPicker.Active ||
 		m.consoleURL.Active ||
@@ -62,6 +64,12 @@ func (m *Model) activeModalView() (string, bool) {
 	}
 	if m.serverResize.Active {
 		return m.serverResize.View(), true
+	}
+	if m.serverAdminAct.Active {
+		return m.serverAdminAct.View(), true
+	}
+	if m.serverMetadata.Active {
+		return m.serverMetadata.View(), true
 	}
 	if m.sshPrompt.Active {
 		return m.sshPrompt.View(), true
@@ -164,6 +172,14 @@ func (m *Model) updateAnyModal(msg tea.Msg) (bool, tea.Cmd) {
 	case m.serverResize.Active:
 		var cmd tea.Cmd
 		m.serverResize, cmd = m.serverResize.Update(msg)
+		return true, cmd
+	case m.serverAdminAct.Active:
+		var cmd tea.Cmd
+		m.serverAdminAct, cmd = m.serverAdminAct.Update(msg)
+		return true, cmd
+	case m.serverMetadata.Active:
+		var cmd tea.Cmd
+		m.serverMetadata, cmd = m.serverMetadata.Update(msg)
 		return true, cmd
 	case m.sshPrompt.Active:
 		var cmd tea.Cmd

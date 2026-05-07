@@ -51,10 +51,12 @@ import (
 	"github.com/larkly/lazystack/internal/ui/routercreate"
 	"github.com/larkly/lazystack/internal/ui/routerview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
+	"github.com/larkly/lazystack/internal/ui/serveradminact"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/serverlist"
 	"github.com/larkly/lazystack/internal/ui/servicecatalog"
+	"github.com/larkly/lazystack/internal/ui/servermetadata"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
@@ -140,6 +142,8 @@ type Model struct {
 	serverRebuild       serverrebuild.Model
 	serverSnapshot      serversnapshot.Model
 	serverResize        serverresize.Model
+	serverAdminAct      serveradminact.Model
+	serverMetadata      servermetadata.Model
 	sshPrompt           sshprompt.Model
 	consoleURL          consoleurl.Model
 	vmPassword          vmpassword.Model
@@ -535,6 +539,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, shared.Keys.Snapshot) {
 				return m.openSnapshot()
+			}
+			if key.Matches(msg, shared.Keys.AdminActions) {
+				return m.openAdminActions()
+			}
+			if key.Matches(msg, shared.Keys.Metadata) {
+				return m.openServerMetadata()
 			}
 			if key.Matches(msg, shared.Keys.ConfirmResize) {
 				return m.doConfirmResize()
