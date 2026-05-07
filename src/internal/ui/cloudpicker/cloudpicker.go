@@ -99,3 +99,8 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 }
+
+// Hints returns key hints for the status bar.
+func (m Model) Hints() string {
+	return "↑/↓ navigate • enter select • esc/q back"
+}

@@ -24,6 +24,7 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	switch m.view {
 	case viewCloudPicker:
 		m.cloudPicker, cmd = m.cloudPicker.Update(msg)
+		m.statusBar.Hint = m.cloudPicker.Hints()
 	case viewServerList:
 		m.serverList, cmd = m.serverList.Update(msg)
 		m.statusBar.Hint = m.serverList.Hints()
