@@ -69,6 +69,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/subnetedit"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
+	"github.com/larkly/lazystack/internal/ui/usermanagement"
 	"github.com/larkly/lazystack/internal/ui/vmpassword"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
@@ -100,6 +101,7 @@ const (
 	viewHypervisorList
 	viewServiceCatalog
 	viewDNSList
+	viewUserManagement
 )
 
 type modalType int
@@ -193,6 +195,7 @@ type Model struct {
 	serviceCatalog      servicecatalog.Model
 	dnsList             dnslist.Model
 	errModal            modal.ErrorModel
+	userManagement      usermanagement.Model
 	activeModal         modalType
 	projects            []shared.ProjectInfo
 	currentProjectID    string
@@ -545,6 +548,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, shared.Keys.Metadata) {
 				return m.openServerMetadata()
+			}
+			if key.Matches(msg, shared.Keys.UserManagement) {
+				return m.openUserManagement()
 			}
 			if key.Matches(msg, shared.Keys.ConfirmResize) {
 				return m.doConfirmResize()

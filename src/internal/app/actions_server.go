@@ -31,6 +31,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/servicecatalog"
 	"github.com/larkly/lazystack/internal/ui/servermetadata"
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
+	"github.com/larkly/lazystack/internal/ui/usermanagement"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
@@ -400,6 +401,16 @@ func (m Model) openServiceCatalog() (Model, tea.Cmd) {
 	m.statusBar.CurrentView = "servicecatalog"
 	m.statusBar.Hint = m.serviceCatalog.Hints()
 	return m, m.serviceCatalog.Init()
+}
+
+func (m Model) openUserManagement() (Model, tea.Cmd) {
+	m.userManagement = usermanagement.New(m.client.ProviderClient, m.client.EndpointOpts)
+	m.userManagement.SetSize(m.width, m.height)
+	m.nav.Push(m.view, m.activeTab)
+	m.view = viewUserManagement
+	m.statusBar.CurrentView = "usermanagement"
+	m.statusBar.Hint = m.userManagement.Hints()
+	return m, m.userManagement.Init()
 }
 
 func (m Model) openResize() (Model, tea.Cmd) {

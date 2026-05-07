@@ -63,8 +63,9 @@ type KeyMap struct {
 	SaveFilter   key.Binding
 	LoadFilter   key.Binding
 	Browse       key.Binding
-	AdminActions key.Binding
-	Metadata     key.Binding
+	AdminActions    key.Binding
+	Metadata        key.Binding
+	UserManagement  key.Binding
 }
 
 var Keys = KeyMap{
@@ -315,5 +316,9 @@ var Keys = KeyMap{
 	Metadata: key.NewBinding(
 		key.WithKeys("M"),
 		key.WithHelp("M", "metadata"),
+	),
+	UserManagement: key.NewBinding(
+		key.WithKeys("U"),
+		key.WithHelp("U", "user management"),
 	),
 }

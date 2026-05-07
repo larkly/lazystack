@@ -51,6 +51,10 @@ func (m Model) viewName() string {
 		return "hypervisorlist"
 	case viewServiceCatalog:
 		return "servicecatalog"
+	case viewDNSList:
+		return "dnslist"
+	case viewUserManagement:
+		return "usermanagement"
 	}
 	return ""
 }
@@ -130,6 +134,8 @@ func (m Model) viewContent() string {
 		content = m.imageView.View()
 	case viewServiceCatalog:
 		content = m.serviceCatalog.View()
+	case viewUserManagement:
+		content = m.userManagement.View()
 	}
 
 	// Add tab bar for top-level views

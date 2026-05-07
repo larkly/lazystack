@@ -117,7 +117,8 @@ var keybindingFieldMap = map[string]func(b key.Binding){
 	"copy":            func(b key.Binding) { shared.Keys.Copy = b },
 	"console_url":     func(b key.Binding) { shared.Keys.ConsoleURL = b },
 	"config":          func(b key.Binding) { shared.Keys.Config = b },
-	"hypervisors":     func(b key.Binding) { shared.Keys.Hypervisors = b },
+	"hypervisors":         func(b key.Binding) { shared.Keys.Hypervisors = b },
+	"user_management":     func(b key.Binding) { shared.Keys.UserManagement = b },
 }
 
 // defaultHelpText maps config keybinding names to their help descriptions.
@@ -177,8 +178,9 @@ var defaultHelpText = map[string]string{
 	"copy":            "copy field...",
 	"console_url":     "console URL (noVNC)",
 	"config":          "config",
+	"hypervisors":     "hypervisors",
+	"user_management": "user management",
 }
-
 // ApplyKeybindings sets shared.Keys fields from the config map.
 func ApplyKeybindings(kb map[string]string) {
 	shared.Debugf("[config] ApplyKeybindings: start bindings=%d", len(kb))
