@@ -17,7 +17,7 @@
 | Phase 3: Additional Resources | ✓ Complete | Tabbed navigation, volumes, floating IPs, security groups, key pairs, networks (CRUD), routers (CRUD) |
 | Phase 4: Refactor, Octavia, Projects, Quotas | ✓ Complete | App refactor, dynamic tabs, Octavia LB tab, project switching, quota overlay |
 | Phase 5: Quality of Life | ✓ Complete | Server rename, rebuild, snapshot, rescue/unrescue, image management (combined view with upload/download/edit), cloud-init/user data, port CRUD, subnet edit, search/filter on all views, confirmation dialogs, SSH integration, console access (noVNC), server cloning, cross-resource navigation, copy-to-clipboard picker, config file (Load/Save at ~/.config/lazystack/config.yaml), DNS (zones + recordsets via gophercloud dns/v2) — done |
-| Phase 6: Operational | Mostly Complete | Service catalog browser (servicecatalog/ui, 245 lines), hypervisor view (hypervisorlist/ui, 236 lines) — done. Admin views — not started |
+| Phase 6: Operational | ✓ Complete | Service catalog browser, hypervisor view, admin server actions (Cold Migrate, Live Migrate, Evacuate, Force Delete, Reset State), metadata browser, user management — all done via PR #168 |
 
 ## Concerns and Considerations
 
