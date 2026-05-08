@@ -16,7 +16,7 @@
 | Phase 2: Extended Compute | ✓ Complete | All actions, console log, resize, bulk ops, action history |
 | Phase 3: Additional Resources | ✓ Complete | Tabbed navigation, volumes, floating IPs, security groups, key pairs, networks (CRUD), routers (CRUD) |
 | Phase 4: Refactor, Octavia, Projects, Quotas | ✓ Complete | App refactor, dynamic tabs, Octavia LB tab, project switching, quota overlay |
-| Phase 5: Quality of Life | Mostly Complete | Server rename, rebuild, snapshot, rescue/unrescue, image management (combined view with upload/download/edit), cloud-init/user data, port CRUD, subnet edit, search/filter on all views, confirmation dialogs, SSH integration, console access (noVNC), server cloning, cross-resource navigation, copy-to-clipboard picker — done. Config file, DNS — not started |
+| Phase 5: Quality of Life | ✓ Complete | Server rename, rebuild, snapshot, rescue/unrescue, image management (combined view with upload/download/edit), cloud-init/user data, port CRUD, subnet edit, search/filter on all views, confirmation dialogs, SSH integration, console access (noVNC), server cloning, cross-resource navigation, copy-to-clipboard picker, config file (Load/Save at ~/.config/lazystack/config.yaml), DNS (zones + recordsets via gophercloud dns/v2) — done |
 | Phase 6: Operational | Not started | Admin views, hypervisor view, service catalog browser |
 
 ## Concerns and Considerations
