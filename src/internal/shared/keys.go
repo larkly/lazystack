@@ -66,6 +66,7 @@ type KeyMap struct {
 	AdminActions    key.Binding
 	Metadata        key.Binding
 	UserManagement  key.Binding
+	ColumnPick      key.Binding
 }
 
 var Keys = KeyMap{
@@ -320,5 +321,9 @@ var Keys = KeyMap{
 	UserManagement: key.NewBinding(
 		key.WithKeys("U"),
 		key.WithHelp("U", "user management"),
+	),
+	ColumnPick: key.NewBinding(
+		key.WithKeys("ctrl+shift+c"),
+		key.WithHelp("ctrl+shift+c", "columns"),
 	),
 }

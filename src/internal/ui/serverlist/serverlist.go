@@ -792,9 +792,44 @@ func (m Model) fetchMissingImageNames() tea.Cmd {
 	}
 }
 
-// SetConfig wires the live config reference for saving/loading filters.
+// Columns returns the current columns slice (copy).
+func (m Model) Columns() []Column {
+	out := make([]Column, len(m.columns))
+	copy(out, m.columns)
+	return out
+}
+
+// SetColumns rebuilds the visible columns from config column entries,
+// falling back to DefaultColumns if the slice is empty or missing keys.
+func (m *Model) SetColumns(cfgCols []config.ColumnConfig) {
+	if len(cfgCols) == 0 {
+		m.columns = DefaultColumns()
+		return
+	}
+	all := AllAvailableColumns()
+	m.columns = make([]Column, len(cfgCols))
+	for i, cc := range cfgCols {
+		found := false
+		for _, ac := range all {
+			if ac.Key == cc.Key {
+				ac.hidden = cc.Hidden
+				m.columns[i] = ac
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.columns[i] = Column{Title: cc.Key, Key: cc.Key, MinWidth: 8, Flex: 1, Priority: 4, hidden: cc.Hidden}
+		}
+	}
+}
+
+// SetConfig wires the live config reference for saving/loading filters and columns.
 func (m *Model) SetConfig(cfg *config.Config) {
 	m.config = cfg
+	if cfg != nil && len(cfg.Columns) > 0 {
+		m.SetColumns(cfg.Columns)
+	}
 	fn := textinput.New()
 	fn.Prompt = ""
 	fn.Placeholder = "filter name..."

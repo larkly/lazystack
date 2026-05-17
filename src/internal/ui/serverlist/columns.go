@@ -16,6 +16,22 @@ type Column struct {
 	hidden   bool // set by ComputeWidths
 }
 
+// AllAvailableColumns returns every column type that may be selected.
+func AllAvailableColumns() []Column {
+	return []Column{
+		{Title: "Name", MinWidth: 20, Flex: 4, Priority: 0, Key: "name"},
+		{Title: "Status", MinWidth: 16, Flex: 1, Priority: 0, Key: "status"},
+		{Title: "IPv4", MinWidth: 12, Flex: 1, Priority: 1, Key: "ipv4"},
+		{Title: "IPv6", MinWidth: 15, Flex: 1, Priority: 5, Key: "ipv6"},
+		{Title: "Floating IP", MinWidth: 12, Flex: 1, Priority: 3, Key: "floating"},
+		{Title: "Flavor", MinWidth: 10, Flex: 2, Priority: 1, Key: "flavor"},
+		{Title: "Image", MinWidth: 10, Flex: 2, Priority: 2, Key: "image"},
+		{Title: "Age", MinWidth: 5, Flex: 0, Priority: 1, Key: "age"},
+		{Title: "Key", MinWidth: 8, Flex: 1, Priority: 4, Key: "key"},
+		{Title: "ID", MinWidth: 16, Flex: 1, Priority: 4, Key: "id"},
+	}
+}
+
 // DefaultColumns returns the standard server list columns, ordered by display position.
 func DefaultColumns() []Column {
 	return []Column{

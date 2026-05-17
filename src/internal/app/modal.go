@@ -38,7 +38,8 @@ func (m *Model) isAnyModalActive() bool {
 		m.lbPoolCreate.Active ||
 		m.lbMemberCreate.Active ||
 		m.lbMonitorCreate.Active ||
-		m.projectPicker.Active
+		m.projectPicker.Active ||
+		m.columnPicker.Active
 }
 
 // activeModalView returns the view string of whichever modal/overlay is active.
@@ -145,6 +146,9 @@ func (m *Model) activeModalView() (string, bool) {
 	}
 	if m.projectPicker.Active {
 		return m.projectPicker.View(), true
+	}
+	if m.columnPicker.Active {
+		return m.columnPicker.View(), true
 	}
 	return "", false
 }
@@ -280,6 +284,10 @@ func (m *Model) updateAnyModal(msg tea.Msg) (bool, tea.Cmd) {
 	case m.projectPicker.Active:
 		var cmd tea.Cmd
 		m.projectPicker, cmd = m.projectPicker.Update(msg)
+		return true, cmd
+	case m.columnPicker.Active:
+		var cmd tea.Cmd
+		m.columnPicker, cmd = m.columnPicker.Update(msg)
 		return true, cmd
 	}
 	return false, nil
@@ -421,5 +429,6 @@ func (m *Model) setSizeAllModals(w, h int) {
 	m.routerCreate.SetSize(w, h)
 	m.subnetPicker.SetSize(w, h)
 	m.projectPicker.SetSize(w, h)
+	m.columnPicker.SetSize(w, h)
 	m.cloneProgress.SetSize(w, h)
 }

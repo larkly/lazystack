@@ -19,6 +19,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/cloneprogress"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
+	"github.com/larkly/lazystack/internal/ui/columnpicker"
 	"github.com/larkly/lazystack/internal/ui/configview"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/consoleurl"
@@ -196,6 +197,7 @@ type Model struct {
 	dnsList             dnslist.Model
 	errModal            modal.ErrorModel
 	userManagement      usermanagement.Model
+	columnPicker        columnpicker.Model
 	activeModal         modalType
 	projects            []shared.ProjectInfo
 	currentProjectID    string
@@ -361,6 +363,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.configView.Visible {
 			var cmd tea.Cmd
 			m.configView, cmd = m.configView.Update(msg)
+			return m, cmd
+		}
+
+		if m.columnPicker.Active {
+			var cmd tea.Cmd
+			m.columnPicker, cmd = m.columnPicker.Update(msg)
 			return m, cmd
 		}
 
@@ -552,6 +560,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.UserManagement) {
 				return m.openUserManagement()
 			}
+		if key.Matches(msg, shared.Keys.ColumnPick) {
+			cols := m.serverList.Columns()
+			pickerCols := make([]columnpicker.PickerColumn, len(cols))
+			for i, c := range cols {
+				pickerCols[i] = columnpicker.PickerColumn{Title: c.Title, Key: c.Key, Hidden: c.Hidden()}
+			}
+			m.columnPicker = columnpicker.New(pickerCols)
+			m.columnPicker.SetSize(m.width, m.height)
+			return m, nil
+		}
 			if key.Matches(msg, shared.Keys.ConfirmResize) {
 				return m.doConfirmResize()
 			}
@@ -1044,6 +1062,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.copyToClipboard(msg.Label, msg.Value), nil
 
 	case copypicker.CancelledMsg:
+		return m, nil
+
+	case columnpicker.ColumnsChosenMsg:
+		cfg := m.configView.Cfg()
+		if cfg != nil {
+			cfg.Columns = msg.Columns
+			_ = cfg.Save()
+			m.serverList.SetColumns(cfg.Columns)
+		}
+		return m, nil
+
+	case columnpicker.ColumnsCancelledMsg:
 		return m, nil
 
 	case sshprompt.SSHConnectMsg:

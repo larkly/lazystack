@@ -10,12 +10,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ColumnConfig holds a single column's key and visible flag.
+type ColumnConfig struct {
+	Key    string `yaml:"key"`
+	Hidden bool   `yaml:"hidden"`
+}
+
 // Config is the full persisted configuration.
 type Config struct {
 	General      GeneralConfig     `yaml:"general"`
 	Colors       ColorConfig       `yaml:"colors"`
 	Keybindings  map[string]string `yaml:"keybindings,omitempty"`
 	SavedFilters []SavedFilter     `yaml:"saved_filters,omitempty"`
+	Columns      []ColumnConfig    `yaml:"columns,omitempty"`
 }
 
 // SavedFilter is a named filter query for quick server list filtering.
@@ -154,6 +161,7 @@ func DefaultKeybindings() map[string]string {
 		"copy_ssh":       "y",
 		"console_url":    "V",
 		"config":         "ctrl+k",
+		"column_pick":    "ctrl+shift+c",
 	}
 }
 
@@ -178,6 +186,7 @@ type rawConfig struct {
 	General     rawGeneral        `yaml:"general"`
 	Colors      ColorConfig       `yaml:"colors"`
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
+	Columns     []ColumnConfig    `yaml:"columns,omitempty"`
 }
 
 // LoadFrom reads config from the given path.
@@ -212,6 +221,7 @@ func LoadFrom(path string) (Config, error) {
 		},
 		Colors:      raw.Colors,
 		Keybindings: raw.Keybindings,
+		Columns:     raw.Columns,
 	}
 
 	// Use raw pointer bools to distinguish "explicitly false" from "absent".
