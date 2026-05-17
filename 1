@@ -1,0 +1,7 @@
+<string>:4: SyntaxWarning: invalid escape sequence '\('
+Traceback (most recent call last):
+<unknown>:1: SyntaxWarning: invalid escape sequence '\('
+  File "<string>", line 4, in <module>
+    ['gh', 'api', f'repos/larkly/pulsar/actions/jobs/{JOB_ID}/logs', '--jq', '.[] | select(.name=="integration") | .steps[] | "\(.name) \(.conclusion)"'],
+                                                      ^^^^^^
+NameError: name 'JOB_ID' is not defined
