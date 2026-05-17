@@ -1,5 +1,5 @@
 test:
-	go test -race -coverprofile=coverage.out ./...
+	cd src && go test ./...
 
 build:
-	go build -o bin/lazystack src/main.go
+	cd src && go build -ldflags "-X main.version=dev" -o ../bin/lazystack ./cmd/lazystack
