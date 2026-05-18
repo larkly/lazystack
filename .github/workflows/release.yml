@@ -20,11 +20,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+<<<<<<< Updated upstream
+      - uses: actions/checkout@v6
         with:
           ref: ${{ env.VERSION }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: src/go.mod
 
@@ -36,7 +37,12 @@ jobs:
     needs: [test]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+=======
+      - name: Run Tests
+        run: make test
       - uses: actions/checkout@v4
+>>>>>>> Stashed changes
         with:
           fetch-depth: 0
 
@@ -63,11 +69,17 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
+<<<<<<< Updated upstream
+      - uses: actions/checkout@v6
+=======
+      - name: Run Tests
+        run: make test
       - uses: actions/checkout@v4
+>>>>>>> Stashed changes
         with:
           ref: ${{ env.VERSION }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: src/go.mod
 
@@ -80,7 +92,7 @@ jobs:
           bin="lazystack-${{ matrix.goos }}-${{ matrix.goarch }}"
           go build -ldflags "-s -w -X main.version=${{ env.VERSION }}" -o "../${bin}" ./cmd/lazystack
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: lazystack-${{ matrix.goos }}-${{ matrix.goarch }}
           path: lazystack-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -99,12 +111,18 @@ jobs:
             deb_arch: arm64
             rpm_arch: aarch64
     steps:
+<<<<<<< Updated upstream
+      - uses: actions/checkout@v6
+=======
+      - name: Run Tests
+        run: make test
       - uses: actions/checkout@v4
+>>>>>>> Stashed changes
         with:
           ref: ${{ env.VERSION }}
 
       - name: Download linux binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: lazystack-linux-${{ matrix.goarch }}
 
@@ -137,7 +155,7 @@ jobs:
           nfpm package --packager archlinux --target "lazystack-${VERSION}-1-${{ matrix.rpm_arch }}.pkg.tar.zst"
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.goarch }}
           path: |
@@ -150,7 +168,13 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
+<<<<<<< Updated upstream
+      - uses: actions/download-artifact@v8
+=======
+      - name: Run Tests
+        run: make test
       - uses: actions/download-artifact@v4
+>>>>>>> Stashed changes
         with:
           merge-multiple: true
 
