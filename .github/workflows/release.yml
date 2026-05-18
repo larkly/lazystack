@@ -20,7 +20,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-<<<<<<< Updated upstream
       - uses: actions/checkout@v6
         with:
           ref: ${{ env.VERSION }}
@@ -38,11 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-=======
-      - name: Run Tests
-        run: make test
-      - uses: actions/checkout@v4
->>>>>>> Stashed changes
         with:
           fetch-depth: 0
 
@@ -69,13 +63,7 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
-<<<<<<< Updated upstream
       - uses: actions/checkout@v6
-=======
-      - name: Run Tests
-        run: make test
-      - uses: actions/checkout@v4
->>>>>>> Stashed changes
         with:
           ref: ${{ env.VERSION }}
 
@@ -111,13 +99,7 @@ jobs:
             deb_arch: arm64
             rpm_arch: aarch64
     steps:
-<<<<<<< Updated upstream
       - uses: actions/checkout@v6
-=======
-      - name: Run Tests
-        run: make test
-      - uses: actions/checkout@v4
->>>>>>> Stashed changes
         with:
           ref: ${{ env.VERSION }}
 
@@ -168,13 +150,7 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
-<<<<<<< Updated upstream
       - uses: actions/download-artifact@v8
-=======
-      - name: Run Tests
-        run: make test
-      - uses: actions/download-artifact@v4
->>>>>>> Stashed changes
         with:
           merge-multiple: true
 
