@@ -27,6 +27,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
 
       - name: Run tests
         run: make test
@@ -70,6 +71,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
 
       - name: Build
         working-directory: src
