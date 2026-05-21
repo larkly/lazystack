@@ -187,9 +187,11 @@ func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gopherc
 		shared.Debugf("[cloud] connectWithOpts: compute client error: %v", err)
 		return nil, fmt.Errorf("compute client: %w", err)
 	}
-	compute.Microversion = "2.100"
-
 	// Resolve the Nova microversion: check user override first, then negotiate.
+	// Note: do NOT pre-set compute.Microversion before negotiation — the discovery
+	// request itself must not include an X-OpenStack-Nova-API-Version header,
+	// or a server whose max is lower than our ceiling (e.g. 2.88) will reject it
+	// with 406 before we can read its supported range.
 	maxVersion, usedVersion, degradeWarning := resolveMicroversion(ctx, compute)
 	compute.Microversion = usedVersion
 
