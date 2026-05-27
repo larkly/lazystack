@@ -203,9 +203,8 @@ type Model struct {
 	currentProjectID    string
 	cloudName           string
 	autoCloud           string
-	previousView        activeView
-	returnToView        activeView // for cross-resource navigation back-nav
-	nav                 NavStack   // explicit navigation stack (H2)
+	returnToView        activeView // cross-resource navigation back-nav
+	nav                 *NavStack  // local drill-down/overlay back-nav
 	refreshInterval     time.Duration
 	minWidth            int
 	minHeight           int
@@ -274,6 +273,7 @@ func New(opts Options) Model {
 			updateCheckInterval: time.Duration(opts.Config.General.UpdateCheckInterval) * time.Hour,
 			tabs:                tabs,
 			tabInited:           make([]bool, len(tabs)),
+			nav:                 &NavStack{},
 		}
 	}
 
@@ -294,6 +294,7 @@ func New(opts Options) Model {
 		updateCheckInterval: time.Duration(opts.Config.General.UpdateCheckInterval) * time.Hour,
 		tabs:                tabs,
 		tabInited:           make([]bool, len(tabs)),
+		nav:                 &NavStack{},
 	}
 }
 
