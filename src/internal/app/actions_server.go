@@ -590,7 +590,17 @@ func (m Model) getSelectedServerInfo() (id, name string) {
 func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 	client := m.client.Compute
 
-	// Bulk actions
+	// Resource-specific bulk actions (must come before the generic server bulk guard)
+	switch action.Action {
+	case "delete_volumes_bulk":
+		return m, m.executeDeleteVolumesBulk(action.Servers)
+	case "detach_volumes_bulk":
+		return m, m.executeDetachVolumesBulk(action.Servers)
+	case "delete_images_bulk":
+		return m, m.executeDeleteImagesBulk(action.Servers)
+	}
+
+	// Bulk actions (server-only)
 	if len(action.Servers) > 0 {
 		m.serverList.ClearSelection()
 		return m, m.executeBulkAction(client, action)
@@ -1364,4 +1374,100 @@ func (m Model) openServerMetadata() (Model, tea.Cmd) {
 	m.serverMetadata = servermetadata.New(m.client.Compute, id, name, meta)
 	m.serverMetadata.SetSize(m.width, m.height)
 	return m, m.serverMetadata.Init()
+}
+
+func (m Model) executeDeleteVolumesBulk(refs []modal.ServerRef) tea.Cmd {
+	bsClient := m.client.BlockStorage
+	if bsClient == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		var errs []string
+		for _, ref := range refs {
+			shared.Debugf("[action] deleting volume %s", ref.Name)
+			if err := volume.DeleteVolume(context.Background(), bsClient, ref.ID); err != nil {
+				shared.Debugf("[action] delete volume %s failed: %s", ref.Name, err)
+				errs = append(errs, fmt.Sprintf("%s: %v", ref.Name, err))
+			}
+		}
+		if len(errs) > 0 {
+			return shared.ResourceActionErrMsg{
+				Action: "Delete volumes",
+				Name:   fmt.Sprintf("%d volumes", len(refs)),
+				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
+			}
+		}
+		return shared.ResourceActionMsg{
+			Action: "Deleted volumes",
+			Name:   fmt.Sprintf("%d volumes", len(refs)),
+		}
+	}
+}
+
+func (m Model) executeDetachVolumesBulk(refs []modal.ServerRef) tea.Cmd {
+	computeC := m.client.Compute
+	bsClient := m.client.BlockStorage
+	if bsClient == nil || computeC == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		var errs []string
+		for _, ref := range refs {
+			shared.Debugf("[action] detaching volume %s", ref.Name)
+			vol, err := volume.GetVolume(context.Background(), bsClient, ref.ID)
+			if err != nil {
+				shared.Debugf("[action] detach volume %s failed: %s", ref.Name, err)
+				errs = append(errs, fmt.Sprintf("%s: %v", ref.Name, err))
+				continue
+			}
+			if !vol.IsAttached() {
+				continue
+			}
+			for _, att := range vol.Attachments {
+				if err := volume.DetachVolume(context.Background(), computeC, att.ServerID, ref.ID); err != nil {
+					shared.Debugf("[action] detach volume %s from server %s failed: %s", ref.Name, att.ServerID, err)
+					errs = append(errs, fmt.Sprintf("%s from %s: %v", ref.Name, att.ServerID, err))
+				}
+			}
+		}
+		if len(errs) > 0 {
+			return shared.ResourceActionErrMsg{
+				Action: "Detach volumes",
+				Name:   fmt.Sprintf("%d volumes", len(refs)),
+				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
+			}
+		}
+		return shared.ResourceActionMsg{
+			Action: "Detached volumes",
+			Name:   fmt.Sprintf("%d volumes", len(refs)),
+		}
+	}
+}
+
+func (m Model) executeDeleteImagesBulk(refs []modal.ServerRef) tea.Cmd {
+	imgClient := m.client.Image
+	if imgClient == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		var errs []string
+		for _, ref := range refs {
+			shared.Debugf("[action] deleting image %s", ref.Name)
+			if err := image.DeleteImage(context.Background(), imgClient, ref.ID); err != nil {
+				shared.Debugf("[action] delete image %s failed: %s", ref.Name, err)
+				errs = append(errs, fmt.Sprintf("%s: %v", ref.Name, err))
+			}
+		}
+		if len(errs) > 0 {
+			return shared.ResourceActionErrMsg{
+				Action: "Delete images",
+				Name:   fmt.Sprintf("%d images", len(refs)),
+				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
+			}
+		}
+		return shared.ResourceActionMsg{
+			Action: "Deleted images",
+			Name:   fmt.Sprintf("%d images", len(refs)),
+		}
+	}
 }

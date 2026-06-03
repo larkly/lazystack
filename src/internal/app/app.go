@@ -388,6 +388,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.view != viewServerCreate && m.view != viewVolumeCreate && m.view != viewKeypairCreate {
+			// Volume list: esc clears selection when items are selected
+			if m.view == viewVolumeList && m.volumeList.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
+				m.volumeList.ClearSelection()
+				return m, nil
+			}
+			// Image view: esc clears selection when items are selected
+			if m.view == viewImageView && m.imageView.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
+				m.imageView.ClearSelection()
+				return m, nil
+			}
 			// Server list filter mode: esc should clear filter before global back-nav/tab handlers.
 			if m.view == viewServerList && m.serverList.IsFiltering() && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
 				return m.updateActiveView(msg)
@@ -598,6 +608,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openVolumeDetail()
 			}
 			if key.Matches(msg, shared.Keys.Delete) {
+				if m.volumeList.SelectionCount() > 0 {
+					return m.openVolumesDeleteConfirm()
+				}
 				return m.openVolumeDeleteConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Create) {
@@ -607,6 +620,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openVolumeAttach()
 			}
 			if key.Matches(msg, shared.Keys.Detach) {
+				if m.volumeList.SelectionCount() > 0 {
+					return m.openVolumesDetachConfirm()
+				}
 				return m.openVolumeDetach()
 			}
 		}
@@ -862,6 +878,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			pane := m.imageView.FocusedPane()
 
 			if key.Matches(msg, shared.Keys.Delete) {
+				if m.imageView.SelectionCount() > 0 {
+					return m.openImagesDeleteConfirm()
+				}
 				return m.openImageDeleteConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Deactivate) && (pane == imageview.FocusSelector || pane == imageview.FocusInfo) {
