@@ -142,6 +142,7 @@ type Model struct {
 	sortHighlight   bool
 	sortClearAt     time.Time
 	highlight       map[string]bool // volume IDs to highlight (from cross-resource navigation)
+	selected        map[string]bool // selected volume IDs for bulk actions
 }
 
 // New creates a volume list model.
@@ -156,6 +157,7 @@ func New(client, computeClient *gophercloud.ServiceClient, refreshInterval time.
 		spinner:         s,
 		refreshInterval: refreshInterval,
 		serverNames:     make(map[string]string),
+		selected:        make(map[string]bool),
 		sortAsc:         true,
 	}
 }
@@ -173,6 +175,33 @@ func (m Model) SelectedVolume() *volume.Volume {
 		return &v
 	}
 	return nil
+}
+
+// SelectedVolumes returns all selected volumes, or the cursor volume if none selected.
+func (m Model) SelectedVolumes() []volume.Volume {
+	if len(m.selected) > 0 {
+		var result []volume.Volume
+		for _, v := range m.volumes {
+			if m.selected[v.ID] {
+				result = append(result, v)
+			}
+		}
+		return result
+	}
+	if v := m.SelectedVolume(); v != nil {
+		return []volume.Volume{*v}
+	}
+	return nil
+}
+
+// SelectionCount returns the number of selected volumes.
+func (m Model) SelectionCount() int {
+	return len(m.selected)
+}
+
+// ClearSelection clears all selected volumes.
+func (m *Model) ClearSelection() {
+	m.selected = make(map[string]bool)
 }
 
 // CopyEntries returns the title and copyable fields for the selected volume.
@@ -328,6 +357,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.cursor = 0
 			}
 			m.ensureVisible()
+		case key.Matches(msg, shared.Keys.Select):
+			if v := m.SelectedVolume(); v != nil {
+				if m.selected[v.ID] {
+					delete(m.selected, v.ID)
+				} else {
+					m.selected[v.ID] = true
+				}
+				if m.cursor < len(m.volumes)-1 {
+					m.cursor++
+					m.ensureVisible()
+				}
+			}
 		}
 	}
 	return m, nil
@@ -511,7 +552,8 @@ func (m Model) View() string {
 			"bootable": v.Bootable,
 		}
 
-		row := m.renderDataRow(values, v.Status, cursor)
+		isSelected := m.selected[v.ID]
+		row := m.renderDataRow(values, v.Status, cursor, isSelected)
 		b.WriteString(row + "\n")
 	}
 
@@ -529,11 +571,14 @@ func (m Model) renderRow(render func(Column) string) string {
 	return "  " + strings.Join(parts, " ")
 }
 
-func (m Model) renderDataRow(values map[string]string, status string, cursor bool) string {
+func (m Model) renderDataRow(values map[string]string, status string, cursor bool, selected bool) string {
 	var rowBg color.Color
 	hasBg := false
 	if cursor {
 		rowBg = lipgloss.Color("#073642")
+		hasBg = true
+	} else if selected {
+		rowBg = lipgloss.Color("#1a1a2e")
 		hasBg = true
 	}
 
@@ -552,6 +597,9 @@ func (m Model) renderDataRow(values map[string]string, status string, cursor boo
 		if col.Key == "status" {
 			style = volumeStatusStyle(status).Width(w)
 		}
+		if selected {
+			style = style.Foreground(shared.ColorPrimary)
+		}
 		if cursor {
 			style = style.Bold(true)
 		}
@@ -563,11 +611,17 @@ func (m Model) renderDataRow(values map[string]string, status string, cursor boo
 	}
 
 	prefix := "  "
+	if selected {
+		prefix = "\u25cf "
+	}
 	prefixStyle := lipgloss.NewStyle()
 	gapStyle := lipgloss.NewStyle()
 	if hasBg {
 		prefixStyle = prefixStyle.Background(rowBg)
 		gapStyle = gapStyle.Background(rowBg)
+	}
+	if selected {
+		prefixStyle = prefixStyle.Foreground(shared.ColorPrimary)
 	}
 
 	gap := gapStyle.Render(" ")
@@ -686,5 +740,8 @@ func (m *Model) applyHighlight() {
 
 // Hints returns key hints.
 func (m Model) Hints() string {
-	return "↑↓ navigate • enter detail • ^n create • ^d delete • ^a attach • ^t detach • R refresh • 1-5/←→ switch tab • ? help"
+	if len(m.selected) > 0 {
+		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^t detach • esc clear • ? help", len(m.selected))
+	}
+	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • ^a attach • ^t detach • R refresh • 1-5/←→ switch tab • ? help"
 }

@@ -79,6 +79,56 @@ func (m Model) openVolumeDeleteConfirm() (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) openVolumesDeleteConfirm() (Model, tea.Cmd) {
+	vols := m.volumeList.SelectedVolumes()
+	if len(vols) == 0 {
+		return m, nil
+	}
+	refs := make([]modal.ServerRef, len(vols))
+	for i, v := range vols {
+		name := v.Name
+		if name == "" {
+			name = v.ID
+		}
+		refs[i] = modal.ServerRef{ID: v.ID, Name: name}
+	}
+	m.volumeList.ClearSelection()
+	m.confirm = modal.NewBulkConfirm("delete_volumes_bulk", refs)
+	m.confirm.Title = "Delete Volumes"
+	m.confirm.Body = fmt.Sprintf("Delete %d selected volumes?", len(refs))
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
+func (m Model) openVolumesDetachConfirm() (Model, tea.Cmd) {
+	vols := m.volumeList.SelectedVolumes()
+	if len(vols) == 0 {
+		return m, nil
+	}
+	var refs []modal.ServerRef
+	for _, v := range vols {
+		if v.AttachedServerID != "" || len(v.Attachments) > 0 {
+			name := v.Name
+			if name == "" {
+				name = v.ID
+			}
+			refs = append(refs, modal.ServerRef{ID: v.ID, Name: name})
+		}
+	}
+	if len(refs) == 0 {
+		m.statusBar.StickyHint = "None of the selected volumes are attached"
+		return m, nil
+	}
+	m.volumeList.ClearSelection()
+	m.confirm = modal.NewBulkConfirm("detach_volumes_bulk", refs)
+	m.confirm.Title = "Detach Volumes"
+	m.confirm.Body = fmt.Sprintf("Detach %d selected volumes?", len(refs))
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
 // blockStorageAvailable reports whether the connected cloud exposes a
 // Cinder (block storage) endpoint. Volume attach/detach/create/delete flows
 // depend on this client being non-nil; callers must gate on this before

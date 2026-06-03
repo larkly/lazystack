@@ -173,6 +173,7 @@ type Model struct {
 	spinner         spinner.Model
 	err             string
 	refreshInterval time.Duration
+	selected        map[string]bool // selected image IDs for bulk actions
 }
 
 // New creates an image view model.
@@ -192,6 +193,7 @@ func New(imageClient, computeClient *gophercloud.ServiceClient, refreshInterval 
 		spinner:         s,
 		searchInput:     ti,
 		refreshInterval: refreshInterval,
+		selected:        make(map[string]bool),
 		sortAsc:         true,
 	}
 }
@@ -216,6 +218,34 @@ func (m Model) SelectedImage() *img.Image {
 		return &i
 	}
 	return nil
+}
+
+// SelectedImages returns all selected images, or the cursor image if none selected.
+func (m Model) SelectedImages() []img.Image {
+	visible := m.visibleImages()
+	if len(m.selected) > 0 {
+		var result []img.Image
+		for _, im := range visible {
+			if m.selected[im.ID] {
+				result = append(result, im)
+			}
+		}
+		return result
+	}
+	if i := m.SelectedImage(); i != nil {
+		return []img.Image{*i}
+	}
+	return nil
+}
+
+// SelectionCount returns the number of selected images.
+func (m Model) SelectionCount() int {
+	return len(m.selected)
+}
+
+// ClearSelection clears all selected images.
+func (m *Model) ClearSelection() {
+	m.selected = make(map[string]bool)
 }
 
 // ImageID returns the selected image ID.
@@ -354,14 +384,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.selectorScroll = 0
 			return m, nil
 		}
+		if len(m.selected) > 0 {
+			m.ClearSelection()
+			return m, nil
+		}
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Tab):
 		m.focus = (m.focus + 1) % focusPaneCount
+		m.ClearSelection()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.ShiftTab):
 		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
+		m.ClearSelection()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Up):
@@ -392,6 +428,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.searchInput.SetValue(m.searchFilter)
 			m.searchInput.Focus()
 			return m, m.searchInput.Focus()
+		}
+	case key.Matches(msg, shared.Keys.Select):
+		if m.focus == FocusSelector {
+			im := m.SelectedImage()
+			if im != nil {
+				if m.selected[im.ID] {
+					delete(m.selected, im.ID)
+				} else {
+					m.selected[im.ID] = true
+				}
+				visible := m.visibleImages()
+				if m.cursor < len(visible)-1 {
+					m.cursor++
+					m.ensureSelectorCursorVisible()
+				}
+			}
+			return m, nil
 		}
 	}
 	return m, nil
@@ -937,6 +990,7 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 
 		selected := m.focus == FocusSelector && i == m.cursor
 		isCursor := i == m.cursor
+		isBulkSelected := m.selected[im.ID]
 
 		name := im.Name
 		if name == "" && len(im.ID) > 8 {
@@ -958,6 +1012,9 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		if selected {
 			rowBg = lipgloss.Color("#073642")
 			hasBg = true
+		} else if isBulkSelected {
+			rowBg = lipgloss.Color("#1a1a2e")
+			hasBg = true
 		}
 
 		var parts []string
@@ -975,6 +1032,9 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 			if col.Key == "status" {
 				style = imageStatusStyle(im.Status).Width(w)
 			}
+			if isBulkSelected {
+				style = style.Foreground(shared.ColorPrimary)
+			}
 			if isCursor {
 				style = style.Bold(true)
 			}
@@ -985,11 +1045,17 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		prefix := "  "
+		if isBulkSelected {
+			prefix = "\u25cf "
+		}
 		prefixStyle := lipgloss.NewStyle()
 		gapStyle := lipgloss.NewStyle()
 		if hasBg {
 			prefixStyle = prefixStyle.Background(rowBg)
 			gapStyle = gapStyle.Background(rowBg)
+		}
+		if isBulkSelected {
+			prefixStyle = prefixStyle.Foreground(shared.ColorPrimary)
 		}
 
 		gap := gapStyle.Render(" ")
@@ -1420,6 +1486,9 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) Hints() string {
 	switch m.focus {
 	case FocusSelector:
+		if len(m.selected) > 0 {
+			return fmt.Sprintf("(%d selected) space toggle • ^d delete • esc clear • ? help", len(m.selected))
+		}
 		return "\u2191\u2193 navigate \u2022 / search \u2022 S sort \u2022 ^n upload \u2022 d deactivate \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 ? help"
 	case FocusInfo:
 		return "enter edit \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 ? help"

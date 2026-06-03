@@ -61,6 +61,34 @@ func (m Model) openImageDeleteConfirm() (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) openImagesDeleteConfirm() (Model, tea.Cmd) {
+	imgs := m.imageView.SelectedImages()
+	if len(imgs) == 0 {
+		return m, nil
+	}
+	for _, im := range imgs {
+		if im.Protected {
+			m.statusBar.StickyHint = "One or more selected images are protected"
+			return m, nil
+		}
+	}
+	refs := make([]modal.ServerRef, len(imgs))
+	for i, im := range imgs {
+		name := im.Name
+		if name == "" {
+			name = im.ID
+		}
+		refs[i] = modal.ServerRef{ID: im.ID, Name: name}
+	}
+	m.imageView.ClearSelection()
+	m.confirm = modal.NewBulkConfirm("delete_images_bulk", refs)
+	m.confirm.Title = "Delete Images"
+	m.confirm.Body = fmt.Sprintf("Delete %d selected images?", len(refs))
+	m.confirm.SetSize(m.width, m.height)
+	m.activeModal = modalConfirm
+	return m, nil
+}
+
 func (m Model) openImageDeactivateConfirm() (Model, tea.Cmd) {
 	im := m.imageView.SelectedImage()
 	if im == nil {
