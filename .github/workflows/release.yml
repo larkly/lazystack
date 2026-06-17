@@ -186,7 +186,7 @@ jobs:
           echo "source=$(sha256sum source.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Update Homebrew tap
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           repository: larkly/homebrew-tap
@@ -201,7 +201,7 @@ jobs:
             }
 
       - name: Update AUR package
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.AUR_REPO_TOKEN }}
           repository: larkly/aur-lazystack
