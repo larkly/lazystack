@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
-	charm.land/lipgloss/v2 v2.0.3
+	charm.land/lipgloss/v2 v2.0.4
 	github.com/atotto/clipboard v0.1.4
 	github.com/gophercloud/gophercloud/v2 v2.12.0
 	golang.org/x/crypto v0.53.0
