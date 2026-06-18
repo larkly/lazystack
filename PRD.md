@@ -833,24 +833,24 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 
 #### Medium-value (specific scenarios)
 - ✅ **Console access (noVNC)** — Retrieve and open VNC console URL via `V` key. Opens in browser or copies to clipboard.
-- **Get password** — Retrieve auto-generated password for Windows VMs (`servers.GetPassword`).
+- ✅ **Get password** — Retrieve auto-generated password for Windows VMs (`servers.GetPassword`). Implemented in `internal/ui/vmpassword/` and `internal/compute/servers.go:GetPassword`.
 
 #### Admin-only (Phase 6)
-- **Migrate / Live Migrate** — Move server to different hypervisor. Admin privilege required.
-- **Evacuate** — Emergency recovery from failed host. Admin-only.
-- **Force Delete** — Bypass normal deletion flow. Admin-only.
-- **Reset State** — Force server into a specific state. Recovery from stuck transitions.
-- **Metadata browser** — Full CRUD on server metadata key-value pairs.
+- ✅ **Migrate / Live Migrate** — Move server to different hypervisor. Admin privilege required. Implemented in `internal/ui/serveradminact/` (`MigrateServer`, `LiveMigrateServer`).
+- ✅ **Evacuate** — Emergency recovery from failed host. Admin-only. Implemented in `internal/ui/serveradminact/` (`EvacuateServer`).
+- ✅ **Force Delete** — Bypass normal deletion flow. Admin-only. Implemented in `internal/ui/serveradminact/` (`ForceDeleteServer`).
+- ✅ **Reset State** — Force server into a specific state. Recovery from stuck transitions. Implemented in `internal/ui/serveradminact/` (`ResetServerState`).
+- ✅ **Metadata browser** — Full CRUD on server metadata key-value pairs. Implemented in `internal/ui/servermetadata/`.
 
 ### Phase 5: Quality of Life (remaining)
-- Configuration file (`~/.config/lazystack/config.yaml`) for defaults
-- Custom column selection and ordering
-- Saved filters
-- Server name templates for create
+- ✅ Configuration file (`~/.config/lazystack/config.yaml`) for defaults — implemented in `internal/config/` (Load/Save/DefaultPath)
+- ✅ Custom column selection and ordering — implemented in `internal/ui/columnpicker/` (#147)
+- ✅ Saved filters — implemented (`config.SavedFilter` + cycle in server list)
+- Server name templates for create — not yet implemented
 - ✅ SSH integration (launch SSH session to selected server) — Done (#27)
 - ✅ Copy-to-clipboard for IDs, IPs — Done (#28): `Y` opens a field picker on every list/detail view (server, volume, network, subnet, router, port, LB + listener/pool/member, floating IP, security group, keypair, image). `y` still copies the SSH command on server views.
-- Log/audit trail of actions taken
-- Designate (DNS) tab
+- Log/audit trail of actions taken — partially implemented via Nova action history viewer (`internal/ui/actionlog/`); unified lazystack-native audit trail not yet implemented
+- ✅ Designate (DNS) tab — implemented in `internal/ui/dnslist/`
 - ✅ Console access (noVNC URL retrieval and browser launch) — Done (#50)
 - ✅ Image upload/download/edit with file picker and combined view — Done (#126)
 - ✅ Cloud-init / user data file picker in server create — Done
@@ -862,10 +862,10 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 - ✅ Server cloning with progress view — Done
 
 ### Phase 6: Operational
-- Hypervisor view (admin)
-- User management (admin)
-- Service catalog browser
-- Migrate/evacuate, force delete, reset state (see Server Action Gaps above)
+- ✅ Hypervisor view (admin) — implemented in `internal/ui/hypervisorlist/`
+- ✅ User management (admin) — implemented in `internal/ui/usermanagement/`
+- ✅ Service catalog browser — implemented in `internal/ui/servicecatalog/`
+- Migrate/evacuate, force delete, reset state — implemented in `internal/ui/serveradminact/`
 
 ## Non-Goals
 
