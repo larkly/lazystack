@@ -25,17 +25,18 @@ import (
 
 // Field indices.
 const (
-	fieldName     = 0
-	fieldImage    = 1
-	fieldFlavor   = 2
-	fieldNetwork  = 3
-	fieldKeypair  = 4
-	fieldSecGroup = 5
-	fieldUserData = 6
-	fieldCount    = 7
-	fieldSubmit   = 8
-	fieldCancel   = 9
-	numFields     = 10
+	fieldName         = 0
+	fieldNameTemplate = 1
+	fieldImage        = 2
+	fieldFlavor       = 3
+	fieldNetwork      = 4
+	fieldKeypair      = 5
+	fieldSecGroup     = 6
+	fieldUserData     = 7
+	fieldCount        = 8
+	fieldSubmit       = 9
+	fieldCancel       = 10
+	numFields         = 11
 )
 
 var udFileExtensions = map[string]bool{
@@ -85,8 +86,9 @@ type Model struct {
 	imageClient   *gophercloud.ServiceClient
 	networkClient *gophercloud.ServiceClient
 
-	nameInput  textinput.Model
-	countInput textinput.Model
+	nameInput      textinput.Model
+	templateInput  textinput.Model
+	countInput     textinput.Model
 
 	images     []img.Image
 	flavors    []compute.Flavor
@@ -139,6 +141,12 @@ func New(computeClient, imageClient, networkClient *gophercloud.ServiceClient) M
 	ni.SetWidth(40)
 	ni.Focus()
 
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Placeholder = "web-{n:02d}"
+	ti.CharLimit = 255
+	ti.SetWidth(40)
+
 	ci := textinput.New()
 	ci.Prompt = ""
 	ci.Placeholder = "1"
@@ -159,6 +167,7 @@ func New(computeClient, imageClient, networkClient *gophercloud.ServiceClient) M
 		imageClient:       imageClient,
 		networkClient:     networkClient,
 		nameInput:         ni,
+		templateInput:     ti,
 		countInput:        ci,
 		pickerFilter:      pf,
 		spinner:           s,
@@ -178,6 +187,7 @@ func NewClone(computeClient, imageClient, networkClient *gophercloud.ServiceClie
 	m.cloneConfig = &cfg
 	m.nameInput.SetValue(cfg.SourceName)
 	m.nameInput.CursorEnd()
+	m.templateInput.SetValue("")
 	return m
 }
 
@@ -282,6 +292,9 @@ func (m Model) isTextInput() bool {
 	if m.focusField == fieldName {
 		return true
 	}
+	if m.focusField == fieldNameTemplate && !m.cloneMode {
+		return true
+	}
 	if m.focusField == fieldCount && !m.cloneMode {
 		return true
 	}
@@ -312,6 +325,10 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 			case fieldName:
 				var cmd tea.Cmd
 				m.nameInput, cmd = m.nameInput.Update(msg)
+				return m, cmd
+			case fieldNameTemplate:
+				var cmd tea.Cmd
+				m.templateInput, cmd = m.templateInput.Update(msg)
 				return m, cmd
 			case fieldCount:
 				var cmd tea.Cmd
@@ -356,6 +373,9 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Enter):
 		switch m.focusField {
 		case fieldName:
+			m.advanceFocus()
+			return m, nil
+		case fieldNameTemplate:
 			m.advanceFocus()
 			return m, nil
 		case fieldUserData:
@@ -565,6 +585,11 @@ func (m *Model) updateFocus() {
 	} else {
 		m.nameInput.Blur()
 	}
+	if m.focusField == fieldNameTemplate && !m.cloneMode {
+		m.templateInput.Focus()
+	} else {
+		m.templateInput.Blur()
+	}
 	if m.focusField == fieldCount && !m.cloneMode {
 		m.countInput.Focus()
 	} else {
@@ -575,6 +600,9 @@ func (m *Model) updateFocus() {
 // advanceFocus moves focus forward by 1, skipping fieldCount in clone mode without volumes.
 func (m *Model) advanceFocus() {
 	m.focusField = (m.focusField + 1) % numFields
+	if m.focusField == fieldNameTemplate && m.cloneMode {
+		m.focusField = (m.focusField + 1) % numFields
+	}
 	if m.focusField == fieldCount && m.cloneMode && !m.hasCloneVolumes() {
 		m.focusField = (m.focusField + 1) % numFields
 	}
@@ -584,6 +612,9 @@ func (m *Model) advanceFocus() {
 // retreatFocus moves focus backward by 1, skipping fieldCount in clone mode without volumes.
 func (m *Model) retreatFocus() {
 	m.focusField = (m.focusField - 1 + numFields) % numFields
+	if m.focusField == fieldNameTemplate && m.cloneMode {
+		m.focusField = (m.focusField - 1 + numFields) % numFields
+	}
 	if m.focusField == fieldCount && m.cloneMode && !m.hasCloneVolumes() {
 		m.focusField = (m.focusField - 1 + numFields) % numFields
 	}
@@ -788,6 +819,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		m.err = "Server name is required"
 		return m, nil
 	}
+	tmpl := strings.TrimSpace(m.templateInput.Value())
+	if tmpl != "" {
+		name = expandNameTemplate(tmpl, 0)
+	}
 	if m.selectedImage < 0 {
 		m.err = "Image is required"
 		return m, nil
@@ -896,6 +931,7 @@ func (m Model) View() string {
 	}
 	fields := []fieldDef{
 		{"Server Name", m.nameInput.View(), m.focusField == fieldName, true},
+		{"Name Template", m.templateInput.View(), m.focusField == fieldNameTemplate, true},
 		{"Image", m.selectionDisplay(fieldImage), m.focusField == fieldImage, false},
 		{"Flavor", m.selectionDisplay(fieldFlavor), m.focusField == fieldFlavor, false},
 		{"Network", m.selectionDisplay(fieldNetwork), m.focusField == fieldNetwork, false},
@@ -914,6 +950,9 @@ func (m Model) View() string {
 	}
 
 	for i, f := range fields {
+		if m.cloneMode && f.label == "Name Template" {
+			continue
+		}
 		cursor := "  "
 		if f.focused {
 			cursor = "▸ "
@@ -930,13 +969,32 @@ func (m Model) View() string {
 			b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, label, style.Render(f.value)))
 		}
 
-		// Show inline picker if open for this field (field indices map 1:1 with field constants for non-clone)
+		// Show inline picker if open for this field (field indices map 1:1 with field constants)
 		if m.pickerOpen && m.pickerField == i {
 			b.WriteString(m.renderPicker())
 		}
 	}
 
 	b.WriteString("\n")
+
+	// Preview generated names when count > 1 and template is set
+	if !m.cloneMode {
+		countStr := strings.TrimSpace(m.countInput.Value())
+		tmpl := strings.TrimSpace(m.templateInput.Value())
+		count := 1
+		if countStr != "" {
+			c, err := strconv.Atoi(countStr)
+			if err == nil && c > 1 && c <= 100 {
+				count = c
+			}
+		}
+		if tmpl != "" && count > 1 {
+			names := previewNames(tmpl, count, 5)
+			if len(names) > 0 {
+				b.WriteString(shared.StyleHelp.Render("  Preview: " + strings.Join(names, ", ")) + "\n")
+			}
+		}
+	}
 
 	// Buttons
 	submitStyle := shared.StyleButton

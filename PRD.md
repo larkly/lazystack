@@ -846,7 +846,7 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 - ✅ Configuration file (`~/.config/lazystack/config.yaml`) for defaults — implemented in `internal/config/` (Load/Save/DefaultPath)
 - ✅ Custom column selection and ordering — implemented in `internal/ui/columnpicker/` (#147)
 - ✅ Saved filters — implemented (`config.SavedFilter` + cycle in server list)
-- Server name templates for create — not yet implemented
+- ✅ Server name templates for create — implemented in `internal/ui/servercreate/nametemplate.go`
 - ✅ SSH integration (launch SSH session to selected server) — Done (#27)
 - ✅ Copy-to-clipboard for IDs, IPs — Done (#28): `Y` opens a field picker on every list/detail view (server, volume, network, subnet, router, port, LB + listener/pool/member, floating IP, security group, keypair, image). `y` still copies the SSH command on server views.
 - Log/audit trail of actions taken — partially implemented via Nova action history viewer (`internal/ui/actionlog/`); unified lazystack-native audit trail not yet implemented
