@@ -23,6 +23,12 @@ type Config struct {
 	Keybindings  map[string]string `yaml:"keybindings,omitempty"`
 	SavedFilters []SavedFilter     `yaml:"saved_filters,omitempty"`
 	Columns      []ColumnConfig    `yaml:"columns,omitempty"`
+	Audit        AuditConfig       `yaml:"audit,omitempty"`
+}
+
+// AuditConfig controls the unified lazystack-native audit trail.
+type AuditConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // SavedFilter is a named filter query for quick server list filtering.

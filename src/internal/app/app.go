@@ -17,6 +17,7 @@ import (
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ssh"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
+	"github.com/larkly/lazystack/internal/ui/auditlog"
 	"github.com/larkly/lazystack/internal/ui/cloneprogress"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
 	"github.com/larkly/lazystack/internal/ui/columnpicker"
@@ -87,6 +88,7 @@ const (
 	viewServerCreate
 	viewConsoleLog
 	viewActionLog
+	viewAuditLog
 	viewVolumeList
 	viewVolumeDetail
 	viewFloatingIPList
@@ -141,6 +143,7 @@ type Model struct {
 	serverCreate        servercreate.Model
 	consoleLog          consolelog.Model
 	actionLog           actionlog.Model
+	auditLog            auditlog.Model
 	serverRename        serverrename.Model
 	serverRebuild       serverrebuild.Model
 	serverSnapshot      serversnapshot.Model
@@ -497,6 +500,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, shared.Keys.Actions) {
 				return m.openActionLog()
+			}
+			if msg.String() == "L" {
+				return m.openAuditLog()
 			}
 
 			// Volume detach from server detail volumes pane
