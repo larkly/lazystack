@@ -17,7 +17,9 @@ import (
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ssh"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
+	"github.com/larkly/lazystack/internal/ui/auditlog"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/hypervisorlist"
@@ -381,6 +383,27 @@ func (m Model) openActionLog() (Model, tea.Cmd) {
 	m.statusBar.CurrentView = "actionlog"
 	m.statusBar.Hint = m.actionLog.Hints()
 	return m, m.actionLog.Init()
+}
+
+func (m Model) openAuditLog() (Model, tea.Cmd) {
+	m.auditLog = auditlog.New()
+	m.auditLog.SetSize(m.width, m.height)
+	m.nav.Push(m.view, m.activeTab)
+	m.view = viewAuditLog
+	m.statusBar.CurrentView = "auditlog"
+	m.statusBar.Hint = m.auditLog.Hints()
+	return m, func() tea.Msg {
+		entries, err := audit.ReadEntries(audit.DefaultPath(), 500)
+		if err != nil {
+			return auditLogLoadedMsg{err: err.Error()}
+		}
+		return auditLogLoadedMsg{entries: entries}
+	}
+}
+
+type auditLogLoadedMsg struct {
+	entries []audit.Entry
+	err     string
 }
 
 func (m Model) openHypervisorList() (Model, tea.Cmd) {
