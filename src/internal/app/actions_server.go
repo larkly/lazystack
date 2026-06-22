@@ -665,6 +665,7 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.DeleteServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] delete server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionDelete, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Delete", Name: action.Name, Err: err}
 			}
 
@@ -676,6 +677,7 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 				}
 			}
 			shared.Debugf("[action] deleted server %s", action.Name)
+			m.logAudit(audit.ActionDelete, "server", action.ServerID, action.Name, "success", "")
 			msg := shared.ServerActionMsg{Action: "Delete", Name: action.Name}
 			if len(volErrs) > 0 {
 				msg.Action = fmt.Sprintf("Delete (warning: %d volume error(s))", len(volErrs))
@@ -688,9 +690,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.RebootServer(context.Background(), client, action.ServerID, servers.SoftReboot)
 			if err != nil {
 				shared.Debugf("[action] reboot server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionReboot, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Reboot", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] rebooted server %s", action.Name)
+			m.logAudit(audit.ActionReboot, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Reboot", Name: action.Name}
 		}
 	case "hard reboot":
@@ -699,9 +703,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.RebootServer(context.Background(), client, action.ServerID, servers.HardReboot)
 			if err != nil {
 				shared.Debugf("[action] hard reboot server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionReboot, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Hard reboot", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] hard rebooted server %s", action.Name)
+			m.logAudit(audit.ActionReboot, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Hard reboot", Name: action.Name}
 		}
 	case "pause":
@@ -710,9 +716,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.PauseServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] pause server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionPause, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Pause", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] paused server %s", action.Name)
+			m.logAudit(audit.ActionPause, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Pause", Name: action.Name}
 		}
 	case "unpause":
@@ -721,9 +729,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.UnpauseServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] unpause server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionUnpause, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Unpause", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] unpaused server %s", action.Name)
+			m.logAudit(audit.ActionUnpause, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Unpause", Name: action.Name}
 		}
 	case "suspend":
@@ -732,9 +742,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.SuspendServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] suspend server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionSuspend, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Suspend", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] suspended server %s", action.Name)
+			m.logAudit(audit.ActionSuspend, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Suspend", Name: action.Name}
 		}
 	case "resume":
@@ -743,9 +755,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.ResumeServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] resume server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionResume, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Resume", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] resumed server %s", action.Name)
+			m.logAudit(audit.ActionResume, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Resume", Name: action.Name}
 		}
 	case "shelve":
@@ -754,9 +768,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.ShelveServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] shelve server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionShelve, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Shelve", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] shelved server %s", action.Name)
+			m.logAudit(audit.ActionShelve, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Shelve", Name: action.Name}
 		}
 	case "unshelve":
@@ -765,9 +781,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.UnshelveServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] unshelve server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionUnshelve, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Unshelve", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] unshelved server %s", action.Name)
+			m.logAudit(audit.ActionUnshelve, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Unshelve", Name: action.Name}
 		}
 	case "stop":
@@ -776,9 +794,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.StopServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] stop server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionStop, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Stop", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] stopped server %s", action.Name)
+			m.logAudit(audit.ActionStop, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Stop", Name: action.Name}
 		}
 	case "start":
@@ -787,9 +807,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.StartServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] start server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionStart, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Start", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] started server %s", action.Name)
+			m.logAudit(audit.ActionStart, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Start", Name: action.Name}
 		}
 	case "lock":
@@ -798,9 +820,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.LockServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] lock server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionLock, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Lock", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] locked server %s", action.Name)
+			m.logAudit(audit.ActionLock, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Lock", Name: action.Name}
 		}
 	case "unlock":
@@ -809,9 +833,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.UnlockServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] unlock server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionUnlock, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Unlock", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] unlocked server %s", action.Name)
+			m.logAudit(audit.ActionUnlock, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Unlock", Name: action.Name}
 		}
 	case "rescue":
@@ -820,9 +846,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			adminPass, err := compute.RescueServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] rescue server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionRescue, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Rescue", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] rescued server %s", action.Name)
+			m.logAudit(audit.ActionRescue, "server", action.ServerID, action.Name, "success", "")
 			msg := shared.ServerActionMsg{Action: "Rescue", Name: action.Name}
 			if adminPass != "" {
 				msg.Action = fmt.Sprintf("Rescue (password: %s)", adminPass)
@@ -835,9 +863,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.UnrescueServer(context.Background(), client, action.ServerID)
 			if err != nil {
 				shared.Debugf("[action] unrescue server %s failed: %s", action.Name, err)
+				m.logAudit(audit.ActionUnrescue, "server", action.ServerID, action.Name, "error", err.Error())
 				return shared.ServerActionErrMsg{Action: "Unrescue", Name: action.Name, Err: err}
 			}
 			shared.Debugf("[action] unrescued server %s", action.Name)
+			m.logAudit(audit.ActionUnrescue, "server", action.ServerID, action.Name, "success", "")
 			return shared.ServerActionMsg{Action: "Unrescue", Name: action.Name}
 		}
 	case "delete_volume":
@@ -849,9 +879,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := volume.DeleteVolume(context.Background(), bsClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete volume %s failed: %s", name, err)
+				m.logAudit(audit.ActionDelete, "volume", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete volume", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted volume %s", name)
+			m.logAudit(audit.ActionDelete, "volume", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted volume", Name: name}
 		}
 	case "detach_volume":
@@ -880,9 +912,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			}
 			if len(detachErrs) > 0 {
 				shared.Debugf("[action] detach volume %s partially failed: %v", name, detachErrs)
+				m.logAudit(audit.ActionDetachVolume, "volume", volID, name, "error", fmt.Sprintf("detach errors: %v", detachErrs))
 				return shared.ResourceActionErrMsg{Action: "Detach volume", Name: name, Err: fmt.Errorf("detach errors: %v", detachErrs)}
 			}
 			shared.Debugf("[action] detached volume %s", name)
+			m.logAudit(audit.ActionDetachVolume, "volume", volID, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Detached volume", Name: name}
 		}
 	case "release_fip":
@@ -894,9 +928,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.ReleaseFloatingIP(context.Background(), netClient, id)
 			if err != nil {
 				shared.Debugf("[action] release floating IP %s failed: %s", name, err)
+				m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Release FIP", Name: name, Err: err}
 			}
 			shared.Debugf("[action] released floating IP %s", name)
+			m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Released", Name: name}
 		}
 	case "disassociate_fip":
@@ -908,9 +944,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.DisassociateFloatingIP(context.Background(), netClient, id)
 			if err != nil {
 				shared.Debugf("[action] disassociate floating IP %s failed: %s", name, err)
+				m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Disassociate FIP", Name: name, Err: err}
 			}
 			shared.Debugf("[action] disassociated floating IP %s", name)
+			m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Disassociated", Name: name}
 		}
 	case "delete_router":
@@ -922,9 +960,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.DeleteRouter(context.Background(), netClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete router %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeleteRouter, "router", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete router", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted router %s", name)
+			m.logAudit(audit.ActionDeleteRouter, "router", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted router", Name: name}
 		}
 	case "remove_router_interface":
@@ -969,9 +1009,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.DeletePort(context.Background(), netClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete port %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeletePort, "port", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete port", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted port %s", name)
+			m.logAudit(audit.ActionDeletePort, "port", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted port", Name: name}
 		}
 	case "delete_network":
@@ -983,9 +1025,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.DeleteNetwork(context.Background(), netClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete network %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeleteNet, "network", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete network", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted network %s", name)
+			m.logAudit(audit.ActionDeleteNet, "network", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted network", Name: name}
 		}
 	case "delete_subnet":
@@ -997,9 +1041,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.DeleteSubnet(context.Background(), netClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete subnet %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeleteSubnet, "subnet", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete subnet", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted subnet %s", name)
+			m.logAudit(audit.ActionDeleteSubnet, "subnet", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted subnet", Name: name}
 		}
 	case "delete_sg":
@@ -1011,9 +1057,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.DeleteSecurityGroup(context.Background(), netClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete security group %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeleteNet, "security_group", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete security group", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted security group %s", name)
+			m.logAudit(audit.ActionDeleteNet, "security_group", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted security group", Name: name}
 		}
 	case "delete_sg_rule":
@@ -1025,9 +1073,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.DeleteSecurityGroupRule(context.Background(), netClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete security group rule from %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeleteNet, "security_group_rule", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete rule", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted security group rule from %s", name)
+			m.logAudit(audit.ActionDeleteNet, "security_group_rule", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted rule from", Name: name}
 		}
 	case "delete_lb":
@@ -1039,9 +1089,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := loadbalancer.DeleteLoadBalancer(context.Background(), lbClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete load balancer %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeleteLB, "load_balancer", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete LB", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted load balancer %s", name)
+			m.logAudit(audit.ActionDeleteLB, "load_balancer", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted LB", Name: name}
 		}
 	case "delete_lb_listener":
@@ -1051,8 +1103,10 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			err := loadbalancer.DeleteListener(context.Background(), lbClient, id)
 			if err != nil {
+				m.logAudit(audit.ActionDeleteLB, "lb_listener", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete listener", Name: name, Err: err}
 			}
+			m.logAudit(audit.ActionDeleteLB, "lb_listener", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted listener", Name: name}
 		}
 	case "delete_lb_pool":
@@ -1062,8 +1116,10 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			err := loadbalancer.DeletePool(context.Background(), lbClient, id)
 			if err != nil {
+				m.logAudit(audit.ActionDeleteLB, "lb_pool", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete pool", Name: name, Err: err}
 			}
+			m.logAudit(audit.ActionDeleteLB, "lb_pool", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted pool", Name: name}
 		}
 	case "delete_lb_monitor":
@@ -1075,9 +1131,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := loadbalancer.DeleteHealthMonitor(context.Background(), lbClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete health monitor from %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeleteLB, "lb_monitor", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete monitor", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted health monitor from %s", name)
+			m.logAudit(audit.ActionDeleteLB, "lb_monitor", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Removed monitor from", Name: name}
 		}
 	case "delete_lb_member":
@@ -1092,8 +1150,10 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			err := loadbalancer.DeleteMember(context.Background(), lbClient, poolID, memberID)
 			if err != nil {
+				m.logAudit(audit.ActionDeleteLB, "lb_member", memberID, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete member", Name: name, Err: err}
 			}
+			m.logAudit(audit.ActionDeleteLB, "lb_member", memberID, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted member", Name: name}
 		}
 	case "delete_lb_members_bulk":
@@ -1140,9 +1200,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := compute.DeleteKeyPair(context.Background(), computeC, name)
 			if err != nil {
 				shared.Debugf("[action] delete keypair %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeleteKey, "keypair", name, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete keypair", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted keypair %s", name)
+			m.logAudit(audit.ActionDeleteKey, "keypair", name, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted keypair", Name: name}
 		}
 	case "delete_image":
@@ -1154,9 +1216,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := image.DeleteImage(context.Background(), imgClient, id)
 			if err != nil {
 				shared.Debugf("[action] delete image %s failed: %s", name, err)
+				m.logAudit(audit.ActionDeleteImage, "image", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete image", Name: name, Err: err}
 			}
 			shared.Debugf("[action] deleted image %s", name)
+			m.logAudit(audit.ActionDeleteImage, "image", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted image", Name: name}
 		}
 	case "deactivate_image":
@@ -1180,32 +1244,46 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 				serverAction = act
 			}
 			var err error
+			var auditAction audit.ActionType
 			switch serverAction {
 			case "delete":
+				auditAction = audit.ActionDelete
 				err = compute.DeleteServer(context.Background(), client, s.ID)
 			case "soft reboot":
+				auditAction = audit.ActionReboot
 				err = compute.RebootServer(context.Background(), client, s.ID, servers.SoftReboot)
 			case "hard reboot":
+				auditAction = audit.ActionReboot
 				err = compute.RebootServer(context.Background(), client, s.ID, servers.HardReboot)
 			case "pause":
+				auditAction = audit.ActionPause
 				err = compute.PauseServer(context.Background(), client, s.ID)
 			case "unpause":
+				auditAction = audit.ActionUnpause
 				err = compute.UnpauseServer(context.Background(), client, s.ID)
 			case "suspend":
+				auditAction = audit.ActionSuspend
 				err = compute.SuspendServer(context.Background(), client, s.ID)
 			case "resume":
+				auditAction = audit.ActionResume
 				err = compute.ResumeServer(context.Background(), client, s.ID)
 			case "shelve":
+				auditAction = audit.ActionShelve
 				err = compute.ShelveServer(context.Background(), client, s.ID)
 			case "unshelve":
+				auditAction = audit.ActionUnshelve
 				err = compute.UnshelveServer(context.Background(), client, s.ID)
 			case "stop":
+				auditAction = audit.ActionStop
 				err = compute.StopServer(context.Background(), client, s.ID)
 			case "start":
+				auditAction = audit.ActionStart
 				err = compute.StartServer(context.Background(), client, s.ID)
 			case "lock":
+				auditAction = audit.ActionLock
 				err = compute.LockServer(context.Background(), client, s.ID)
 			case "unlock":
+				auditAction = audit.ActionUnlock
 				err = compute.UnlockServer(context.Background(), client, s.ID)
 			case "rescue":
 				var adminPass string
@@ -1214,10 +1292,14 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 					passwords = append(passwords, fmt.Sprintf("%s: %s", s.Name, adminPass))
 				}
 			case "unrescue":
+				auditAction = audit.ActionUnrescue
 				err = compute.UnrescueServer(context.Background(), client, s.ID)
 			}
 			if err != nil {
+				m.logAudit(auditAction, "server", s.ID, s.Name, "error", err.Error())
 				errs = append(errs, fmt.Sprintf("%s (%s): %v", s.Name, serverAction, err))
+			} else {
+				m.logAudit(auditAction, "server", s.ID, s.Name, "success", "")
 			}
 		}
 		label := act

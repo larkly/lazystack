@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/config"
@@ -136,6 +137,7 @@ type Model struct {
 	width               int
 	height              int
 	client              *cloud.Client
+	auditLogger         *audit.Logger
 	cloudPicker         cloudpicker.Model
 	copyPicker          copypicker.Model
 	serverList          serverlist.Model
@@ -277,6 +279,7 @@ func New(opts Options) Model {
 			tabs:                tabs,
 			tabInited:           make([]bool, len(tabs)),
 			nav:                 &NavStack{},
+			auditLogger:         audit.NewLogger(audit.DefaultPath(), opts.Config.Audit.Enabled),
 		}
 	}
 
@@ -298,6 +301,7 @@ func New(opts Options) Model {
 		tabs:                tabs,
 		tabInited:           make([]bool, len(tabs)),
 		nav:                 &NavStack{},
+		auditLogger:         audit.NewLogger(audit.DefaultPath(), opts.Config.Audit.Enabled),
 	}
 }
 

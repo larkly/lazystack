@@ -849,7 +849,7 @@ Actions available in Nova but not yet implemented, prioritized by usefulness:
 - ✅ Server name templates for create — implemented in `internal/ui/servercreate/nametemplate.go`
 - ✅ SSH integration (launch SSH session to selected server) — Done (#27)
 - ✅ Copy-to-clipboard for IDs, IPs — Done (#28): `Y` opens a field picker on every list/detail view (server, volume, network, subnet, router, port, LB + listener/pool/member, floating IP, security group, keypair, image). `y` still copies the SSH command on server views.
-- Log/audit trail of actions taken — partially implemented via Nova action history viewer (`internal/ui/actionlog/`); unified lazystack-native audit trail not yet implemented
+- Log/audit trail of actions taken — implemented: audit package (`internal/audit/`) with structured JSON logs, auditlog viewer (`internal/ui/auditlog/`), and `audit.Log()` calls wired into every server/resource action handler in `actions_server.go` (single + bulk actions) and `audit_helper.go`
 - ✅ Designate (DNS) tab — implemented in `internal/ui/dnslist/`
 - ✅ Console access (noVNC URL retrieval and browser launch) — Done (#50)
 - ✅ Image upload/download/edit with file picker and combined view — Done (#126)
