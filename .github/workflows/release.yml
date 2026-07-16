@@ -24,7 +24,7 @@ jobs:
         with:
           ref: ${{ env.VERSION }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
@@ -68,7 +68,7 @@ jobs:
         with:
           ref: ${{ env.VERSION }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
