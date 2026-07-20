@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkly/lazystack/internal/network"
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
 type focusPane int
@@ -251,7 +251,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.applyHighlightNames()
 		if r := m.selectedRouter(); r != nil && r.ID != m.lastDetailID {
-			shared.Debugf("[routerview] routersLoaded: new selection %s, fetching detail", r.ID[:8])
+			shared.Debugf("[routerview] routersLoaded: new selection %.8s, fetching detail", r.ID)
 			m.lastDetailID = r.ID
 			m.resetDetailState()
 			return m, m.fetchDetail(r.ID)
@@ -271,7 +271,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case detailLoadedMsg:
-		shared.Debugf("[routerview] detailLoadedMsg: router=%s ifaces=%d", msg.routerID[:8], len(msg.interfaces))
+		shared.Debugf("[routerview] detailLoadedMsg: router=%.8s ifaces=%d", msg.routerID, len(msg.interfaces))
 		if r := m.selectedRouter(); r != nil && r.ID == msg.routerID {
 			m.detailLoading = false
 			m.detailErr = ""
@@ -281,7 +281,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case detailErrMsg:
-		shared.Debugf("[routerview] detailErrMsg: router=%s err=%s", msg.routerID[:8], msg.err)
+		shared.Debugf("[routerview] detailErrMsg: router=%.8s err=%s", msg.routerID, msg.err)
 		if r := m.selectedRouter(); r != nil && r.ID == msg.routerID {
 			m.detailLoading = false
 			m.detailErr = msg.err.Error()
