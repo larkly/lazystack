@@ -18,7 +18,6 @@
 | Document | Description |
 |---|---|
 | [`PRD.md`](PRD.md) | Full product requirements document covering all implemented features and phases. |
-| [`PRD-new.md`](PRD-new.md) | Refreshed PRD with updated structure and requirements. |
 
 ---
 
