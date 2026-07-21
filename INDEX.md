@@ -42,4 +42,4 @@
 ## Contributing
 
 - All code is in `src/`. Run `make test` before committing.
-- CI pipelines are in [`.github/workflows/`](.github/workflows/).
+- Release workflow is in [`.github/workflows/`](.github/workflows/) — CI workflows removed 2026-07-19 by release-only policy.
