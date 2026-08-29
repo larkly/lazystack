@@ -49,6 +49,9 @@ func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	case viewDNSList:
 		m.dnsList, cmd = m.dnsList.Update(msg)
 		m.statusBar.Hint = m.dnsList.Hints()
+	case viewAuditLog:
+		m.auditLog, cmd = m.auditLog.Update(msg)
+		m.statusBar.Hint = m.auditLog.Hints()
 	case viewUserManagement:
 		m.userManagement, cmd = m.userManagement.Update(msg)
 		m.statusBar.Hint = m.userManagement.Hints()
@@ -443,6 +446,8 @@ func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {
 		return m, m.dnsList.ForceRefresh()
 	case viewUserManagement:
 		return m, m.userManagement.ForceRefresh()
+	case viewAuditLog:
+		return m, m.openAuditLogCmd()
 	}
 	return m, nil
 }

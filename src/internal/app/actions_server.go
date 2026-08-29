@@ -11,13 +11,13 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ssh"
-	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/auditlog"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
@@ -26,12 +26,12 @@ import (
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/serveradminact"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
+	"github.com/larkly/lazystack/internal/ui/servermetadata"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
 	"github.com/larkly/lazystack/internal/ui/servicecatalog"
-	"github.com/larkly/lazystack/internal/ui/servermetadata"
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
 	"github.com/larkly/lazystack/internal/ui/usermanagement"
 	"github.com/larkly/lazystack/internal/volume"
@@ -392,7 +392,11 @@ func (m Model) openAuditLog() (Model, tea.Cmd) {
 	m.view = viewAuditLog
 	m.statusBar.CurrentView = "auditlog"
 	m.statusBar.Hint = m.auditLog.Hints()
-	return m, func() tea.Msg {
+	return m, m.openAuditLogCmd()
+}
+
+func (m Model) openAuditLogCmd() tea.Cmd {
+	return func() tea.Msg {
 		entries, err := audit.ReadEntries(audit.DefaultPath(), 500)
 		if err != nil {
 			return auditLogLoadedMsg{err: err.Error()}
@@ -1286,6 +1290,7 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 				auditAction = audit.ActionUnlock
 				err = compute.UnlockServer(context.Background(), client, s.ID)
 			case "rescue":
+				auditAction = audit.ActionRescue
 				var adminPass string
 				adminPass, err = compute.RescueServer(context.Background(), client, s.ID)
 				if err == nil && adminPass != "" {

@@ -3,70 +3,71 @@ package shared
 import "charm.land/bubbles/v2/key"
 
 type KeyMap struct {
-	Quit       key.Binding
-	Help       key.Binding
-	CloudPick  key.Binding
-	Filter     key.Binding
-	Enter      key.Binding
-	Back       key.Binding
-	Create     key.Binding
-	Delete     key.Binding
-	Reboot     key.Binding
-	HardReboot key.Binding
-	Refresh    key.Binding
-	Up         key.Binding
-	Down       key.Binding
-	Left       key.Binding
-	Right      key.Binding
-	Tab        key.Binding
-	ShiftTab   key.Binding
-	Pause      key.Binding
-	Suspend    key.Binding
-	Shelve     key.Binding
-	Resize        key.Binding
-	ConfirmResize key.Binding
-	RevertResize  key.Binding
-	Actions       key.Binding
-	Console       key.Binding
-	Select     key.Binding
-	Confirm    key.Binding
-	Deny       key.Binding
-	Restart    key.Binding
-	Attach     key.Binding
-	AssignFIP  key.Binding
-	Detach     key.Binding
-	Allocate   key.Binding
-	PageUp      key.Binding
-	PageDown    key.Binding
-	Sort        key.Binding
-	ReverseSort key.Binding
-	ProjectPick key.Binding
-	Quota       key.Binding
-	StopStart   key.Binding
-	Lock        key.Binding
-	Rename      key.Binding
-	Rebuild     key.Binding
-	Snapshot    key.Binding
-	Deactivate  key.Binding
-	Rescue      key.Binding
-	Clone        key.Binding
-	JumpVolumes  key.Binding
-	JumpSecGroups key.Binding
-	JumpNetworks key.Binding
-	SSH         key.Binding
-	CopySSH     key.Binding
-	Copy        key.Binding
-	ConsoleURL  key.Binding
-	GetPassword key.Binding
-	Config       key.Binding
-	Hypervisors  key.Binding
-	SaveFilter   key.Binding
-	LoadFilter   key.Binding
-	Browse       key.Binding
-	AdminActions    key.Binding
-	Metadata        key.Binding
-	UserManagement  key.Binding
-	ColumnPick      key.Binding
+	Quit           key.Binding
+	Help           key.Binding
+	CloudPick      key.Binding
+	Filter         key.Binding
+	Enter          key.Binding
+	Back           key.Binding
+	Create         key.Binding
+	Delete         key.Binding
+	Reboot         key.Binding
+	HardReboot     key.Binding
+	Refresh        key.Binding
+	Up             key.Binding
+	Down           key.Binding
+	Left           key.Binding
+	Right          key.Binding
+	Tab            key.Binding
+	ShiftTab       key.Binding
+	Pause          key.Binding
+	Suspend        key.Binding
+	Shelve         key.Binding
+	Resize         key.Binding
+	ConfirmResize  key.Binding
+	RevertResize   key.Binding
+	Actions        key.Binding
+	Console        key.Binding
+	AuditLog       key.Binding
+	Select         key.Binding
+	Confirm        key.Binding
+	Deny           key.Binding
+	Restart        key.Binding
+	Attach         key.Binding
+	AssignFIP      key.Binding
+	Detach         key.Binding
+	Allocate       key.Binding
+	PageUp         key.Binding
+	PageDown       key.Binding
+	Sort           key.Binding
+	ReverseSort    key.Binding
+	ProjectPick    key.Binding
+	Quota          key.Binding
+	StopStart      key.Binding
+	Lock           key.Binding
+	Rename         key.Binding
+	Rebuild        key.Binding
+	Snapshot       key.Binding
+	Deactivate     key.Binding
+	Rescue         key.Binding
+	Clone          key.Binding
+	JumpVolumes    key.Binding
+	JumpSecGroups  key.Binding
+	JumpNetworks   key.Binding
+	SSH            key.Binding
+	CopySSH        key.Binding
+	Copy           key.Binding
+	ConsoleURL     key.Binding
+	GetPassword    key.Binding
+	Config         key.Binding
+	Hypervisors    key.Binding
+	SaveFilter     key.Binding
+	LoadFilter     key.Binding
+	Browse         key.Binding
+	AdminActions   key.Binding
+	Metadata       key.Binding
+	UserManagement key.Binding
+	ColumnPick     key.Binding
 }
 
 var Keys = KeyMap{
@@ -169,6 +170,10 @@ var Keys = KeyMap{
 	Console: key.NewBinding(
 		key.WithKeys("L"),
 		key.WithHelp("L", "console log"),
+	),
+	AuditLog: key.NewBinding(
+		key.WithKeys("T"),
+		key.WithHelp("T", "audit trail"),
 	),
 	Select: key.NewBinding(
 		key.WithKeys("space"),

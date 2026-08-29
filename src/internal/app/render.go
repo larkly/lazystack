@@ -55,6 +55,8 @@ func (m Model) viewName() string {
 		return "dnslist"
 	case viewUserManagement:
 		return "usermanagement"
+	case viewAuditLog:
+		return "auditlog"
 	}
 	return ""
 }
@@ -136,6 +138,8 @@ func (m Model) viewContent() string {
 		content = m.serviceCatalog.View()
 	case viewUserManagement:
 		content = m.userManagement.View()
+	case viewAuditLog:
+		content = m.auditLog.View()
 	}
 
 	// Add tab bar for top-level views
