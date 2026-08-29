@@ -298,9 +298,11 @@ func (m *Model) updateAnyModal(msg tea.Msg) (bool, tea.Cmd) {
 	return false, nil
 }
 
-// updateAnyModalBackground routes non-key messages to active modals.
-func (m *Model) updateAnyModalBackground(msg tea.Msg) tea.Cmd {
-	// Surface results of backgrounded image downloads in the status bar.
+// updateImageDownloadBackground routes image-download lifecycle messages
+// (progress ticks, done, error) to the download modal even when it is
+// inactive, so backgrounded downloads keep flowing, and surfaces completion
+// results in the status bar. Returns the resulting command, if any.
+func (m *Model) updateImageDownloadBackground(msg tea.Msg) tea.Cmd {
 	if fin, ok := msg.(imagedownload.DownloadFinishedMsg); ok {
 		if fin.Err != nil {
 			m.statusBar.StickyHint = fmt.Sprintf("✗ Image download failed: %v", fin.Err)
@@ -309,12 +311,15 @@ func (m *Model) updateAnyModalBackground(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 	}
-	// Route image-download lifecycle messages (progress ticks, done, error)
-	// even when the modal is inactive so backgrounded downloads keep flowing.
-	var bgCmd tea.Cmd
-	m.imageDownload, bgCmd = m.imageDownload.Update(msg)
-	if bgCmd != nil {
-		return bgCmd
+	var cmd tea.Cmd
+	m.imageDownload, cmd = m.imageDownload.Update(msg)
+	return cmd
+}
+
+// updateAnyModalBackground routes non-key messages to active modals.
+func (m *Model) updateAnyModalBackground(msg tea.Msg) tea.Cmd {
+	if cmd := m.updateImageDownloadBackground(msg); cmd != nil {
+		return cmd
 	}
 	switch {
 	case m.serverRename.Active:

@@ -398,8 +398,9 @@ func TestRetryTransport_BodyReplay(t *testing.T) {
 	defer srv.Close()
 
 	// A plain io.Reader wrapper: http.NewRequest leaves GetBody nil, forcing
-	// the transport to buffer and replay the body itself.
-	req, err := http.NewRequest(http.MethodPost, srv.URL, struct{ io.Reader }{strings.NewReader("hello")})
+	// the transport to buffer and replay the body itself. PUT is used because
+	// it is idempotent and thus retryable on 503 (POST is not).
+	req, err := http.NewRequest(http.MethodPut, srv.URL, struct{ io.Reader }{strings.NewReader("hello")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,6 +449,57 @@ func TestRetryTransport_NoRetryOn500(t *testing.T) {
 	}
 	if got := attempts.Load(); got != 1 {
 		t.Errorf("attempts = %d, want 1 (500 must not be retried)", got)
+	}
+}
+
+// Mutating calls (POST/PATCH) must not be retried on 5xx: the backend may
+// have processed the original request, and a retry could duplicate the
+// resource. 429 remains retryable for every method.
+func TestRetryTransport_PostNotRetriedOn503(t *testing.T) {
+	var attempts atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		http.Error(w, "bad gateway", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := retryTestClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("attempts = %d, want 1 (POST must not be retried on 503)", got)
+	}
+}
+
+func TestRetryTransport_PostRetriedOn429(t *testing.T) {
+	var attempts atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, "slow down", http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := retryTestClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := attempts.Load(); got != 2 {
+		t.Errorf("attempts = %d, want 2 (POST should be retried on 429)", got)
 	}
 }
 

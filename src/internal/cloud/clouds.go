@@ -51,8 +51,8 @@ func ListCloudNames() ([]string, error) {
 		return names, nil
 	}
 
-	shared.Debugf("[cloud] ListCloudNames: no clouds.yaml found")
-	return nil, fmt.Errorf("no clouds.yaml found (searched: %v)", paths)
+	shared.Debugf("[cloud] ListCloudNames: no usable clouds.yaml found")
+	return nil, fmt.Errorf("no usable clouds.yaml found (no clouds defined; searched: %v)", paths)
 }
 
 // CloudsYamlPaths returns the list of paths searched for clouds.yaml, in

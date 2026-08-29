@@ -175,10 +175,11 @@ func ConnectWithProject(ctx context.Context, cloudName, projectID string) (*Clie
 		shared.Debugf("[cloud] ConnectWithProject: error parsing cloud config: %v", err)
 		return nil, fmt.Errorf("parsing cloud %q: %w", cloudName, err)
 	}
-	// Token-based auth cannot be re-scoped: the token is issued for a fixed
-	// scope and there is no way to exchange it for a project-scoped one.
-	if ao.TokenID != "" {
-		return nil, fmt.Errorf("project switch to %s for cloud %q: token re-scoping not possible with token auth; use password or application-credential auth", projectID, cloudName)
+	// Token- and application-credential-based auth cannot be re-scoped: the
+	// token is issued for a fixed scope (app creds are bound to their owning
+	// project) and there is no way to exchange it for a project-scoped one.
+	if ao.TokenID != "" || ao.ApplicationCredentialID != "" || ao.ApplicationCredentialName != "" {
+		return nil, fmt.Errorf("project switch to %s for cloud %q: re-scoping is not possible with token or application-credential auth; use password auth", projectID, cloudName)
 	}
 	// Drop any scope populated from clouds.yaml (e.g. trust_id) so the token
 	// ends up scoped to the target project instead.

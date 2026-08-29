@@ -77,8 +77,10 @@ const getVolumeFixture = `{
   }
 }`
 
-func fakeBlockStorageClient(handler http.Handler) *gophercloud.ServiceClient {
+func fakeBlockStorageClient(t *testing.T, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -98,7 +100,7 @@ func TestListVolumes(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeBlockStorageClient(handler)
+	client := fakeBlockStorageClient(t, handler)
 	ctx := context.Background()
 
 	vols, err := ListVolumes(ctx, client)
@@ -231,7 +233,7 @@ func TestGetVolume(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeBlockStorageClient(handler)
+	client := fakeBlockStorageClient(t, handler)
 	ctx := context.Background()
 
 	vol, err := GetVolume(ctx, client, "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
@@ -331,7 +333,7 @@ func TestListVolumeTypesPagination(t *testing.T) {
 		}
 	})
 
-	client := fakeBlockStorageClient(handler)
+	client := fakeBlockStorageClient(t, handler)
 	ctx := context.Background()
 
 	types, err := ListVolumeTypes(ctx, client)
@@ -417,7 +419,7 @@ func TestAttachVolumeReturnsAttachmentID(t *testing.T) {
 		w.Write([]byte(`{"volumeAttachment": {"id": "att-42", "volumeId": "vol-1", "serverId": "srv-1", "device": "/dev/vdb"}}`))
 	})
 
-	client := fakeBlockStorageClient(handler)
+	client := fakeBlockStorageClient(t, handler)
 	attID, err := AttachVolume(context.Background(), client, "srv-1", "vol-1")
 	if err != nil {
 		t.Fatalf("AttachVolume() error: %v", err)
@@ -445,7 +447,7 @@ func TestDetachVolumeResolvesAttachmentID(t *testing.T) {
 		}
 	})
 
-	client := fakeBlockStorageClient(handler)
+	client := fakeBlockStorageClient(t, handler)
 	if err := DetachVolume(context.Background(), client, "srv-1", "vol-1"); err != nil {
 		t.Fatalf("DetachVolume() error: %v", err)
 	}
@@ -470,7 +472,7 @@ func TestDetachVolumeFallsBackToVolumeID(t *testing.T) {
 		}
 	})
 
-	client := fakeBlockStorageClient(handler)
+	client := fakeBlockStorageClient(t, handler)
 	if err := DetachVolume(context.Background(), client, "srv-1", "vol-1"); err != nil {
 		t.Fatalf("DetachVolume() error: %v", err)
 	}

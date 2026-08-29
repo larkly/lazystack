@@ -55,6 +55,10 @@ type retryTransport struct {
 
 // RoundTrip executes the request, retrying up to retryMaxRetries times on
 // retryable status codes. The request is left usable after RoundTrip returns.
+// Non-idempotent methods (POST, PATCH) are only retried on 429: a throttled
+// request is known not to have executed, while a 5xx on a mutating call may
+// have been processed before the gateway timed out, and a retry could create
+// a duplicate resource.
 func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.Base
 	if base == nil {
@@ -69,7 +73,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			restoreBody(req)
 			return resp, err
 		}
-		if !isRetryableStatus(resp.StatusCode) || !replayable || attempt >= retryMaxRetries {
+		if !isRetryableStatus(resp.StatusCode, req.Method) || !replayable || attempt >= retryMaxRetries {
 			restoreBody(req)
 			return resp, nil
 		}
@@ -82,17 +86,27 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if werr := retryWait(req.Context(), attempt, resp.Header.Get("Retry-After")); werr != nil {
 			return nil, werr
 		}
-		restoreBody(req)
+		if !restoreBody(req) {
+			// Body could not be replayed; surface the last response rather
+			// than sending a request with an empty body.
+			return resp, nil
+		}
 	}
 }
 
-// isRetryableStatus reports whether the status code should trigger a retry.
-// Only 429 and the transient 5xx codes 502/503/504 are retried.
-func isRetryableStatus(status int) bool {
-	return status == http.StatusTooManyRequests ||
-		status == http.StatusBadGateway ||
-		status == http.StatusServiceUnavailable ||
-		status == http.StatusGatewayTimeout
+// isRetryableStatus reports whether the status code should trigger a retry
+// for the given method. 429 is always retried (the request was throttled
+// before execution); 502/503/504 are only retried for idempotent methods.
+func isRetryableStatus(status int, method string) bool {
+	if status == http.StatusTooManyRequests {
+		return true
+	}
+	if method != http.MethodPost && method != http.MethodPatch {
+		return status == http.StatusBadGateway ||
+			status == http.StatusServiceUnavailable ||
+			status == http.StatusGatewayTimeout
+	}
+	return false
 }
 
 // replayableBody makes the request body replayable across attempts. Bodies
@@ -131,12 +145,16 @@ func replayableBody(req *http.Request) bool {
 
 // restoreBody puts a fresh body reader back into the request, leaving it
 // usable for the next attempt (or by the caller after RoundTrip returns).
-func restoreBody(req *http.Request) {
+// It reports whether the body was successfully restored.
+func restoreBody(req *http.Request) bool {
 	if req.Body != nil && req.GetBody != nil {
 		if fresh, err := req.GetBody(); err == nil {
 			req.Body = fresh
+			return true
 		}
+		return false
 	}
+	return true
 }
 
 type readCloser struct {
@@ -176,11 +194,16 @@ func retryDelay(attempt int, retryAfter string) time.Duration {
 	return min(d, retryMaxBackoff) + time.Duration(rand.IntN(101))*time.Millisecond
 }
 
-// drainAndClose discards the remaining response body and closes it.
+// drainAndClose discards the remaining response body (bounded, so a
+// misbehaving server streaming an endless error body cannot stall the
+// retry loop) and closes it.
 func drainAndClose(body io.ReadCloser) {
 	if body == nil {
 		return
 	}
-	io.Copy(io.Discard, body)
+	_, _ = io.CopyN(io.Discard, body, drainLimit)
 	body.Close()
 }
+
+// drainLimit bounds how much of an error body is drained before closing.
+const drainLimit = 64 << 10

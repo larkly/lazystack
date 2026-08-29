@@ -83,8 +83,10 @@ const listenerListFixture = `{
   ]
 }`
 
-func fakeLBClient(handler http.Handler) *gophercloud.ServiceClient {
+func fakeLBClient(t *testing.T, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -104,7 +106,7 @@ func TestListLoadBalancers(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeLBClient(handler)
+	client := fakeLBClient(t, handler)
 	ctx := context.Background()
 
 	lbs, err := ListLoadBalancers(ctx, client)
@@ -169,7 +171,7 @@ func TestListListeners(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeLBClient(handler)
+	client := fakeLBClient(t, handler)
 	ctx := context.Background()
 
 	listeners, err := ListListeners(ctx, client, "f1b9d8c2-7a3e-4d1f-92c5-e81a2d3b4f76")
@@ -290,7 +292,7 @@ func TestWaitForActive(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var calls int
-			client := fakeLBClient(scriptHandler(tt.responses, &calls))
+			client := fakeLBClient(t, scriptHandler(tt.responses, &calls))
 			ctx := context.Background()
 
 			err := WaitForActive(ctx, client, "lb-123", 30*time.Second)

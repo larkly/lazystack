@@ -1334,11 +1334,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Route to all views first so background messages keep flowing
 		m2, viewCmd := m.updateAllViews(msg)
 		m = m2
-		// Route to quota view for spinner/loaded messages
+		// Route to quota view for spinner/loaded messages; keep background
+		// image downloads flowing even while the quota overlay is up.
 		if m.quotaView.Visible {
 			var cmd tea.Cmd
 			m.quotaView, cmd = m.quotaView.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
+			dlCmd := m.updateImageDownloadBackground(msg)
+			return m, tea.Batch(viewCmd, cmd, dlCmd)
 		}
 		// Route to any active modals for background messages
 		if modalCmd := m.updateAnyModalBackground(msg); modalCmd != nil {
