@@ -407,8 +407,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Server list filter mode: every keystroke belongs to the filter
 			// input — never let global handlers see them (typing "q" would
-			// otherwise quit the app).
-			if m.view == viewServerList && m.serverList.IsFiltering() {
+			// otherwise quit the app). Quit (ctrl+c) stays global so the
+			// app can always be exited.
+			if m.view == viewServerList && m.serverList.IsFiltering() && !key.Matches(msg, shared.Keys.Quit) {
 				return m.updateActiveView(msg)
 			}
 
