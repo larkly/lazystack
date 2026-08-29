@@ -9,7 +9,7 @@
 | Document | Description |
 |---|---|
 | [`README.md`](README.md) | Overview, installation, features, keybindings, configuration, and usage. |
-| [`LICENSE`](LICENSE) | MPL-2.0 license. |
+| [`LICENSE`](LICENSE) | Apache 2.0 license. |
 
 ---
 
