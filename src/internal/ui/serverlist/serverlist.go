@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/config"
-	img "github.com/larkly/lazystack/internal/image"
-	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/config"
+	img "github.com/larkly/lazystack/internal/image"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
 type serversLoadedMsg struct {
@@ -59,6 +59,7 @@ type Model struct {
 	config          *config.Config // live reference to global config for saving filters
 	filterNameInput textinput.Model
 	namingFilter    bool // true when user is typing name for save
+	cycleFilterIdx  int  // next saved-filter index to load (per model, reset on filter changes)
 }
 
 // New creates a new server list model.
@@ -143,6 +144,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		m.err = ""
+		m.pruneSelection()
 		m.applyFilter()
 		// Fetch any unknown image names
 		cmd := m.fetchMissingImageNames()
@@ -407,6 +409,23 @@ func (m Model) maxContentWidths() map[string]int {
 
 func (m *Model) recomputeColumns() {
 	m.columns = ComputeWidths(m.columns, m.width, m.maxContentWidths())
+}
+
+// pruneSelection drops selected IDs that are no longer present in the
+// server list, so vanished servers don't linger as stale selections.
+func (m *Model) pruneSelection() {
+	if len(m.selected) == 0 {
+		return
+	}
+	current := make(map[string]bool, len(m.servers))
+	for _, s := range m.servers {
+		current[s.ID] = true
+	}
+	for id := range m.selected {
+		if !current[id] {
+			delete(m.selected, id)
+		}
+	}
 }
 
 func (m Model) visibleColCount() int {
@@ -827,6 +846,7 @@ func (m *Model) SetColumns(cfgCols []config.ColumnConfig) {
 // SetConfig wires the live config reference for saving/loading filters and columns.
 func (m *Model) SetConfig(cfg *config.Config) {
 	m.config = cfg
+	m.cycleFilterIdx = 0 // new config, restart the saved-filter cycle
 	if cfg != nil && len(cfg.Columns) > 0 {
 		m.SetColumns(cfg.Columns)
 	}
@@ -850,6 +870,7 @@ func (m Model) updateNamingFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.config.SavedFilters = append(m.config.SavedFilters, config.SavedFilter{
 				Name: name, Pattern: m.filter.Value(),
 			})
+			m.cycleFilterIdx = 0 // saved-filter list changed; restart the cycle
 			if err := m.config.Save(); err != nil {
 				shared.Debugf("[serverlist] failed to save filter: %v", err)
 			}
@@ -864,16 +885,14 @@ func (m Model) updateNamingFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
-// cycleFilterIdx tracks which saved filter was last loaded.
-var cycleFilterIdx int
-
 func (m Model) loadNextFilter() (Model, tea.Cmd) {
 	if m.config == nil || len(m.config.SavedFilters) == 0 {
 		return m, nil
 	}
-	cycleFilterIdx = (cycleFilterIdx) % len(m.config.SavedFilters)
-	f := m.config.SavedFilters[cycleFilterIdx]
-	cycleFilterIdx++
+	// Clamp to bounds in case the saved-filter list shrank.
+	m.cycleFilterIdx %= len(m.config.SavedFilters)
+	f := m.config.SavedFilters[m.cycleFilterIdx]
+	m.cycleFilterIdx++
 	m.filter.SetValue(f.Pattern)
 	m.applyFilter()
 	return m, nil

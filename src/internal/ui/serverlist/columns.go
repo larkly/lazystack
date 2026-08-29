@@ -1,8 +1,8 @@
 package serverlist
 
 import (
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Column defines a table column.

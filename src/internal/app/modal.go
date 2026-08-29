@@ -1,6 +1,11 @@
 package app
 
-import tea "charm.land/bubbletea/v2"
+import (
+	"fmt"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/ui/imagedownload"
+)
 
 // isAnyModalActive checks all overlay/modals in priority order and returns
 // true if any of them is active. This replaces the ~25 if-blocks duplicated
@@ -295,6 +300,22 @@ func (m *Model) updateAnyModal(msg tea.Msg) (bool, tea.Cmd) {
 
 // updateAnyModalBackground routes non-key messages to active modals.
 func (m *Model) updateAnyModalBackground(msg tea.Msg) tea.Cmd {
+	// Surface results of backgrounded image downloads in the status bar.
+	if fin, ok := msg.(imagedownload.DownloadFinishedMsg); ok {
+		if fin.Err != nil {
+			m.statusBar.StickyHint = fmt.Sprintf("✗ Image download failed: %v", fin.Err)
+		} else {
+			m.statusBar.StickyHint = fmt.Sprintf("✓ Image %s downloaded", fin.Name)
+		}
+		return nil
+	}
+	// Route image-download lifecycle messages (progress ticks, done, error)
+	// even when the modal is inactive so backgrounded downloads keep flowing.
+	var bgCmd tea.Cmd
+	m.imageDownload, bgCmd = m.imageDownload.Update(msg)
+	if bgCmd != nil {
+		return bgCmd
+	}
 	switch {
 	case m.serverRename.Active:
 		var cmd tea.Cmd
@@ -367,10 +388,6 @@ func (m *Model) updateAnyModalBackground(msg tea.Msg) tea.Cmd {
 	case m.imageCreate.Active:
 		var cmd tea.Cmd
 		m.imageCreate, cmd = m.imageCreate.Update(msg)
-		return cmd
-	case m.imageDownload.Active:
-		var cmd tea.Cmd
-		m.imageDownload, cmd = m.imageDownload.Update(msg)
 		return cmd
 	case m.lbCreate.Active:
 		var cmd tea.Cmd

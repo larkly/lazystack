@@ -71,7 +71,9 @@ func (m Model) openInBrowser() (Model, tea.Cmd) {
 	case "darwin":
 		cmd = exec.Command("open", url)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", url)
+		// rundll32 passes the URL as a single argument — no cmd.exe
+		// metacharacter (&, ^, ...) interpretation of API-provided URLs.
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}

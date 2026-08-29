@@ -7,15 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/network"
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
 type focusPane int
@@ -82,6 +83,7 @@ type Model struct {
 	refreshInterval time.Duration
 	highlightNames  map[string]bool
 	lastDetailNetID string
+	pendingDetailID string // network whose detail fetch is pending after highlight navigation
 }
 
 // New creates a network view model.
@@ -288,13 +290,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.cursor = len(m.networks) - 1
 		}
 		m.applyHighlightNames()
+		fetchCmd := m.takePendingDetailFetch()
 		// Fetch detail for selected network if changed
 		if n := m.selectedNetwork(); n != nil && n.ID != m.lastDetailNetID {
 			m.lastDetailNetID = n.ID
 			m.resetDetailState()
-			return m, m.fetchDetail(n.ID)
+			fetchCmd = m.fetchDetail(n.ID)
 		}
-		return m, nil
+		return m, fetchCmd
 
 	case networksErrMsg:
 		shared.Debugf("[networkview] networksErrMsg: %v", msg.err)
@@ -311,16 +314,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.serverNames = msg.serverNames
 			m.sgNames = msg.sgNames
 			m.clampDetailCursors()
+			return m, nil
 		}
-		return m, nil
+		// Stale detail for a previous selection — start any pending
+		// highlight-navigation fetch now that the in-flight one finished.
+		return m, m.takePendingDetailFetch()
 
 	case detailErrMsg:
 		shared.Debugf("[networkview] detailErrMsg: %v", msg.err)
 		if n := m.selectedNetwork(); n != nil && n.ID == msg.netID {
 			m.detailLoading = false
 			m.detailErr = msg.err.Error()
+			return m, nil
 		}
-		return m, nil
+		return m, m.takePendingDetailFetch()
 
 	case shared.TickMsg:
 		if m.loading {
@@ -329,7 +336,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[networkview] tick fetching")
 		cmds := []tea.Cmd{m.fetchNetworks()}
-		if n := m.selectedNetwork(); n != nil {
+		if cmd := m.takePendingDetailFetch(); cmd != nil {
+			cmds = append(cmds, cmd)
+		} else if n := m.selectedNetwork(); n != nil && !m.detailLoading {
+			// Guard against overlapping in-flight detail requests.
 			cmds = append(cmds, m.fetchDetail(n.ID))
 		}
 		return m, tea.Batch(cmds...)
@@ -472,6 +482,7 @@ func (m Model) onSelectorChange() (Model, tea.Cmd) {
 	if n == nil || n.ID == m.lastDetailNetID {
 		return m, nil
 	}
+	m.pendingDetailID = "" // manual navigation supersedes any pending highlight fetch
 	m.lastDetailNetID = n.ID
 	m.resetDetailState()
 	return m, m.fetchDetail(n.ID)
@@ -782,8 +793,9 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		line := prefix + nameStyle.Render(net.Name) + shared.StyleHelp.Render(meta) + "  " + statusStr
-		if lipgloss.Width(line) > maxWidth+2 {
-			line = line[:maxWidth+1]
+		// Truncate to width (ANSI-aware so escape sequences survive)
+		if ansi.StringWidth(line) > maxWidth+2 {
+			line = ansi.Truncate(line, maxWidth+1, "")
 		}
 		lines = append(lines, line)
 	}
@@ -1301,10 +1313,25 @@ func (m *Model) applyHighlightNames() {
 			if net.ID != m.lastDetailNetID {
 				m.lastDetailNetID = net.ID
 				m.resetDetailState()
+				// Schedule the detail fetch; callers thread the command
+				// through Update's return (or it is flushed on the next
+				// opportunity — see takePendingDetailFetch).
+				m.pendingDetailID = net.ID
 			}
 			return
 		}
 	}
+}
+
+// takePendingDetailFetch returns and clears the detail fetch command
+// scheduled by highlight navigation, if any.
+func (m *Model) takePendingDetailFetch() tea.Cmd {
+	if m.pendingDetailID == "" {
+		return nil
+	}
+	netID := m.pendingDetailID
+	m.pendingDetailID = ""
+	return m.fetchDetail(netID)
 }
 
 // Hints returns key hints for the status bar.
@@ -1430,4 +1457,3 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 		return detailLoadedMsg{netID: netID, ports: fetchedPorts, serverNames: srvNames, sgNames: sgNameMap}
 	}
 }
-

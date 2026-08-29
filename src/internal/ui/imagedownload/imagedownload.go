@@ -10,14 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/larkly/lazystack/internal/image"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/image"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 const (
@@ -27,9 +27,24 @@ const (
 	numFields   = 3
 )
 
-type downloadDoneMsg struct{ name string }
-type downloadErrMsg struct{ err error }
+type downloadDoneMsg struct {
+	imageID string // correlation ID: which download completed
+	name    string
+}
+type downloadErrMsg struct {
+	imageID string // correlation ID: which download failed
+	err     error
+}
 type progressTickMsg struct{}
+
+// DownloadFinishedMsg is emitted when a backgrounded download (dismissed
+// with "b" or replaced by a newer download) finishes, so the app can surface
+// the result in the status bar.
+type DownloadFinishedMsg struct {
+	ImageID string
+	Name    string
+	Err     error // nil on success
+}
 
 // countingReader wraps a reader and atomically tracks bytes read.
 type countingReader struct {
@@ -62,9 +77,9 @@ type Model struct {
 	imageID   string
 	imageName string
 
-	pathInput    textinput.Model
-	focusField   int
-	defaultFile  string // default filename for save-here
+	pathInput   textinput.Model
+	focusField  int
+	defaultFile string // default filename for save-here
 
 	// Directory picker
 	pickerOpen    bool
@@ -145,18 +160,41 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case downloadDoneMsg:
-		m.Active = false
+		if msg.imageID != m.imageID {
+			// Stale completion from a previous download — ignore it.
+			shared.Debugf("[imagedownload] ignoring stale done for imageID=%s (current %s)", msg.imageID, m.imageID)
+			return m, nil
+		}
 		m.downloading = false
 		shared.Debugf("[imagedownload] download success name=%q", msg.name)
+		if m.Active {
+			m.Active = false
+			return m, func() tea.Msg {
+				return shared.ResourceActionMsg{Action: "Downloaded image", Name: msg.name}
+			}
+		}
+		// Backgrounded: report via DownloadFinishedMsg so the app can show
+		// the result in the status bar.
 		return m, func() tea.Msg {
-			return shared.ResourceActionMsg{Action: "Downloaded image", Name: msg.name}
+			return DownloadFinishedMsg{ImageID: msg.imageID, Name: msg.name}
 		}
 
 	case downloadErrMsg:
+		if msg.imageID != m.imageID {
+			shared.Debugf("[imagedownload] ignoring stale error for imageID=%s (current %s)", msg.imageID, m.imageID)
+			return m, nil
+		}
 		m.downloading = false
 		m.err = msg.err.Error()
 		shared.Debugf("[imagedownload] error: %v", msg.err)
-		return m, nil
+		if m.Active {
+			return m, nil
+		}
+		// Backgrounded: surface the failure via DownloadFinishedMsg.
+		finErr := msg.err
+		return m, func() tea.Msg {
+			return DownloadFinishedMsg{ImageID: msg.imageID, Err: finErr}
+		}
 
 	case spinner.TickMsg:
 		if m.downloading {
@@ -402,7 +440,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 		body, contentLength, err := image.DownloadImageData(ctx, client, imageID)
 		if err != nil {
-			return downloadErrMsg{err: err}
+			return downloadErrMsg{imageID: imageID, err: err}
 		}
 		defer body.Close()
 		if contentLength > 0 {
@@ -411,7 +449,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 		if err != nil {
-			return downloadErrMsg{err: fmt.Errorf("creating file: %w", err)}
+			return downloadErrMsg{imageID: imageID, err: fmt.Errorf("creating file: %w", err)}
 		}
 		defer f.Close()
 
@@ -420,10 +458,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		_, err = io.Copy(f, reader)
 		if err != nil {
 			os.Remove(path)
-			return downloadErrMsg{err: fmt.Errorf("writing file: %w", err)}
+			return downloadErrMsg{imageID: imageID, err: fmt.Errorf("writing file: %w", err)}
 		}
 
-		return downloadDoneMsg{name: name}
+		return downloadDoneMsg{imageID: imageID, name: name}
 	})
 }
 
