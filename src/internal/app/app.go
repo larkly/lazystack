@@ -58,13 +58,13 @@ import (
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/serverlist"
-	"github.com/larkly/lazystack/internal/ui/servicecatalog"
 	"github.com/larkly/lazystack/internal/ui/servermetadata"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/serverrebuild"
 	"github.com/larkly/lazystack/internal/ui/serverrename"
 	"github.com/larkly/lazystack/internal/ui/serverresize"
 	"github.com/larkly/lazystack/internal/ui/serversnapshot"
+	"github.com/larkly/lazystack/internal/ui/servicecatalog"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
 	"github.com/larkly/lazystack/internal/ui/sgrulecreate"
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
@@ -405,8 +405,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.imageView.ClearSelection()
 				return m, nil
 			}
-			// Server list filter mode: esc should clear filter before global back-nav/tab handlers.
-			if m.view == viewServerList && m.serverList.IsFiltering() && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
+			// Server list filter mode: every keystroke belongs to the filter
+			// input — never let global handlers see them (typing "q" would
+			// otherwise quit the app). Quit (ctrl+c) stays global so the
+			// app can always be exited.
+			if m.view == viewServerList && m.serverList.IsFiltering() && !key.Matches(msg, shared.Keys.Quit) {
 				return m.updateActiveView(msg)
 			}
 
@@ -505,7 +508,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.Actions) {
 				return m.openActionLog()
 			}
-			if msg.String() == "L" {
+			if key.Matches(msg, shared.Keys.AuditLog) {
 				return m.openAuditLog()
 			}
 
@@ -581,16 +584,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.UserManagement) {
 				return m.openUserManagement()
 			}
-		if key.Matches(msg, shared.Keys.ColumnPick) {
-			cols := m.serverList.Columns()
-			pickerCols := make([]columnpicker.PickerColumn, len(cols))
-			for i, c := range cols {
-				pickerCols[i] = columnpicker.PickerColumn{Title: c.Title, Key: c.Key, Hidden: c.Hidden()}
+			if key.Matches(msg, shared.Keys.ColumnPick) {
+				cols := m.serverList.Columns()
+				pickerCols := make([]columnpicker.PickerColumn, len(cols))
+				for i, c := range cols {
+					pickerCols[i] = columnpicker.PickerColumn{Title: c.Title, Key: c.Key, Hidden: c.Hidden()}
+				}
+				m.columnPicker = columnpicker.New(pickerCols)
+				m.columnPicker.SetSize(m.width, m.height)
+				return m, nil
 			}
-			m.columnPicker = columnpicker.New(pickerCols)
-			m.columnPicker.SetSize(m.width, m.height)
-			return m, nil
-		}
 			if key.Matches(msg, shared.Keys.ConfirmResize) {
 				return m.doConfirmResize()
 			}
@@ -925,6 +928,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case shared.CloudConnectedMsg:
 		m.lastActivity = time.Now()
 		m.idlePaused = false
+		// Reset any cross-resource back-nav from a previous cloud/project.
+		m.returnToView = 0
 		m.client = &cloud.Client{
 			CloudName:      m.cloudName,
 			Compute:        msg.ComputeClient,
@@ -1040,6 +1045,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				NetworkClient:      client.Network,
 				BlockStorageClient: client.BlockStorage,
 				LoadBalancerClient: client.LoadBalancer,
+				DNSClient:          client.DNS,
 				ProviderClient:     client.ProviderClient,
 				EndpointOpts:       client.EndpointOpts,
 				Region:             client.Region,
@@ -1216,6 +1222,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fmt.Sprintf("%s %s", msg.Action, msg.Name), msg.Err)
 		m.errModal.SetSize(m.width, m.height)
 		m.activeModal = modalError
+		return m, nil
+
+	case auditLogLoadedMsg:
+		if m.view == viewAuditLog {
+			if msg.err != "" {
+				m.auditLog.SetError(msg.err)
+			} else {
+				m.auditLog.SetEntries(msg.entries)
+			}
+		}
 		return m, nil
 
 	case servercreate.ServerCloneCreatedMsg:

@@ -5,11 +5,11 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/atotto/clipboard"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Model is the console URL display modal.
@@ -78,6 +78,8 @@ func (m Model) openInBrowser() (Model, tea.Cmd) {
 	if err := cmd.Start(); err != nil {
 		m.status = "Failed to open browser: " + err.Error()
 	} else {
+		// Reap the child process so we don't leave zombies behind.
+		go func() { _ = cmd.Wait() }()
 		m.status = "Opened in browser"
 	}
 	return m, nil

@@ -3,10 +3,10 @@ package help
 import (
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // ToggleHelpMsg toggles the help overlay.
@@ -79,6 +79,7 @@ var allSections = []section{
 			"V             console URL (noVNC)",
 			"W             admin password",
 			"L             console log",
+			"T             audit trail",
 			"a             action history",
 			"space         select/deselect",
 			"/             filter",
@@ -112,6 +113,7 @@ var allSections = []section{
 			"V             console URL (noVNC)",
 			"W             admin password",
 			"L             console log",
+			"T             audit trail",
 			"a             action history",
 			"esc           back to list",
 		},
@@ -275,25 +277,26 @@ var allSections = []section{
 // viewSections maps view names to the section names shown in profiled help.
 // "Global" is always prepended automatically.
 var viewSections = map[string][]string{
-	"serverlist":    {"Server List"},
-	"serverdetail":  {"Server Detail"},
-	"servercreate":  {"Create Form"},
-	"consolelog":    {"Console Log"},
-	"actionlog":     {"Console Log"},
-	"volumelist":    {"Volume List"},
-	"volumedetail":  {"Volume Detail"},
-	"volumecreate":  {"Create Form"},
+	"serverlist":     {"Server List"},
+	"serverdetail":   {"Server Detail"},
+	"servercreate":   {"Create Form"},
+	"consolelog":     {"Console Log"},
+	"actionlog":      {"Console Log"},
+	"volumelist":     {"Volume List"},
+	"volumedetail":   {"Volume Detail"},
+	"volumecreate":   {"Create Form"},
 	"floatingiplist": {"Floating IPs"},
-	"secgroupview":  {"Security Groups"},
-	"networkview":   {"Networks"},
-	"keypairlist":   {"Key Pairs"},
-	"keypairdetail": {"Key Pairs"},
-	"keypaircreate": {"Create Form"},
-	"routerlist":    {"Routers"},
-	"routerdetail":  {"Routers"},
-	"lbview":        {"Load Balancers"},
-	"imageview":     {"Images"},
-	"cloudpicker":   {},
+	"secgroupview":   {"Security Groups"},
+	"networkview":    {"Networks"},
+	"keypairlist":    {"Key Pairs"},
+	"keypairdetail":  {"Key Pairs"},
+	"keypaircreate":  {"Create Form"},
+	"routerlist":     {"Routers"},
+	"routerdetail":   {"Routers"},
+	"routerview":     {"Routers"},
+	"lbview":         {"LB List", "LB Detail"},
+	"imageview":      {"Images"},
+	"cloudpicker":    {},
 }
 
 // New creates a help model.

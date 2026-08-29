@@ -173,6 +173,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Y` | Copy field (ID, IP, name, …) |
 | `V` | Console URL (noVNC) |
 | `L` | Console log |
+| `T` | Audit trail |
 | `a` | Action history |
 
 ### Server detail
@@ -204,6 +205,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `g` | Jump to security groups |
 | `N` | Jump to networks |
 | `L` | Console log |
+| `T` | Audit trail |
 | `a` | Action history |
 | `Esc` | Back to list |
 

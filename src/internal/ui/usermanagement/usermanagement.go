@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 type usersLoadedMsg struct {
@@ -24,18 +25,18 @@ type usersErrMsg struct {
 
 // Model is the user management viewer.
 type Model struct {
-	providerClient    *gophercloud.ProviderClient
-	endpointOpts      gophercloud.EndpointOpts
-	items             []compute.User
-	cursor            int
-	scroll            int
-	width             int
-	height            int
-	loading           bool
-	spinner           spinner.Model
-	err               string
-	confirmingDelete  string // user ID pending delete confirmation
-	toggling          string // user ID being toggled
+	providerClient   *gophercloud.ProviderClient
+	endpointOpts     gophercloud.EndpointOpts
+	items            []compute.User
+	cursor           int
+	scroll           int
+	width            int
+	height           int
+	loading          bool
+	spinner          spinner.Model
+	err              string
+	confirmingDelete string // user ID pending delete confirmation
+	toggling         string // user ID being toggled
 }
 
 // New creates a user management model.
@@ -232,8 +233,8 @@ func (m Model) View() string {
 			style = style.Foreground(shared.ColorMuted)
 		}
 		rowStr := style.Render(row)
-		if len(rowStr) > m.width {
-			rowStr = rowStr[:m.width-1]
+		if m.width > 0 && ansi.StringWidth(rowStr) > m.width {
+			rowStr = ansi.Truncate(rowStr, m.width-1, "")
 		}
 		b.WriteString(rowStr + "\n")
 	}

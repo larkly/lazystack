@@ -8,37 +8,44 @@ import (
 )
 
 // actionTypeFromString maps UI action strings to audit.ActionType.
+// Note: reverse actions (unpause, unlock, …) must be matched before their
+// base actions, and "force delete" before "delete", since a plain
+// strings.Contains on the base word would shadow them.
 func actionTypeFromString(s string) audit.ActionType {
 	s = strings.ToLower(s)
 	switch {
+	case strings.Contains(s, "force delete"):
+		return audit.ActionForceDelete
+	case strings.Contains(s, "unpause"):
+		return audit.ActionUnpause
+	case strings.Contains(s, "unlock"):
+		return audit.ActionUnlock
+	case strings.Contains(s, "unshelve"):
+		return audit.ActionUnshelve
+	case strings.Contains(s, "unrescue"):
+		return audit.ActionUnrescue
+	case strings.Contains(s, "resume"):
+		return audit.ActionResume
+	case strings.Contains(s, "reset state"):
+		return audit.ActionResetState
 	case strings.Contains(s, "delete"):
 		return audit.ActionDelete
 	case strings.Contains(s, "reboot"):
 		return audit.ActionReboot
 	case strings.Contains(s, "pause"):
 		return audit.ActionPause
-	case strings.Contains(s, "unpause"):
-		return audit.ActionUnpause
 	case strings.Contains(s, "suspend"):
 		return audit.ActionSuspend
-	case strings.Contains(s, "resume"):
-		return audit.ActionResume
 	case strings.Contains(s, "shelve"):
 		return audit.ActionShelve
-	case strings.Contains(s, "unshelve"):
-		return audit.ActionUnshelve
 	case strings.Contains(s, "stop"):
 		return audit.ActionStop
 	case strings.Contains(s, "start"):
 		return audit.ActionStart
 	case strings.Contains(s, "lock"):
 		return audit.ActionLock
-	case strings.Contains(s, "unlock"):
-		return audit.ActionUnlock
 	case strings.Contains(s, "rescue"):
 		return audit.ActionRescue
-	case strings.Contains(s, "unrescue"):
-		return audit.ActionUnrescue
 	case strings.Contains(s, "resize"):
 		return audit.ActionResize
 	case strings.Contains(s, "rebuild"):
@@ -51,10 +58,6 @@ func actionTypeFromString(s string) audit.ActionType {
 		return audit.ActionMigrate
 	case strings.Contains(s, "evacuate"):
 		return audit.ActionEvacuate
-	case strings.Contains(s, "force delete"):
-		return audit.ActionForceDelete
-	case strings.Contains(s, "reset state"):
-		return audit.ActionResetState
 	default:
 		return audit.ActionUnknown
 	}
