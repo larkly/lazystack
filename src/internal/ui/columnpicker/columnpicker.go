@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/config"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/config"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // ColumnsChosenMsg is emitted when the user confirms column selection.

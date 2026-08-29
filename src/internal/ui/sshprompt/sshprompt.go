@@ -7,20 +7,20 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 const (
-	fieldHost            = 0
-	fieldUser            = 1
-	fieldKeyPath         = 2
-	fieldDebug           = 3
-	fieldIgnoreHostKeys  = 4
-	numFields            = 5
+	fieldHost           = 0
+	fieldUser           = 1
+	fieldKeyPath        = 2
+	fieldDebug          = 3
+	fieldIgnoreHostKeys = 4
+	numFields           = 5
 )
 
 // SSHConnectMsg is emitted when the user confirms the SSH username.
@@ -40,18 +40,18 @@ type ipOption struct {
 
 // Model is the SSH username prompt overlay modal.
 type Model struct {
-	Active     bool
-	serverName string
-	ips        []ipOption
-	ipIndex    int
-	userInput  textinput.Model
-	keyInput   textinput.Model
-	debug      bool
+	Active         bool
+	serverName     string
+	ips            []ipOption
+	ipIndex        int
+	userInput      textinput.Model
+	keyInput       textinput.Model
+	debug          bool
 	ignoreHostKeys bool
-	focusField int
-	err        string
-	width      int
-	height     int
+	focusField     int
+	err            string
+	width          int
+	height         int
 
 	// IP picker state.
 	ipPickerOpen   bool
@@ -100,16 +100,16 @@ func New(serverName string, floatingIPs, ipv6, ipv4 []string, keyPath string, ig
 	pf.SetWidth(26)
 
 	return Model{
-		Active:       true,
-		serverName:   serverName,
-		ips:          ips,
-		ipIndex:      0,
-		userInput:    ui,
-		keyInput:     ki,
+		Active:         true,
+		serverName:     serverName,
+		ips:            ips,
+		ipIndex:        0,
+		userInput:      ui,
+		keyInput:       ki,
 		ignoreHostKeys: ignoreHostKeysDefault,
-		pickerFilter: pf,
-		pickerFiles:  listSSHKeys(),
-		focusField:   fieldHost,
+		pickerFilter:   pf,
+		pickerFiles:    listSSHKeys(),
+		focusField:     fieldHost,
 	}
 }
 

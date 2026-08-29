@@ -305,6 +305,17 @@ func New(opts Options) Model {
 	}
 }
 
+// actionCtx returns a request-scoped context with a timeout for OpenStack API calls.
+func actionCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 30*time.Second)
+}
+
+// actionCtxLong returns a request-scoped context with a long timeout for
+// multi-step operations and polling/wait loops (connects, delete waits).
+func actionCtxLong() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 5*time.Minute)
+}
+
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
@@ -318,7 +329,9 @@ func (m Model) Init() tea.Cmd {
 		ver := m.version
 		ttl := m.updateCheckInterval
 		cmds = append(cmds, func() tea.Msg {
-			latest, dlURL, csURL, err := selfupdate.CheckLatestCached(context.Background(), ver, ttl)
+			ctx, cancel := actionCtx()
+			defer cancel()
+			latest, dlURL, csURL, err := selfupdate.CheckLatestCached(ctx, ver, ttl)
 			if err != nil || latest == "" {
 				return nil
 			}
@@ -975,7 +988,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			pc := msg.ProviderClient
 			eo := msg.EndpointOpts
 			cmds = append(cmds, func() tea.Msg {
-				projs, err := cloud.ListAccessibleProjects(context.Background(), pc, eo)
+				ctx, cancel := actionCtxLong()
+				defer cancel()
+				projs, err := cloud.ListAccessibleProjects(ctx, pc, eo)
 				if err != nil {
 					return nil
 				}
@@ -1035,7 +1050,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cloudName := m.cloudName
 		projectID := msg.ProjectID
 		return m, func() tea.Msg {
-			client, err := cloud.ConnectWithProject(context.Background(), cloudName, projectID)
+			ctx, cancel := actionCtxLong()
+			defer cancel()
+			client, err := cloud.ConnectWithProject(ctx, cloudName, projectID)
 			if err != nil {
 				return shared.CloudConnectErrMsg{Err: err}
 			}
@@ -1274,7 +1291,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			client := m.client.Compute
 			id := msg.id
 			return m, func() tea.Msg {
-				srv, err := compute.GetServer(context.Background(), client, id)
+				ctx, cancel := actionCtx()
+				defer cancel()
+				srv, err := compute.GetServer(ctx, client, id)
 				if err != nil {
 					return shared.ErrMsg{Err: err}
 				}
@@ -1315,11 +1334,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Route to all views first so background messages keep flowing
 		m2, viewCmd := m.updateAllViews(msg)
 		m = m2
-		// Route to quota view for spinner/loaded messages
+		// Route to quota view for spinner/loaded messages; keep background
+		// image downloads flowing even while the quota overlay is up.
 		if m.quotaView.Visible {
 			var cmd tea.Cmd
 			m.quotaView, cmd = m.quotaView.Update(msg)
-			return m, tea.Batch(viewCmd, cmd)
+			dlCmd := m.updateImageDownloadBackground(msg)
+			return m, tea.Batch(viewCmd, cmd, dlCmd)
 		}
 		// Route to any active modals for background messages
 		if modalCmd := m.updateAnyModalBackground(msg); modalCmd != nil {

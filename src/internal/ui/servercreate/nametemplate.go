@@ -13,10 +13,11 @@ var templatePlaceholderRe = regexp.MustCompile(`\{(n)(?::(\d+)d)?\}|\{(timestamp
 
 // expandNameTemplate replaces placeholders in a name template.
 // Supported placeholders:
-//   {n}        - zero-based index
-//   {n:02d}    - zero-padded index (any width)
-//   {timestamp} - Unix timestamp in seconds
-//   {random}    - 6-character hex random string
+//
+//	{n}        - zero-based index
+//	{n:02d}    - zero-padded index (any width)
+//	{timestamp} - Unix timestamp in seconds
+//	{random}    - 6-character hex random string
 func expandNameTemplate(tmpl string, idx int) string {
 	now := time.Now().Unix()
 	rnd := fmt.Sprintf("%06x", rand.Intn(0xFFFFFF))

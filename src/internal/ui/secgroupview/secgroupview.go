@@ -7,15 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/network"
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
 type focusPane int
@@ -34,9 +34,9 @@ const narrowThreshold = 80
 type sgLoadedMsg struct{ groups []network.SecurityGroup }
 type sgErrMsg struct{ err error }
 type detailLoadedMsg struct {
-	sgID       string
-	servers    []serverRef
-	ports      []network.Port
+	sgID        string
+	servers     []serverRef
+	ports       []network.Port
 	serverNames map[string]string
 }
 type detailErrMsg struct {
@@ -1356,4 +1356,3 @@ func (m Model) fetchDetail(sgID string) tea.Cmd {
 		return detailLoadedMsg{sgID: sgID, servers: refs, ports: fetchedPorts, serverNames: srvNames}
 	}
 }
-

@@ -15,20 +15,20 @@ func TestClassifyIPs(t *testing.T) {
 	addresses := map[string]interface{}{
 		"private": []interface{}{
 			map[string]interface{}{
-				"addr":              "10.0.0.5",
-				"version":          float64(4),
+				"addr":            "10.0.0.5",
+				"version":         float64(4),
 				"OS-EXT-IPS:type": "fixed",
 			},
 			map[string]interface{}{
-				"addr":              "fd00::5",
-				"version":          float64(6),
+				"addr":            "fd00::5",
+				"version":         float64(6),
 				"OS-EXT-IPS:type": "fixed",
 			},
 		},
 		"public": []interface{}{
 			map[string]interface{}{
-				"addr":              "192.168.1.100",
-				"version":          float64(4),
+				"addr":            "192.168.1.100",
+				"version":         float64(4),
 				"OS-EXT-IPS:type": "floating",
 			},
 		},
@@ -77,15 +77,15 @@ func TestExtractAllIPs(t *testing.T) {
 	addresses := map[string]interface{}{
 		"net1": []interface{}{
 			map[string]interface{}{
-				"addr":              "10.0.0.1",
-				"version":          float64(4),
+				"addr":            "10.0.0.1",
+				"version":         float64(4),
 				"OS-EXT-IPS:type": "fixed",
 			},
 		},
 		"net2": []interface{}{
 			map[string]interface{}{
-				"addr":              "172.16.0.1",
-				"version":          float64(4),
+				"addr":            "172.16.0.1",
+				"version":         float64(4),
 				"OS-EXT-IPS:type": "fixed",
 			},
 		},

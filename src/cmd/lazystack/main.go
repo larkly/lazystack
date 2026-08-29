@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/app"
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/config"
 	"github.com/larkly/lazystack/internal/selfupdate"
 	"github.com/larkly/lazystack/internal/shared"
-	"charm.land/bubbletea/v2"
 )
 
 var version = "dev"

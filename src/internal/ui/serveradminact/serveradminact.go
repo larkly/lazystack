@@ -44,19 +44,19 @@ type actionErrMsg struct {
 
 // Model is the admin server actions modal.
 type Model struct {
-	Active       bool
-	client       *gophercloud.ServiceClient
-	serverID     string
-	serverName   string
-	width        int
-	height       int
-	cursor       int
-	promptStage  string // "" = picking, "host" = entering host, "state" = picking state, "confirm" = confirming
-	stateCursor  int
-	hostInput    textinput.Model
-	submitting   bool
-	err          string
-	spinner      spinner.Model
+	Active      bool
+	client      *gophercloud.ServiceClient
+	serverID    string
+	serverName  string
+	width       int
+	height      int
+	cursor      int
+	promptStage string // "" = picking, "host" = entering host, "state" = picking state, "confirm" = confirming
+	stateCursor int
+	hostInput   textinput.Model
+	submitting  bool
+	err         string
+	spinner     spinner.Model
 }
 
 // New creates an admin actions modal.

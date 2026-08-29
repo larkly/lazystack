@@ -1,16 +1,15 @@
 package app
 
 import (
-	"context"
 	"fmt"
 
+	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/imagecreate"
 	"github.com/larkly/lazystack/internal/ui/imagedownload"
 	"github.com/larkly/lazystack/internal/ui/imageedit"
 	"github.com/larkly/lazystack/internal/ui/modal"
-	"charm.land/bubbletea/v2"
 )
 
 func (m Model) openImageEdit() (Model, tea.Cmd) {
@@ -119,8 +118,10 @@ func (m Model) openImageDeactivateConfirm() (Model, tea.Cmd) {
 func (m Model) doDeactivateImage(id, name string) tea.Cmd {
 	imgClient := m.client.Image
 	return func() tea.Msg {
+		ctx, cancel := actionCtx()
+		defer cancel()
 		shared.Debugf("[action] deactivating image %s", name)
-		err := image.DeactivateImage(context.Background(), imgClient, id)
+		err := image.DeactivateImage(ctx, imgClient, id)
 		if err != nil {
 			shared.Debugf("[action] deactivate image %s failed: %s", name, err)
 			return shared.ResourceActionErrMsg{Action: "Deactivate image", Name: name, Err: err}
@@ -133,8 +134,10 @@ func (m Model) doDeactivateImage(id, name string) tea.Cmd {
 func (m Model) doReactivateImage(id, name string) tea.Cmd {
 	imgClient := m.client.Image
 	return func() tea.Msg {
+		ctx, cancel := actionCtx()
+		defer cancel()
 		shared.Debugf("[action] reactivating image %s", name)
-		err := image.ReactivateImage(context.Background(), imgClient, id)
+		err := image.ReactivateImage(ctx, imgClient, id)
 		if err != nil {
 			shared.Debugf("[action] reactivate image %s failed: %s", name, err)
 			return shared.ResourceActionErrMsg{Action: "Reactivate image", Name: name, Err: err}

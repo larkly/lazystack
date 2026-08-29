@@ -10,14 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/larkly/lazystack/internal/image"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/image"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 const (
@@ -27,9 +27,31 @@ const (
 	numFields   = 3
 )
 
-type downloadDoneMsg struct{ name string }
-type downloadErrMsg struct{ err error }
+type downloadDoneMsg struct {
+	downloadID int64  // correlation ID: which download session completed
+	imageID    string // which image it was for
+	name       string
+}
+type downloadErrMsg struct {
+	downloadID int64 // correlation ID: which download session failed
+	imageID    string
+	err        error
+}
 type progressTickMsg struct{}
+
+// downloadSeq generates per-submit session IDs so a completion can be
+// attributed to the exact download that produced it, even if the user
+// reopens the modal for another (or the same) image while it runs.
+var downloadSeq atomic.Int64
+
+// DownloadFinishedMsg is emitted when a backgrounded download (dismissed
+// with "b" or replaced by a newer download) finishes, so the app can surface
+// the result in the status bar.
+type DownloadFinishedMsg struct {
+	ImageID string
+	Name    string
+	Err     error // nil on success
+}
 
 // countingReader wraps a reader and atomically tracks bytes read.
 type countingReader struct {
@@ -62,9 +84,9 @@ type Model struct {
 	imageID   string
 	imageName string
 
-	pathInput    textinput.Model
-	focusField   int
-	defaultFile  string // default filename for save-here
+	pathInput   textinput.Model
+	focusField  int
+	defaultFile string // default filename for save-here
 
 	// Directory picker
 	pickerOpen    bool
@@ -73,6 +95,7 @@ type Model struct {
 	pickerCursor  int
 
 	downloading     bool
+	downloadID      int64 // current download session (0 = none)
 	sharedBytesRead *atomic.Int64
 	sharedTotal     *atomic.Int64
 	bytesRead       int64
@@ -145,18 +168,48 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case downloadDoneMsg:
-		m.Active = false
+		if msg.downloadID != m.downloadID {
+			// Stale completion from a superseded download session. The file
+			// was still written, so tell the app regardless of modal state.
+			shared.Debugf("[imagedownload] stale done for session %d (current %d), notifying", msg.downloadID, m.downloadID)
+			finName := msg.name
+			return m, func() tea.Msg {
+				return DownloadFinishedMsg{ImageID: msg.imageID, Name: finName}
+			}
+		}
 		m.downloading = false
 		shared.Debugf("[imagedownload] download success name=%q", msg.name)
+		if m.Active {
+			m.Active = false
+			return m, func() tea.Msg {
+				return shared.ResourceActionMsg{Action: "Downloaded image", Name: msg.name}
+			}
+		}
+		// Backgrounded: report via DownloadFinishedMsg so the app can show
+		// the result in the status bar.
 		return m, func() tea.Msg {
-			return shared.ResourceActionMsg{Action: "Downloaded image", Name: msg.name}
+			return DownloadFinishedMsg{ImageID: msg.imageID, Name: msg.name}
 		}
 
 	case downloadErrMsg:
+		if msg.downloadID != m.downloadID {
+			shared.Debugf("[imagedownload] stale error for session %d (current %d), notifying", msg.downloadID, m.downloadID)
+			finErr := msg.err
+			return m, func() tea.Msg {
+				return DownloadFinishedMsg{ImageID: msg.imageID, Err: finErr}
+			}
+		}
 		m.downloading = false
 		m.err = msg.err.Error()
 		shared.Debugf("[imagedownload] error: %v", msg.err)
-		return m, nil
+		if m.Active {
+			return m, nil
+		}
+		// Backgrounded: surface the failure via DownloadFinishedMsg.
+		finErr := msg.err
+		return m, func() tea.Msg {
+			return DownloadFinishedMsg{ImageID: msg.imageID, Err: finErr}
+		}
 
 	case spinner.TickMsg:
 		if m.downloading {
@@ -397,12 +450,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 	imageID := m.imageID
 	name := m.imageName
+	m.downloadID = downloadSeq.Add(1)
+	downloadID := m.downloadID
 	return m, tea.Batch(m.spinner.Tick, scheduleProgressTick(), func() tea.Msg {
 		ctx := context.Background()
 
 		body, contentLength, err := image.DownloadImageData(ctx, client, imageID)
 		if err != nil {
-			return downloadErrMsg{err: err}
+			return downloadErrMsg{downloadID: downloadID, imageID: imageID, err: err}
 		}
 		defer body.Close()
 		if contentLength > 0 {
@@ -411,7 +466,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 		if err != nil {
-			return downloadErrMsg{err: fmt.Errorf("creating file: %w", err)}
+			return downloadErrMsg{downloadID: downloadID, imageID: imageID, err: fmt.Errorf("creating file: %w", err)}
 		}
 		defer f.Close()
 
@@ -420,10 +475,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		_, err = io.Copy(f, reader)
 		if err != nil {
 			os.Remove(path)
-			return downloadErrMsg{err: fmt.Errorf("writing file: %w", err)}
+			return downloadErrMsg{downloadID: downloadID, imageID: imageID, err: fmt.Errorf("writing file: %w", err)}
 		}
 
-		return downloadDoneMsg{name: name}
+		return downloadDoneMsg{downloadID: downloadID, imageID: imageID, name: name}
 	})
 }
 

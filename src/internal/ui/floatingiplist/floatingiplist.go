@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/network"
-	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
 type fipsLoadedMsg struct{ fips []network.FloatingIP }

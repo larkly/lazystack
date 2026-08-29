@@ -17,6 +17,10 @@ type cloudsFile struct {
 }
 
 // ListCloudNames parses clouds.yaml and returns sorted cloud names.
+// The search walks CloudsYamlPaths in order and stops at the first file that
+// exists and defines at least one cloud. A parseable file with zero clouds is
+// skipped so an empty config does not shadow a real one further down the list;
+// only a file that exists but fails to parse aborts the search with an error.
 func ListCloudNames() ([]string, error) {
 	shared.Debugf("[cloud] ListCloudNames: starting")
 	paths := CloudsYamlPaths()
@@ -33,6 +37,11 @@ func ListCloudNames() ([]string, error) {
 			return nil, fmt.Errorf("parsing %s: %w", p, err)
 		}
 
+		if len(cf.Clouds) == 0 {
+			shared.Debugf("[cloud] ListCloudNames: %s contains no clouds, continuing search", p)
+			continue
+		}
+
 		names := make([]string, 0, len(cf.Clouds))
 		for name := range cf.Clouds {
 			names = append(names, name)
@@ -42,18 +51,25 @@ func ListCloudNames() ([]string, error) {
 		return names, nil
 	}
 
-	shared.Debugf("[cloud] ListCloudNames: no clouds.yaml found")
-	return nil, fmt.Errorf("no clouds.yaml found (searched: %v)", paths)
+	shared.Debugf("[cloud] ListCloudNames: no usable clouds.yaml found")
+	return nil, fmt.Errorf("no usable clouds.yaml found (no clouds defined; searched: %v)", paths)
 }
 
-// CloudsYamlPaths returns the list of paths searched for clouds.yaml.
+// CloudsYamlPaths returns the list of paths searched for clouds.yaml, in
+// priority order:
+//  1. $OS_CLIENT_CONFIG_FILE (explicit user override)
+//  2. ~/.config/openstack/clouds.yaml (per-user config)
+//  3. /etc/openstack/clouds.yaml (system-wide config)
+//  4. ./clouds.yaml (current working directory)
+//
+// The current directory is searched LAST: trusting a clouds.yaml found in
+// whatever directory the user happens to be in is a credential-phishing
+// surface (a planted file would silently override the real configuration),
+// and python-openstackclient does not search the CWD either.
 func CloudsYamlPaths() []string {
 	var paths []string
 
-	// Current directory
-	paths = append(paths, "clouds.yaml")
-
-	// OS_CLIENT_CONFIG_FILE
+	// OS_CLIENT_CONFIG_FILE — explicit override, always first
 	if env := os.Getenv("OS_CLIENT_CONFIG_FILE"); env != "" {
 		paths = append(paths, env)
 	}
@@ -65,6 +81,9 @@ func CloudsYamlPaths() []string {
 
 	// /etc/openstack/clouds.yaml
 	paths = append(paths, "/etc/openstack/clouds.yaml")
+
+	// ./clouds.yaml — demoted to last, see doc comment
+	paths = append(paths, "clouds.yaml")
 
 	return paths
 }

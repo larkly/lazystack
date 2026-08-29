@@ -38,6 +38,7 @@ func resolveMicroversion(ctx context.Context, compute *gophercloud.ServiceClient
 	}
 	return negotiateNovaMicroversion(ctx, compute)
 }
+
 // negotiateNovaMicroversion queries the Nova API for the max supported microversion,
 // caps at 2.100 (our known-good ceiling), and returns the negotiated version.
 // Returns (maxVersion, usedVersion, degradationWarning).
@@ -47,7 +48,10 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 	// Save current microversion and set to base for version discovery
 	// Version discovery returns the API versions supported by the deployment.
 	url := compute.ServiceURL("")
+	// 300 Multiple Choices is served by unversioned compute endpoints and
+	// carries the same versions document as a 200.
 	resp, err := compute.Get(ctx, url, nil, &gophercloud.RequestOpts{
+		OkCodes:          []int{200, 300},
 		KeepResponseBody: true,
 	})
 	if err != nil {
@@ -171,6 +175,15 @@ func ConnectWithProject(ctx context.Context, cloudName, projectID string) (*Clie
 		shared.Debugf("[cloud] ConnectWithProject: error parsing cloud config: %v", err)
 		return nil, fmt.Errorf("parsing cloud %q: %w", cloudName, err)
 	}
+	// Token- and application-credential-based auth cannot be re-scoped: the
+	// token is issued for a fixed scope (app creds are bound to their owning
+	// project) and there is no way to exchange it for a project-scoped one.
+	if ao.TokenID != "" || ao.ApplicationCredentialID != "" || ao.ApplicationCredentialName != "" {
+		return nil, fmt.Errorf("project switch to %s for cloud %q: re-scoping is not possible with token or application-credential auth; use password auth", projectID, cloudName)
+	}
+	// Drop any scope populated from clouds.yaml (e.g. trust_id) so the token
+	// ends up scoped to the target project instead.
+	ao.Scope = nil
 	ao.TenantID = projectID
 	ao.TenantName = "" // Clear TenantName to avoid conflicts
 	return connectWithOpts(ctx, ao, eo, tlsConfig, cloudName)
@@ -178,7 +191,10 @@ func ConnectWithProject(ctx context.Context, cloudName, projectID string) (*Clie
 
 func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gophercloud.EndpointOpts, tlsConfig *tls.Config, cloudName string) (*Client, error) {
 	shared.Debugf("[cloud] connectWithOpts: authenticating to %s", cloudName)
-	providerClient, err := config.NewProviderClient(ctx, ao, config.WithTLSConfig(tlsConfig))
+	// TLS config is applied inside newHTTPClient: gophercloud's
+	// config.WithTLSConfig replaces the transport of any client passed via
+	// config.WithHTTPClient, so both must be combined into one option.
+	providerClient, err := config.NewProviderClient(ctx, ao, config.WithHTTPClient(newHTTPClient(tlsConfig)))
 	if err != nil {
 		shared.Debugf("[cloud] connectWithOpts: authentication error: %v", err)
 		return nil, fmt.Errorf("authenticating to %q: %w", cloudName, err)

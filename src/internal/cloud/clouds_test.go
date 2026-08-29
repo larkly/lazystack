@@ -61,13 +61,48 @@ func TestListCloudNames_Empty(t *testing.T) {
 	}
 
 	t.Setenv("OS_CLIENT_CONFIG_FILE", path)
+	t.Setenv("HOME", dir)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	// A parseable file with zero clouds must not short-circuit the search.
+	_, err := ListCloudNames()
+	if err == nil {
+		t.Error("expected error when the only clouds.yaml contains zero clouds")
+	}
+}
+
+// TestListCloudNames_EmptyFallsThrough verifies that an empty clouds.yaml in
+// an earlier search path does not shadow a real one further down (#200).
+func TestListCloudNames_EmptyFallsThrough(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.yaml")
+	if err := os.WriteFile(empty, []byte("clouds: {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	homeConfig := filepath.Join(dir, ".config", "openstack", "clouds.yaml")
+	if err := os.MkdirAll(filepath.Dir(homeConfig), 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `clouds:
+  real:
+    auth:
+      auth_url: https://real.example.com:5000
+`
+	if err := os.WriteFile(homeConfig, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("OS_CLIENT_CONFIG_FILE", empty)
+	t.Setenv("HOME", dir)
 
 	names, err := ListCloudNames()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(names) != 0 {
-		t.Errorf("expected 0 clouds, got %d", len(names))
+	if len(names) != 1 || names[0] != "real" {
+		t.Errorf("expected [real], got %v", names)
 	}
 }
 
@@ -88,36 +123,47 @@ func TestListCloudNames_NoFile(t *testing.T) {
 
 func TestCloudsYamlPaths_Order(t *testing.T) {
 	t.Setenv("OS_CLIENT_CONFIG_FILE", "/custom/path/clouds.yaml")
+	t.Setenv("HOME", "/testhome")
 	paths := CloudsYamlPaths()
 
-	// First path should always be relative clouds.yaml
-	if paths[0] != "clouds.yaml" {
-		t.Errorf("first path should be 'clouds.yaml', got %s", paths[0])
+	// First path should be OS_CLIENT_CONFIG_FILE (when set)
+	if paths[0] != "/custom/path/clouds.yaml" {
+		t.Errorf("first path should be OS_CLIENT_CONFIG_FILE, got %s", paths[0])
 	}
 
-	// Second path should be OS_CLIENT_CONFIG_FILE (when set)
-	if paths[1] != "/custom/path/clouds.yaml" {
-		t.Errorf("second path should be OS_CLIENT_CONFIG_FILE, got %s", paths[1])
+	// Then the per-user config
+	if paths[1] != filepath.Join("/testhome", ".config", "openstack", "clouds.yaml") {
+		t.Errorf("second path should be the home config, got %s", paths[1])
 	}
 
-	// Last path should be the system-wide path
-	if paths[len(paths)-1] != "/etc/openstack/clouds.yaml" {
-		t.Errorf("last path should be /etc/openstack/clouds.yaml, got %s", paths[len(paths)-1])
+	// Then the system-wide config
+	if paths[2] != "/etc/openstack/clouds.yaml" {
+		t.Errorf("third path should be /etc/openstack/clouds.yaml, got %s", paths[2])
+	}
+
+	// CWD must be searched LAST (credential-phishing surface, #200)
+	if paths[len(paths)-1] != "clouds.yaml" {
+		t.Errorf("last path should be the CWD-relative clouds.yaml, got %s", paths[len(paths)-1])
 	}
 }
 
 func TestCloudsYamlPaths_WithoutEnv(t *testing.T) {
 	// Ensure OS_CLIENT_CONFIG_FILE is not set
 	t.Setenv("OS_CLIENT_CONFIG_FILE", "")
+	t.Setenv("HOME", "/testhome")
 	paths := CloudsYamlPaths()
 
-	// Should have 3 paths: relative, home, system
+	// Should have 3 paths: home, system, CWD
 	if len(paths) != 3 {
 		t.Errorf("expected 3 paths without env, got %d: %v", len(paths), paths)
 	}
 
-	if paths[0] != "clouds.yaml" {
-		t.Errorf("first path should be 'clouds.yaml', got %s", paths[0])
+	if paths[0] != filepath.Join("/testhome", ".config", "openstack", "clouds.yaml") {
+		t.Errorf("first path should be the home config, got %s", paths[0])
+	}
+
+	if paths[len(paths)-1] != "clouds.yaml" {
+		t.Errorf("last path should be the CWD-relative clouds.yaml, got %s", paths[len(paths)-1])
 	}
 }
 
@@ -125,13 +171,17 @@ func TestCloudsYamlPaths_WithEnv(t *testing.T) {
 	t.Setenv("OS_CLIENT_CONFIG_FILE", "/my/custom/clouds.yaml")
 	paths := CloudsYamlPaths()
 
-	// Should have 4 paths: relative, env, home, system
+	// Should have 4 paths: env, home, system, CWD
 	if len(paths) != 4 {
 		t.Errorf("expected 4 paths with env, got %d: %v", len(paths), paths)
 	}
 
-	if paths[1] != "/my/custom/clouds.yaml" {
-		t.Errorf("second path should be env path, got %s", paths[1])
+	if paths[0] != "/my/custom/clouds.yaml" {
+		t.Errorf("first path should be env path, got %s", paths[0])
+	}
+
+	if paths[len(paths)-1] != "clouds.yaml" {
+		t.Errorf("last path should be the CWD-relative clouds.yaml, got %s", paths[len(paths)-1])
 	}
 }
 
@@ -168,14 +218,16 @@ func TestListCloudNames_NoCloudsKey(t *testing.T) {
 	}
 
 	t.Setenv("OS_CLIENT_CONFIG_FILE", path)
+	t.Setenv("HOME", dir)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
 
-	names, err := ListCloudNames()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// Missing 'clouds' key means empty map, so 0 names
-	if len(names) != 0 {
-		t.Errorf("expected 0 clouds when 'clouds' key is missing, got %d", len(names))
+	// The file parses but defines zero clouds, so the search continues and
+	// ends with "not found" rather than returning 0 names.
+	_, err := ListCloudNames()
+	if err == nil {
+		t.Error("expected error when no clouds.yaml defines any clouds")
 	}
 }
 
@@ -187,13 +239,15 @@ func TestListCloudNames_EmptyFile(t *testing.T) {
 	}
 
 	t.Setenv("OS_CLIENT_CONFIG_FILE", path)
+	t.Setenv("HOME", dir)
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
 
-	names, err := ListCloudNames()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(names) != 0 {
-		t.Errorf("expected 0 clouds for empty file, got %d", len(names))
+	// An empty file parses but defines zero clouds, so the search continues.
+	_, err := ListCloudNames()
+	if err == nil {
+		t.Error("expected error when the only clouds.yaml is empty")
 	}
 }
 

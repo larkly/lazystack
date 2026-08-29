@@ -3,6 +3,7 @@ package loadbalancer
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -15,6 +16,16 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 )
+
+// requireLBClient guards against a nil Octavia client on clouds lacking the
+// load balancer service; gophercloud methods panic on nil *ServiceClient
+// receivers.
+func requireLBClient(client *gophercloud.ServiceClient) error {
+	if client == nil {
+		return fmt.Errorf("load balancer (Octavia) service is not available in this cloud")
+	}
+	return nil
+}
 
 // LoadBalancer is a simplified load balancer.
 type LoadBalancer struct {
@@ -111,6 +122,9 @@ type HealthMonitor struct {
 
 // ListLoadBalancers fetches all load balancers.
 func ListLoadBalancers(ctx context.Context, client *gophercloud.ServiceClient) ([]LoadBalancer, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] ListLoadBalancers: starting")
 	var result []LoadBalancer
 	err := loadbalancers.List(client, loadbalancers.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -143,6 +157,9 @@ func ListLoadBalancers(ctx context.Context, client *gophercloud.ServiceClient) (
 
 // GetLoadBalancer fetches a single load balancer by ID.
 func GetLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string) (*LoadBalancer, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] GetLoadBalancer: starting, id=%s", id)
 	lb, err := loadbalancers.Get(ctx, client, id).Extract()
 	if err != nil {
@@ -165,6 +182,9 @@ func GetLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id 
 
 // CreateLoadBalancer creates a new load balancer on the given subnet.
 func CreateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, name, description, vipSubnetID string) (*LoadBalancer, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] CreateLoadBalancer: starting, name=%s subnetID=%s", name, vipSubnetID)
 	opts := loadbalancers.CreateOpts{
 		Name:        name,
@@ -192,6 +212,9 @@ func CreateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, 
 
 // UpdateLoadBalancer updates a load balancer's name and/or description.
 func UpdateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string, adminStateUp *bool) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] UpdateLoadBalancer: starting, id=%s", id)
 	opts := loadbalancers.UpdateOpts{
 		Name:         name,
@@ -209,6 +232,9 @@ func UpdateLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, 
 
 // DeleteLoadBalancer deletes a load balancer with cascade.
 func DeleteLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] DeleteLoadBalancer: starting, id=%s", id)
 	r := loadbalancers.Delete(ctx, client, id, loadbalancers.DeleteOpts{Cascade: true})
 	if r.Err != nil {
@@ -221,6 +247,9 @@ func DeleteLoadBalancer(ctx context.Context, client *gophercloud.ServiceClient, 
 
 // ListListeners fetches listeners for a load balancer.
 func ListListeners(ctx context.Context, client *gophercloud.ServiceClient, lbID string) ([]Listener, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] ListListeners: starting, lbID=%s", lbID)
 	var result []Listener
 	err := listeners.List(client, listeners.ListOpts{LoadbalancerID: lbID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -252,6 +281,9 @@ func ListListeners(ctx context.Context, client *gophercloud.ServiceClient, lbID 
 
 // ListPools fetches pools for a load balancer.
 func ListPools(ctx context.Context, client *gophercloud.ServiceClient, lbID string) ([]Pool, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] ListPools: starting, lbID=%s", lbID)
 	var result []Pool
 	err := pools.List(client, pools.ListOpts{LoadbalancerID: lbID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -281,6 +313,9 @@ func ListPools(ctx context.Context, client *gophercloud.ServiceClient, lbID stri
 
 // GetHealthMonitor fetches a single health monitor by ID.
 func GetHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string) (*HealthMonitor, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] GetHealthMonitor: starting, id=%s", id)
 	mon, err := monitors.Get(ctx, client, id).Extract()
 	if err != nil {
@@ -307,6 +342,9 @@ func GetHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id
 
 // CreateListener creates a listener on a load balancer.
 func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol string, port int) (*Listener, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] CreateListener: starting, lbID=%s name=%s protocol=%s port=%d", lbID, name, protocol, port)
 	opts := listeners.CreateOpts{
 		LoadbalancerID: lbID,
@@ -334,6 +372,9 @@ func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID
 
 // DeleteListener deletes a listener.
 func DeleteListener(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] DeleteListener: starting, id=%s", id)
 	r := listeners.Delete(ctx, client, id)
 	if r.Err != nil {
@@ -346,6 +387,9 @@ func DeleteListener(ctx context.Context, client *gophercloud.ServiceClient, id s
 
 // UpdateListener updates a listener's name.
 func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id string, name, description *string, connLimit *int, adminStateUp *bool) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] UpdateListener: starting, id=%s", id)
 	opts := listeners.UpdateOpts{
 		Name:         name,
@@ -363,8 +407,12 @@ func UpdateListener(ctx context.Context, client *gophercloud.ServiceClient, id s
 }
 
 // CreatePool creates a pool on a load balancer and, when requested, creates its
-// health monitor as a follow-up operation.
+// health monitor as a follow-up operation. Because pools are immutable while
+// PENDING_CREATE, the pool is polled until ACTIVE before the monitor is created.
 func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol, lbMethod string, mon *monitors.CreateOpts) (*Pool, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] CreatePool: starting, lbID=%s name=%s protocol=%s lbMethod=%s", lbID, name, protocol, lbMethod)
 	opts := pools.CreateOpts{
 		LoadbalancerID: lbID,
@@ -391,6 +439,12 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 		return result, nil
 	}
 
+	if err := waitForPoolActive(ctx, client, p.ID, 60*time.Second); err != nil {
+		shared.Debugf("[lb] CreatePool: waiting for pool %s to become ACTIVE failed: %v, cleaning up", p.ID, err)
+		cleanupPool(ctx, client, p.ID)
+		return nil, fmt.Errorf("waiting for pool %s to become ACTIVE before creating health monitor: %w", p.ID, err)
+	}
+
 	shared.Debugf("[lb] CreatePool: creating health monitor for pool %s", p.ID)
 	monOpts := *mon
 	monOpts.PoolID = p.ID
@@ -399,8 +453,11 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 	if err != nil {
 		shared.Debugf("[lb] CreatePool: health monitor creation failed: %v, cleaning up pool %s", err, p.ID)
 		if deleteErr := DeletePool(ctx, client, p.ID); deleteErr != nil {
-			shared.Debugf("[lb] CreatePool: cleanup of pool %s failed: %v", p.ID, deleteErr)
-			return nil, fmt.Errorf("creating health monitor for pool %s: %w (cleanup failed: %v)", p.ID, err, deleteErr)
+			if gophercloud.ResponseCodeIs(deleteErr, http.StatusConflict) || gophercloud.ResponseCodeIs(deleteErr, http.StatusNotFound) {
+				shared.Debugf("[lb] CreatePool: cleanup delete of pool %s returned tolerable status (already deleting or gone), not masking original error: %v", p.ID, deleteErr)
+			} else {
+				return nil, fmt.Errorf("creating health monitor for pool %s: %w (cleanup failed: %v)", p.ID, err, deleteErr)
+			}
 		}
 		return nil, fmt.Errorf("creating health monitor for pool %s: %w", p.ID, err)
 	}
@@ -410,8 +467,63 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 	return result, nil
 }
 
+// cleanupPool deletes a pool, tolerating 409/404 responses (the pool may be
+// mid-delete or already gone).
+func cleanupPool(ctx context.Context, client *gophercloud.ServiceClient, poolID string) {
+	if err := DeletePool(ctx, client, poolID); err != nil {
+		if gophercloud.ResponseCodeIs(err, http.StatusConflict) || gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+			shared.Debugf("[lb] cleanupPool: delete of pool %s returned tolerable status, ignoring: %v", poolID, err)
+			return
+		}
+		shared.Debugf("[lb] cleanupPool: delete of pool %s failed: %v", poolID, err)
+	}
+}
+
+// waitForPoolActive polls the pool until its provisioning status is ACTIVE,
+// the context is cancelled, or the timeout elapses. On deadline it returns an
+// error so callers can proceed to their error/cleanup path.
+func waitForPoolActive(ctx context.Context, client *gophercloud.ServiceClient, poolID string, timeout time.Duration) error {
+	shared.Debugf("[lb] waitForPoolActive: starting, poolID=%s timeout=%s", poolID, timeout)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		p, err := pools.Get(ctx, client, poolID).Extract()
+		if err != nil {
+			switch {
+			case gophercloud.ResponseCodeIs(err, http.StatusNotFound):
+				shared.Debugf("[lb] waitForPoolActive: pool not found, poolID=%s", poolID)
+				return fmt.Errorf("pool %s not found", poolID)
+			case gophercloud.ResponseCodeIs(err, http.StatusUnauthorized) || gophercloud.ResponseCodeIs(err, http.StatusForbidden):
+				shared.Debugf("[lb] waitForPoolActive: polling error: %v", err)
+				return fmt.Errorf("polling pool %s: %w", poolID, err)
+			default:
+				shared.Debugf("[lb] waitForPoolActive: transient polling error, retrying: %v", err)
+			}
+		} else {
+			if p.ProvisioningStatus == "ACTIVE" {
+				shared.Debugf("[lb] waitForPoolActive: success, poolID=%s is ACTIVE", poolID)
+				return nil
+			}
+			if strings.HasPrefix(p.ProvisioningStatus, "ERROR") {
+				shared.Debugf("[lb] waitForPoolActive: error status, poolID=%s status=%s", poolID, p.ProvisioningStatus)
+				return fmt.Errorf("pool %s entered %s", poolID, p.ProvisioningStatus)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			shared.Debugf("[lb] waitForPoolActive: context cancelled, poolID=%s", poolID)
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	shared.Debugf("[lb] waitForPoolActive: timed out, poolID=%s", poolID)
+	return fmt.Errorf("timed out waiting for pool %s to become ACTIVE", poolID)
+}
+
 // DeletePool deletes a pool.
 func DeletePool(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] DeletePool: starting, id=%s", id)
 	r := pools.Delete(ctx, client, id)
 	if r.Err != nil {
@@ -424,6 +536,9 @@ func DeletePool(ctx context.Context, client *gophercloud.ServiceClient, id strin
 
 // UpdatePool updates a pool's name and/or LB method.
 func UpdatePool(ctx context.Context, client *gophercloud.ServiceClient, id string, name *string, lbMethod string, adminStateUp *bool) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] UpdatePool: starting, id=%s", id)
 	opts := pools.UpdateOpts{
 		Name:         name,
@@ -443,6 +558,9 @@ func UpdatePool(ctx context.Context, client *gophercloud.ServiceClient, id strin
 
 // CreateMember adds a member to a pool.
 func CreateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID string, opts MemberCreateOpts) (*Member, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] CreateMember: starting, poolID=%s address=%s port=%d", poolID, opts.Address, opts.ProtocolPort)
 	createOpts := pools.CreateMemberOpts{
 		Name:           opts.Name,
@@ -467,6 +585,9 @@ func CreateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID
 
 // DeleteMember removes a member from a pool.
 func DeleteMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] DeleteMember: starting, poolID=%s memberID=%s", poolID, memberID)
 	r := pools.DeleteMember(ctx, client, poolID, memberID)
 	if r.Err != nil {
@@ -479,6 +600,9 @@ func DeleteMember(ctx context.Context, client *gophercloud.ServiceClient, poolID
 
 // UpdateMember updates an existing member.
 func UpdateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID, memberID string, opts MemberUpdateOpts) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] UpdateMember: starting, poolID=%s memberID=%s", poolID, memberID)
 	_, err := pools.UpdateMember(ctx, client, poolID, memberID, memberUpdateRequest(opts)).Extract()
 	if err != nil {
@@ -491,6 +615,9 @@ func UpdateMember(ctx context.Context, client *gophercloud.ServiceClient, poolID
 
 // ListMembers fetches members for a pool.
 func ListMembers(ctx context.Context, client *gophercloud.ServiceClient, poolID string) ([]Member, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] ListMembers: starting, poolID=%s", poolID)
 	var result []Member
 	err := pools.ListMembers(client, poolID, pools.ListMembersOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -578,6 +705,9 @@ func cloneStringSlice(values []string) []string {
 
 // CreateHealthMonitor creates a health monitor for a pool.
 func CreateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, poolID, monType string, delay, timeout, maxRetries int, urlPath, expectedCodes, httpMethod string) (*HealthMonitor, error) {
+	if err := requireLBClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[lb] CreateHealthMonitor: starting, poolID=%s type=%s", poolID, monType)
 	opts := monitors.CreateOpts{
 		PoolID:     poolID,
@@ -620,6 +750,9 @@ func CreateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient,
 
 // UpdateHealthMonitor updates a health monitor's settings.
 func UpdateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string, delay, timeout, maxRetries *int, urlPath, expectedCodes, httpMethod *string) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] UpdateHealthMonitor: starting, id=%s", id)
 	opts := monitors.UpdateOpts{}
 	if delay != nil {
@@ -651,6 +784,9 @@ func UpdateHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient,
 
 // DeleteHealthMonitor deletes a health monitor.
 func DeleteHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] DeleteHealthMonitor: starting, id=%s", id)
 	r := monitors.Delete(ctx, client, id)
 	if r.Err != nil {
@@ -662,23 +798,37 @@ func DeleteHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient,
 }
 
 // WaitForActive polls the LB until its provisioning status is ACTIVE or the
-// context is cancelled. Returns nil once ACTIVE, error on timeout/failure.
+// context is cancelled. Transient polling errors are retried until the
+// deadline; 404 aborts immediately, as do auth errors and ERROR statuses.
+// Reaching the deadline without ACTIVE is an error.
 func WaitForActive(ctx context.Context, client *gophercloud.ServiceClient, lbID string, timeout time.Duration) error {
+	if err := requireLBClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[lb] WaitForActive: starting, lbID=%s timeout=%s", lbID, timeout)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		lb, err := loadbalancers.Get(ctx, client, lbID).Extract()
 		if err != nil {
-			shared.Debugf("[lb] WaitForActive: polling error: %v", err)
-			return fmt.Errorf("polling LB %s: %w", lbID, err)
-		}
-		if lb.ProvisioningStatus == "ACTIVE" {
-			shared.Debugf("[lb] WaitForActive: success, lbID=%s is ACTIVE", lbID)
-			return nil
-		}
-		if strings.HasPrefix(lb.ProvisioningStatus, "ERROR") {
-			shared.Debugf("[lb] WaitForActive: error status, lbID=%s status=%s", lbID, lb.ProvisioningStatus)
-			return fmt.Errorf("LB %s entered %s", lbID, lb.ProvisioningStatus)
+			switch {
+			case gophercloud.ResponseCodeIs(err, http.StatusNotFound):
+				shared.Debugf("[lb] WaitForActive: load balancer not found, lbID=%s", lbID)
+				return fmt.Errorf("load balancer %s not found", lbID)
+			case gophercloud.ResponseCodeIs(err, http.StatusUnauthorized) || gophercloud.ResponseCodeIs(err, http.StatusForbidden):
+				shared.Debugf("[lb] WaitForActive: polling error: %v", err)
+				return fmt.Errorf("polling LB %s: %w", lbID, err)
+			default:
+				shared.Debugf("[lb] WaitForActive: transient polling error, retrying: %v", err)
+			}
+		} else {
+			if lb.ProvisioningStatus == "ACTIVE" {
+				shared.Debugf("[lb] WaitForActive: success, lbID=%s is ACTIVE", lbID)
+				return nil
+			}
+			if strings.HasPrefix(lb.ProvisioningStatus, "ERROR") {
+				shared.Debugf("[lb] WaitForActive: error status, lbID=%s status=%s", lbID, lb.ProvisioningStatus)
+				return fmt.Errorf("LB %s entered %s", lbID, lb.ProvisioningStatus)
+			}
 		}
 		select {
 		case <-ctx.Done():

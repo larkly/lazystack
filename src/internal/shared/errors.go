@@ -11,7 +11,22 @@ import (
 var urlPattern = regexp.MustCompile(`https?://[^\s"']+`)
 
 // Network error patterns to detect connectivity issues.
-var networkPatterns = []string{"timeout", "connection refused", "dial", "network"}
+// Patterns are deliberately connection-specific: a bare word like "network"
+// also appears in resource errors (e.g. "Network abc123 not found") and must
+// NOT trigger connectivity classification.
+var networkPatterns = []string{
+	"connection refused",
+	"connection reset",
+	"no route to host",
+	"network is unreachable",
+	"network is down",
+	"no such host",
+	"i/o timeout",
+	"context deadline exceeded",
+	"dial tcp",
+	"tls handshake",
+	"temporarily unavailable",
+}
 
 // ParsedError carries both a user-friendly message and the raw error for expandable display.
 type ParsedError struct {

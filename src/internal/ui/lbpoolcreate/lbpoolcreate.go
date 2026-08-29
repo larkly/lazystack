@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/larkly/lazystack/internal/loadbalancer"
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
+	"github.com/larkly/lazystack/internal/loadbalancer"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 const (
@@ -453,7 +454,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 	lbID := m.lbID
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		_, err := loadbalancer.CreatePool(context.Background(), client, lbID, name, protocol, lbMethod, monOpts)
+		// CreatePool waits for the pool to become ACTIVE (~60s) before the
+		// optional health-monitor create, so allow a generous deadline.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		_, err := loadbalancer.CreatePool(ctx, client, lbID, name, protocol, lbMethod, monOpts)
 		if err != nil {
 			return poolCreateErrMsg{err: err}
 		}

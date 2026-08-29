@@ -6,14 +6,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/network"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 const (
@@ -99,18 +99,18 @@ func New(client *gophercloud.ServiceClient, networkID, networkName string) Model
 	s.Spinner = spinner.Dot
 
 	return Model{
-		Active:       true,
-		client:       client,
-		networkID:    networkID,
-		networkName:  networkName,
-		nameInput:    ni,
-		cidrInput:    ci,
-		gatewayInput: gi,
+		Active:         true,
+		client:         client,
+		networkID:      networkID,
+		networkName:    networkName,
+		nameInput:      ni,
+		cidrInput:      ci,
+		gatewayInput:   gi,
 		prefixLenInput: pi,
-		ipv6CfgMode:  0, // SLAAC by default
-		ipv6RAMode:   0, // SLAAC by default
-		loading:      true,
-		spinner:      s,
+		ipv6CfgMode:    0, // SLAAC by default
+		ipv6RAMode:     0, // SLAAC by default
+		loading:        true,
+		spinner:        s,
 	}
 }
 

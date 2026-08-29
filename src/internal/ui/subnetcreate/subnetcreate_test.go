@@ -22,4 +22,3 @@ func TestIPv6ModeValue(t *testing.T) {
 		}
 	}
 }
-

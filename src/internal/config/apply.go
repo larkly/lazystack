@@ -3,9 +3,9 @@ package config
 import (
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // ApplyAll applies all config sections to the shared globals.
@@ -117,8 +117,8 @@ var keybindingFieldMap = map[string]func(b key.Binding){
 	"copy":            func(b key.Binding) { shared.Keys.Copy = b },
 	"console_url":     func(b key.Binding) { shared.Keys.ConsoleURL = b },
 	"config":          func(b key.Binding) { shared.Keys.Config = b },
-	"hypervisors":         func(b key.Binding) { shared.Keys.Hypervisors = b },
-	"user_management":     func(b key.Binding) { shared.Keys.UserManagement = b },
+	"hypervisors":     func(b key.Binding) { shared.Keys.Hypervisors = b },
+	"user_management": func(b key.Binding) { shared.Keys.UserManagement = b },
 }
 
 // defaultHelpText maps config keybinding names to their help descriptions.
@@ -181,6 +181,7 @@ var defaultHelpText = map[string]string{
 	"hypervisors":     "hypervisors",
 	"user_management": "user management",
 }
+
 // ApplyKeybindings sets shared.Keys fields from the config map.
 func ApplyKeybindings(kb map[string]string) {
 	shared.Debugf("[config] ApplyKeybindings: start bindings=%d", len(kb))

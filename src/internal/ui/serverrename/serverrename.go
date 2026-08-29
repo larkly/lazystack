@@ -4,14 +4,14 @@ import (
 	"context"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 type renameSuccessMsg struct{ newName string }
@@ -46,12 +46,12 @@ func New(client *gophercloud.ServiceClient, id, name string) Model {
 	s.Spinner = spinner.Dot
 
 	return Model{
-		Active:   true,
-		client:   client,
-		serverID: id,
-		origName: name,
+		Active:    true,
+		client:    client,
+		serverID:  id,
+		origName:  name,
 		nameInput: ni,
-		spinner:  s,
+		spinner:   s,
 	}
 }
 

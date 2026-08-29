@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Model is the project picker overlay.

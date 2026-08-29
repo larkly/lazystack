@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
 )
 
 // volumesFixture is a minimal Cinder v3 paginated volume list response with
@@ -76,8 +77,10 @@ const getVolumeFixture = `{
   }
 }`
 
-func fakeBlockStorageClient(handler http.Handler) *gophercloud.ServiceClient {
+func fakeBlockStorageClient(t *testing.T, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -97,7 +100,7 @@ func TestListVolumes(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeBlockStorageClient(handler)
+	client := fakeBlockStorageClient(t, handler)
 	ctx := context.Background()
 
 	vols, err := ListVolumes(ctx, client)
@@ -230,7 +233,7 @@ func TestGetVolume(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeBlockStorageClient(handler)
+	client := fakeBlockStorageClient(t, handler)
 	ctx := context.Background()
 
 	vol, err := GetVolume(ctx, client, "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
@@ -289,5 +292,191 @@ func TestGetVolume(t *testing.T) {
 	}
 	if vol.AttachedDevice != "/dev/vdb" {
 		t.Errorf("unexpected deprecated AttachedDevice: %s", vol.AttachedDevice)
+	}
+}
+
+// volumeTypesPage1/2 simulate two pages of a paginated Cinder volume type
+// listing; page 1 carries a next link the paginator must follow.
+const volumeTypesPage1 = `{
+  "volume_types": [
+    {"id": "vt-ssd-0001", "name": "ssd"},
+    {"id": "vt-hdd-0002", "name": "hdd"}
+  ],
+  "volume_type_links": [
+    {"rel": "next", "href": "PLACEHOLDER?page=2"}
+  ]
+}`
+
+const volumeTypesPage2 = `{
+  "volume_types": [
+    {"id": "vt-nvme-0003", "name": "nvme"}
+  ]
+}`
+
+func TestListVolumeTypesPagination(t *testing.T) {
+	var calls int
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/types") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "2":
+			w.Write([]byte(volumeTypesPage2))
+		default:
+			// Rewrite the placeholder link to the absolute URL of this server.
+			body := strings.Replace(volumeTypesPage1, "PLACEHOLDER",
+				"http://"+r.Host+r.URL.Path, 1)
+			w.Write([]byte(body))
+		}
+	})
+
+	client := fakeBlockStorageClient(t, handler)
+	ctx := context.Background()
+
+	types, err := ListVolumeTypes(ctx, client)
+	if err != nil {
+		t.Fatalf("ListVolumeTypes() error: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 paginated GETs, got %d", calls)
+	}
+	if len(types) != 3 {
+		t.Fatalf("expected 3 volume types across 2 pages, got %d", len(types))
+	}
+	want := []VolumeType{
+		{ID: "vt-ssd-0001", Name: "ssd"},
+		{ID: "vt-hdd-0002", Name: "hdd"},
+		{ID: "vt-nvme-0003", Name: "nvme"},
+	}
+	for i, exp := range want {
+		if types[i] != exp {
+			t.Errorf("types[%d] = %+v, want %+v", i, types[i], exp)
+		}
+	}
+}
+
+func TestNilClientGuards(t *testing.T) {
+	const cinderMsg = "block storage (Cinder) service is not available in this cloud"
+	const novaMsg = "compute (Nova) service is not available in this cloud"
+
+	tests := []struct {
+		name    string
+		call    func() error
+		wantMsg string
+	}{
+		{"ListVolumes", func() error {
+			_, err := ListVolumes(context.Background(), nil)
+			return err
+		}, cinderMsg},
+		{"GetVolume", func() error {
+			_, err := GetVolume(context.Background(), nil, "vol-1")
+			return err
+		}, cinderMsg},
+		{"CreateVolume", func() error {
+			_, err := CreateVolume(context.Background(), nil, volumes.CreateOpts{})
+			return err
+		}, cinderMsg},
+		{"ListVolumeTypes", func() error {
+			_, err := ListVolumeTypes(context.Background(), nil)
+			return err
+		}, cinderMsg},
+		{"DeleteVolume", func() error {
+			return DeleteVolume(context.Background(), nil, "vol-1")
+		}, cinderMsg},
+		{"AttachVolume", func() error {
+			_, err := AttachVolume(context.Background(), nil, "srv-1", "vol-1")
+			return err
+		}, novaMsg},
+		{"DetachVolume", func() error {
+			return DetachVolume(context.Background(), nil, "srv-1", "vol-1")
+		}, novaMsg},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call()
+			if err == nil {
+				t.Fatal("expected error for nil client, got nil")
+			}
+			if err.Error() != tt.wantMsg {
+				t.Errorf("error = %q, want %q", err.Error(), tt.wantMsg)
+			}
+		})
+	}
+}
+
+func TestAttachVolumeReturnsAttachmentID(t *testing.T) {
+	var gotPath string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != http.MethodPost || !strings.Contains(r.URL.Path, "os-volume_attachments") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"volumeAttachment": {"id": "att-42", "volumeId": "vol-1", "serverId": "srv-1", "device": "/dev/vdb"}}`))
+	})
+
+	client := fakeBlockStorageClient(t, handler)
+	attID, err := AttachVolume(context.Background(), client, "srv-1", "vol-1")
+	if err != nil {
+		t.Fatalf("AttachVolume() error: %v", err)
+	}
+	if attID != "att-42" {
+		t.Errorf("attachment ID = %q, want %q", attID, "att-42")
+	}
+	if !strings.HasSuffix(gotPath, "/servers/srv-1/os-volume_attachments") {
+		t.Errorf("unexpected request path: %s", gotPath)
+	}
+}
+
+func TestDetachVolumeResolvesAttachmentID(t *testing.T) {
+	var deletePath string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "os-volume_attachments"):
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"volumeAttachments": [{"id": "att-42", "volumeId": "vol-1", "serverId": "srv-1", "device": "/dev/vdb"}]}`))
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "os-volume_attachments/att-42"):
+			deletePath = r.URL.Path
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	client := fakeBlockStorageClient(t, handler)
+	if err := DetachVolume(context.Background(), client, "srv-1", "vol-1"); err != nil {
+		t.Fatalf("DetachVolume() error: %v", err)
+	}
+	if deletePath == "" {
+		t.Error("expected DELETE by attachment ID att-42, request never seen")
+	}
+}
+
+func TestDetachVolumeFallsBackToVolumeID(t *testing.T) {
+	var deletePath string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "os-volume_attachments"):
+			w.Header().Set("Content-Type", "application/json")
+			// List contains a different volume only; no match for vol-1.
+			w.Write([]byte(`{"volumeAttachments": [{"id": "att-99", "volumeId": "vol-other", "serverId": "srv-1"}]}`))
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "os-volume_attachments/vol-1"):
+			deletePath = r.URL.Path
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	client := fakeBlockStorageClient(t, handler)
+	if err := DetachVolume(context.Background(), client, "srv-1", "vol-1"); err != nil {
+		t.Fatalf("DetachVolume() error: %v", err)
+	}
+	if deletePath == "" {
+		t.Error("expected fallback DELETE by volume ID vol-1, request never seen")
 	}
 }

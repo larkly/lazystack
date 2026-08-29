@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/network"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -15,6 +13,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/security/rules"
+	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 const (
@@ -40,10 +40,10 @@ type ruleCreateErrMsg struct{ err error }
 
 // Model is the security group rule create/edit form modal.
 type Model struct {
-	Active    bool
-	client    *gophercloud.ServiceClient
-	sgID      string
-	sgName    string
+	Active bool
+	client *gophercloud.ServiceClient
+	sgID   string
+	sgName string
 
 	selectedDirection int
 	selectedEtherType int
@@ -60,8 +60,8 @@ type Model struct {
 	height     int
 
 	// Edit mode: delete old rule after creating the new one
-	editMode   bool
-	oldRuleID  string
+	editMode  bool
+	oldRuleID string
 }
 
 // New creates a rule create form for the given security group.
@@ -369,9 +369,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	opts := rules.CreateOpts{
-		SecGroupID:  m.sgID,
-		Direction:   ruleDir,
-		EtherType:   ruleEther,
+		SecGroupID: m.sgID,
+		Direction:  ruleDir,
+		EtherType:  ruleEther,
 	}
 
 	if proto != "any" {

@@ -478,6 +478,9 @@ func (m *Model) scrollDown(n int) {
 	switch m.focus {
 	case focusInfo:
 		m.scroll += n
+		if max := m.infoMaxScroll(); m.scroll > max {
+			m.scroll = max
+		}
 	case focusInterfaces:
 		m.interfacesScroll += n
 	case focusVolumes:
@@ -528,6 +531,27 @@ func (m Model) actionsMaxScroll() int {
 		return 0
 	}
 	return max
+}
+
+// infoMaxScroll returns the highest valid scroll offset for the info pane,
+// computed the same way renderInfoContent slices its lines.
+func (m Model) infoMaxScroll() int {
+	lines := m.infoLines(m.infoContentWidth())
+	viewH := m.panelHeight() - 2
+	max := len(lines) - viewH
+	if max < 0 {
+		return 0
+	}
+	return max
+}
+
+// infoContentWidth returns the maxWidth the info pane is rendered with,
+// matching the layout math in renderWide/renderNarrow.
+func (m Model) infoContentWidth() int {
+	if m.width < narrowThreshold {
+		return m.width - 6 // renderNarrow: w-4 where w = m.width-2
+	}
+	return m.width/2 - 4 // renderWide: leftW-4 where leftW = m.width/2
 }
 
 func (m Model) rightPanelHeights() (totalH, consoleH, actionsH int) {
@@ -765,9 +789,10 @@ func (m Model) panelBorder(pane focusPane) lipgloss.Style {
 		BorderRight(true)
 }
 
-func (m Model) renderInfoContent(maxWidth int) string {
+// infoLines builds the full (unscrolled) info-pane content lines.
+func (m Model) infoLines(maxWidth int) []string {
 	if m.server == nil {
-		return ""
+		return nil
 	}
 
 	s := m.server
@@ -907,11 +932,17 @@ func (m Model) renderInfoContent(maxWidth int) string {
 		}
 	}
 
+	return lines
+}
+
+func (m Model) renderInfoContent(maxWidth int) string {
+	lines := m.infoLines(maxWidth)
+	if len(lines) == 0 {
+		return ""
+	}
+
 	// Apply scroll
 	viewH := m.panelHeight() - 2
-	if m.scroll > len(lines)-viewH {
-		// Clamp — use a local copy so we don't mutate
-	}
 	start := m.scroll
 	if start > len(lines) {
 		start = len(lines)

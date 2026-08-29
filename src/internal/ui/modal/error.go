@@ -3,10 +3,10 @@ package modal
 import (
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // ErrorDismissedMsg is sent when the error modal is dismissed.
@@ -28,11 +28,11 @@ func NewError(context string, err error) ErrorModel {
 	shared.Debugf("[error] shown context=%s err=%v", context, err)
 	parsed := shared.ParseError(err)
 	return ErrorModel{
-		Context:       context,
-		FriendlyError: parsed.FriendlyMessage,
-		RawError:      parsed.RawError,
+		Context:        context,
+		FriendlyError:  parsed.FriendlyMessage,
+		RawError:       parsed.RawError,
 		HTTPStatusCode: parsed.HTTPStatusCode,
-		ShowDetails:   false,
+		ShowDetails:    false,
 	}
 }
 

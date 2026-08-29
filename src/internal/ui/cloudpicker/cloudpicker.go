@@ -3,19 +3,19 @@ package cloudpicker
 import (
 	"fmt"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Model is the cloud picker overlay.
 type Model struct {
-	clouds   []string
-	cursor   int
-	width    int
-	height   int
-	err      error
+	clouds []string
+	cursor int
+	width  int
+	height int
+	err    error
 }
 
 // New creates a cloud picker with the given cloud names.

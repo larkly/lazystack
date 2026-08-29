@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
@@ -13,6 +12,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/dns/v2/recordsets"
 	"github.com/gophercloud/gophercloud/v2/openstack/dns/v2/zones"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 type zonesLoadedMsg struct {
@@ -24,7 +24,7 @@ type zonesErrMsg struct {
 }
 
 type recordsetsLoadedMsg struct {
-	zoneID    string
+	zoneID     string
 	recordsets []recordsets.RecordSet
 }
 
@@ -34,17 +34,17 @@ type recordsetsErrMsg struct {
 
 // Model is the DNS zone/record list viewer.
 type Model struct {
-	client     *gophercloud.ServiceClient
-	zones      []zones.Zone
-	recordsets []recordsets.RecordSet
+	client       *gophercloud.ServiceClient
+	zones        []zones.Zone
+	recordsets   []recordsets.RecordSet
 	selectedZone *zones.Zone
-	cursor     int
-	scroll     int
-	width      int
-	height     int
-	loading    bool
-	spinner    spinner.Model
-	err        string
+	cursor       int
+	scroll       int
+	width        int
+	height       int
+	loading      bool
+	spinner      spinner.Model
+	err          string
 }
 
 // New creates a DNS list model.

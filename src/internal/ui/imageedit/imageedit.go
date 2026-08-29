@@ -5,26 +5,26 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/image"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/image"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 const (
-	fieldName      = 0
+	fieldName       = 0
 	fieldVisibility = 1
-	fieldMinDisk   = 2
-	fieldMinRAM    = 3
-	fieldTags      = 4
-	fieldProtected = 5
-	fieldSubmit    = 6
-	fieldCancel    = 7
-	numFields      = 8
+	fieldMinDisk    = 2
+	fieldMinRAM     = 3
+	fieldTags       = 4
+	fieldProtected  = 5
+	fieldSubmit     = 6
+	fieldCancel     = 7
+	numFields       = 8
 )
 
 var (
@@ -37,9 +37,9 @@ type imageEditErrMsg struct{ err error }
 
 // Model is the image edit modal.
 type Model struct {
-	Active   bool
-	client   *gophercloud.ServiceClient
-	imageID  string
+	Active  bool
+	client  *gophercloud.ServiceClient
+	imageID string
 
 	nameInput    textinput.Model
 	visibility   int

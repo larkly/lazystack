@@ -1,18 +1,18 @@
 package app
 
 import (
-	"context"
-
+	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/cloudpicker"
-	"charm.land/bubbletea/v2"
 )
 
 func (m Model) connectToCloud(name string) tea.Cmd {
 	shared.Debugf("[app] connectToCloud: start cloud=%s", name)
 	return func() tea.Msg {
-		client, err := cloud.Connect(context.Background(), name)
+		ctx, cancel := actionCtxLong()
+		defer cancel()
+		client, err := cloud.Connect(ctx, name)
 		if err != nil {
 			shared.Debugf("[app] connectToCloud: error: %v", err)
 			return shared.CloudConnectErrMsg{Err: err}

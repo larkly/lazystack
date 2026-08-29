@@ -22,6 +22,11 @@ func TestEnableDebug_CreatesLogFile(t *testing.T) {
 		debugFile = origFile
 	}()
 
+	// Isolate the log path so parallel package test binaries cannot race
+	// on the shared default location under the user cache dir.
+	logPath := filepath.Join(t.TempDir(), "debug.log")
+	t.Setenv("LAZYSTACK_DEBUG_LOG", logPath)
+
 	err := EnableDebug()
 	if err != nil {
 		t.Fatalf("EnableDebug failed: %v", err)
@@ -30,8 +35,6 @@ func TestEnableDebug_CreatesLogFile(t *testing.T) {
 		if debugFile != nil {
 			debugFile.Close()
 		}
-		cacheDir, _ := os.UserCacheDir()
-		os.Remove(filepath.Join(cacheDir, "lazystack", "debug.log"))
 	}()
 
 	if !DebugEnabled() {
@@ -50,6 +53,9 @@ func TestDebugf_WritesToLog(t *testing.T) {
 		debugFile = origFile
 	}()
 
+	logPath := filepath.Join(t.TempDir(), "debug.log")
+	t.Setenv("LAZYSTACK_DEBUG_LOG", logPath)
+
 	err := EnableDebug()
 	if err != nil {
 		t.Fatalf("EnableDebug failed: %v", err)
@@ -58,15 +64,11 @@ func TestDebugf_WritesToLog(t *testing.T) {
 		if debugFile != nil {
 			debugFile.Close()
 		}
-		cacheDir, _ := os.UserCacheDir()
-		os.Remove(filepath.Join(cacheDir, "lazystack", "debug.log"))
 	}()
 
 	Debugf("test message: %s", "hello")
 
 	// Read the log file to verify the message was written
-	cacheDir, _ := os.UserCacheDir()
-	logPath := filepath.Join(cacheDir, "lazystack", "debug.log")
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("failed to read debug log: %v", err)

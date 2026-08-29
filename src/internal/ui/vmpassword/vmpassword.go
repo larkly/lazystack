@@ -3,11 +3,11 @@ package vmpassword
 import (
 	"strings"
 
-	"github.com/atotto/clipboard"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Model is the admin password display modal.

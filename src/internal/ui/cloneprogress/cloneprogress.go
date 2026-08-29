@@ -6,15 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/volume"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
 	bsvolumes "github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/volume"
 )
 
 const pollInterval = 3 * time.Second
@@ -39,9 +39,9 @@ type RollbackCompleteMsg struct {
 }
 
 type volumeCreatedMsg struct {
-	idx    int
-	volID  string
-	err    error
+	idx   int
+	volID string
+	err   error
 }
 
 type volumeStatusMsg struct {
@@ -460,7 +460,7 @@ func (m Model) attachVolume(idx int) tea.Cmd {
 	serverID := m.serverID
 	computeClient := m.computeClient
 	return func() tea.Msg {
-		err := volume.AttachVolume(context.Background(), computeClient, serverID, volID)
+		_, err := volume.AttachVolume(context.Background(), computeClient, serverID, volID)
 		return volumeAttachedMsg{idx: idx, err: err}
 	}
 }

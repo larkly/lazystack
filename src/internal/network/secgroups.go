@@ -21,14 +21,14 @@ type SecurityGroup struct {
 
 // SecurityRule is a simplified security group rule.
 type SecurityRule struct {
-	ID            string
-	Direction     string // ingress or egress
-	EtherType     string // IPv4 or IPv6
-	Protocol      string
-	PortRangeMin  int
-	PortRangeMax  int
+	ID             string
+	Direction      string // ingress or egress
+	EtherType      string // IPv4 or IPv6
+	Protocol       string
+	PortRangeMin   int
+	PortRangeMax   int
 	RemoteIPPrefix string
-	RemoteGroupID string
+	RemoteGroupID  string
 }
 
 // ListSecurityGroups fetches all security groups with their rules.
@@ -48,14 +48,14 @@ func ListSecurityGroups(ctx context.Context, client *gophercloud.ServiceClient) 
 			}
 			for _, r := range sg.Rules {
 				group.Rules = append(group.Rules, SecurityRule{
-					ID:            r.ID,
-					Direction:     r.Direction,
-					EtherType:     r.EtherType,
-					Protocol:      r.Protocol,
-					PortRangeMin:  r.PortRangeMin,
-					PortRangeMax:  r.PortRangeMax,
+					ID:             r.ID,
+					Direction:      r.Direction,
+					EtherType:      r.EtherType,
+					Protocol:       r.Protocol,
+					PortRangeMin:   r.PortRangeMin,
+					PortRangeMax:   r.PortRangeMax,
 					RemoteIPPrefix: r.RemoteIPPrefix,
-					RemoteGroupID: r.RemoteGroupID,
+					RemoteGroupID:  r.RemoteGroupID,
 				})
 			}
 			result = append(result, group)
@@ -81,14 +81,14 @@ func CreateSecurityGroupRule(ctx context.Context, client *gophercloud.ServiceCli
 	}
 	shared.Debugf("[network] created security group rule %s", rule.ID)
 	return &SecurityRule{
-		ID:            rule.ID,
-		Direction:     rule.Direction,
-		EtherType:     rule.EtherType,
-		Protocol:      rule.Protocol,
-		PortRangeMin:  rule.PortRangeMin,
-		PortRangeMax:  rule.PortRangeMax,
+		ID:             rule.ID,
+		Direction:      rule.Direction,
+		EtherType:      rule.EtherType,
+		Protocol:       rule.Protocol,
+		PortRangeMin:   rule.PortRangeMin,
+		PortRangeMax:   rule.PortRangeMax,
 		RemoteIPPrefix: rule.RemoteIPPrefix,
-		RemoteGroupID: rule.RemoteGroupID,
+		RemoteGroupID:  rule.RemoteGroupID,
 	}, nil
 }
 
