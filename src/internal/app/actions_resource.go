@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -18,6 +17,8 @@ import (
 	"github.com/larkly/lazystack/internal/ui/lbpoolcreate"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/networkcreate"
+	"github.com/larkly/lazystack/internal/ui/portcreate"
+	"github.com/larkly/lazystack/internal/ui/portedit"
 	"github.com/larkly/lazystack/internal/ui/routercreate"
 	"github.com/larkly/lazystack/internal/ui/serverpicker"
 	"github.com/larkly/lazystack/internal/ui/sgcreate"
@@ -25,8 +26,6 @@ import (
 	"github.com/larkly/lazystack/internal/ui/subnetcreate"
 	"github.com/larkly/lazystack/internal/ui/subnetedit"
 	"github.com/larkly/lazystack/internal/ui/subnetpicker"
-	"github.com/larkly/lazystack/internal/ui/portcreate"
-	"github.com/larkly/lazystack/internal/ui/portedit"
 	"github.com/larkly/lazystack/internal/ui/volumecreate"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 	"github.com/larkly/lazystack/internal/ui/volumepicker"
@@ -257,8 +256,10 @@ func (m Model) doAllocateFIP() (Model, tea.Cmd) {
 	m.statusBar.Hint = "Allocating floating IP..."
 	networkClient := m.client.Network
 	return m, func() tea.Msg {
+		ctx, cancel := actionCtx()
+		defer cancel()
 		shared.Debugf("[action] allocating floating IP")
-		nets, err := network.ListExternalNetworks(context.Background(), networkClient)
+		nets, err := network.ListExternalNetworks(ctx, networkClient)
 		if err != nil {
 			shared.Debugf("[action] allocate floating IP failed: %s", err)
 			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
@@ -267,7 +268,7 @@ func (m Model) doAllocateFIP() (Model, tea.Cmd) {
 			shared.Debugf("[action] allocate floating IP failed: no external networks available")
 			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: fmt.Errorf("no external networks available")}
 		}
-		fip, err := network.AllocateFloatingIP(context.Background(), networkClient, nets[0].ID)
+		fip, err := network.AllocateFloatingIP(ctx, networkClient, nets[0].ID)
 		if err != nil {
 			shared.Debugf("[action] allocate floating IP failed: %s", err)
 			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
@@ -722,8 +723,10 @@ func (m Model) drainLBMember() (Model, tea.Cmd) {
 	}
 	zero := 0
 	return m, func() tea.Msg {
+		ctx, cancel := actionCtx()
+		defer cancel()
 		shared.Debugf("[action] draining member %s (weight -> 0)", name)
-		err := loadbalancer.UpdateMember(context.Background(), client, poolID, memberID, loadbalancer.MemberUpdateOpts{Weight: &zero})
+		err := loadbalancer.UpdateMember(ctx, client, poolID, memberID, loadbalancer.MemberUpdateOpts{Weight: &zero})
 		if err != nil {
 			return shared.ResourceActionErrMsg{Action: "Drain", Name: name, Err: err}
 		}
@@ -746,7 +749,8 @@ func (m Model) drainLBMembersBulk() (Model, tea.Cmd) {
 	m.lbView.ClearMemberSelection()
 	zero := 0
 	return m, func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := actionCtxLong()
+		defer cancel()
 		var failed int
 		for i, memberID := range ids {
 			if i > 0 && lbID != "" {
@@ -829,8 +833,10 @@ func (m Model) toggleLBAdminState() (Model, tea.Cmd) {
 		action = "Disabled"
 	}
 	return m, func() tea.Msg {
+		ctx, cancel := actionCtx()
+		defer cancel()
 		shared.Debugf("[action] toggling LB admin state %s -> %v", name, newState)
-		err := loadbalancer.UpdateLoadBalancer(context.Background(), client, id, nil, nil, &newState)
+		err := loadbalancer.UpdateLoadBalancer(ctx, client, id, nil, nil, &newState)
 		if err != nil {
 			return shared.ResourceActionErrMsg{Action: action, Name: name, Err: err}
 		}
@@ -852,8 +858,10 @@ func (m Model) toggleListenerAdminState() (Model, tea.Cmd) {
 		action = "Disabled"
 	}
 	return m, func() tea.Msg {
+		ctx, cancel := actionCtx()
+		defer cancel()
 		shared.Debugf("[action] toggling listener admin state %s -> %v", name, newState)
-		err := loadbalancer.UpdateListener(context.Background(), client, id, nil, nil, nil, &newState)
+		err := loadbalancer.UpdateListener(ctx, client, id, nil, nil, nil, &newState)
 		if err != nil {
 			return shared.ResourceActionErrMsg{Action: action, Name: name, Err: err}
 		}
@@ -875,8 +883,10 @@ func (m Model) togglePoolAdminState() (Model, tea.Cmd) {
 		action = "Disabled"
 	}
 	return m, func() tea.Msg {
+		ctx, cancel := actionCtx()
+		defer cancel()
 		shared.Debugf("[action] toggling pool admin state %s -> %v", name, newState)
-		err := loadbalancer.UpdatePool(context.Background(), client, id, nil, "", &newState)
+		err := loadbalancer.UpdatePool(ctx, client, id, nil, "", &newState)
 		if err != nil {
 			return shared.ResourceActionErrMsg{Action: action, Name: name, Err: err}
 		}
@@ -902,8 +912,10 @@ func (m Model) toggleMemberAdminState() (Model, tea.Cmd) {
 		action = "Disabled"
 	}
 	return m, func() tea.Msg {
+		ctx, cancel := actionCtx()
+		defer cancel()
 		shared.Debugf("[action] toggling member admin state %s -> %v", name, newState)
-		err := loadbalancer.UpdateMember(context.Background(), client, poolID, memberID, loadbalancer.MemberUpdateOpts{AdminStateUp: &newState})
+		err := loadbalancer.UpdateMember(ctx, client, poolID, memberID, loadbalancer.MemberUpdateOpts{AdminStateUp: &newState})
 		if err != nil {
 			return shared.ResourceActionErrMsg{Action: action, Name: name, Err: err}
 		}

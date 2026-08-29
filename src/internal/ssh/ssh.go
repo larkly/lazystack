@@ -19,10 +19,17 @@ type Options struct {
 
 // FindKeyPath looks for a private key matching the given key pair name
 // in ~/.ssh/. Returns the path if found, empty string otherwise.
+// Names that could traverse outside ~/.ssh/ (separators, "..") are rejected
+// and yield an empty result, consistent with "key not found".
 func FindKeyPath(keyName string) string {
 	shared.Debugf("[ssh] FindKeyPath: start keyName=%q", keyName)
 	if keyName == "" {
 		shared.Debugf("[ssh] FindKeyPath: empty keyName, returning empty")
+		return ""
+	}
+	if keyName != filepath.Base(keyName) || keyName == "." || keyName == ".." ||
+		strings.ContainsAny(keyName, `/\`) {
+		shared.Debugf("[ssh] FindKeyPath: unsafe keyName %q, returning empty", keyName)
 		return ""
 	}
 	home, err := os.UserHomeDir()
@@ -97,7 +104,29 @@ func BuildArgs(opts Options) []string {
 	return args
 }
 
+// shellQuote returns s quoted for safe inclusion in a POSIX shell command
+// line. Strings consisting only of unreserved shell characters are left
+// untouched so the common case stays readable; everything else is wrapped
+// in single quotes with embedded single quotes escaped.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if strings.IndexFunc(s, func(r rune) bool {
+		return !strings.ContainsRune(safeShellChars, r)
+	}) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// safeShellChars lists the characters that are safe to leave unquoted in a
+// POSIX shell word (same heuristic as shlex.quote).
+const safeShellChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@%+=:,./-"
+
 // BuildCommandString returns the full SSH command string for clipboard use.
+// User- and API-supplied components (user@host, key path) are shell-quoted
+// so pasting the command into a shell cannot inject extra commands.
 func BuildCommandString(opts Options) string {
 	shared.Debugf("[ssh] BuildCommandString: start user=%s ip=%s", opts.User, opts.IP)
 	var parts []string
@@ -110,9 +139,9 @@ func BuildCommandString(opts Options) string {
 		)
 	}
 	if opts.KeyPath != "" {
-		parts = append(parts, "-i", opts.KeyPath)
+		parts = append(parts, "-i", shellQuote(opts.KeyPath))
 	}
-	parts = append(parts, opts.User+"@"+opts.IP)
+	parts = append(parts, shellQuote(opts.User+"@"+opts.IP))
 	cmd := strings.Join(parts, " ")
 	shared.Debugf("[ssh] BuildCommandString: result %s", cmd)
 	return cmd

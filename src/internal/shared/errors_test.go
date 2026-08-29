@@ -120,7 +120,7 @@ func TestParseError_ConnectionRefused(t *testing.T) {
 }
 
 func TestParseError_NetworkUnknown(t *testing.T) {
-	err := errors.New("network unreachable")
+	err := errors.New("connect: network is unreachable")
 	parsed := ParseError(err)
 
 	if parsed.FriendlyMessage != "Network error — check connectivity and try again." {
@@ -132,7 +132,7 @@ func TestParseError_NetworkUnknown(t *testing.T) {
 }
 
 func TestParseError_DialError(t *testing.T) {
-	err := errors.New("unable to dial endpoint")
+	err := errors.New("dial tcp 10.0.0.1:5000: lookup api.example.com: no such host")
 	parsed := ParseError(err)
 
 	if parsed.FriendlyMessage != "Network error — check connectivity and try again." {
@@ -140,6 +140,32 @@ func TestParseError_DialError(t *testing.T) {
 	}
 	if parsed.Category != "network" {
 		t.Errorf("expected category network, got %q", parsed.Category)
+	}
+}
+
+func TestParseError_IOTimeout(t *testing.T) {
+	err := errors.New("net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers) (read tcp 10.0.0.1:5000: i/o timeout)")
+	parsed := ParseError(err)
+
+	if parsed.Category != "network" {
+		t.Errorf("expected category network for i/o timeout, got %q", parsed.Category)
+	}
+}
+
+// Resource errors that merely mention the word "network" must NOT be
+// classified as connectivity errors (regression test for issue 208).
+func TestParseError_ResourceErrorsMentioningNetwork(t *testing.T) {
+	cases := []string{
+		"Network abc123 not found",
+		"network X is in use by port 456",
+		"The network 1234567890 could not be deleted: it still has subnets attached",
+	}
+	for _, raw := range cases {
+		parsed := ParseError(errors.New(raw))
+		if parsed.Category == "network" {
+			t.Errorf("error %q must not be classified as network/connectivity, got category %q (message %q)",
+				raw, parsed.Category, parsed.FriendlyMessage)
+		}
 	}
 }
 

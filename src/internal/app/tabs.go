@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/dnslist"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
@@ -14,8 +16,6 @@ import (
 	"github.com/larkly/lazystack/internal/ui/routerview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
-	"charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // TabDef describes a resource tab.
