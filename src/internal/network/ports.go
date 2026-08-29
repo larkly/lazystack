@@ -142,6 +142,7 @@ func FindRouterPortOnNetwork(ctx context.Context, client *gophercloud.ServiceCli
 		if len(extracted) > 0 {
 			p := mapPortBasic(extracted[0])
 			result = &p
+			return false, nil // stop paginating once found
 		}
 		return true, nil
 	})
