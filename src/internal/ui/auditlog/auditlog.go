@@ -24,18 +24,18 @@ const (
 
 // Model is the audit log viewer.
 type Model struct {
-	entries       []audit.Entry
-	filtered      []audit.Entry
-	cursor        int
-	scroll        int // top visible index
-	loading       bool
-	spinner       spinner.Model
-	err           string
-	width         int
-	height        int
-	filterMode    FilterType
-	filterInput   string
-	filterCursor  int
+	entries      []audit.Entry
+	filtered     []audit.Entry
+	cursor       int
+	scroll       int // top visible index
+	loading      bool
+	spinner      spinner.Model
+	err          string
+	width        int
+	height       int
+	filterMode   FilterType
+	filterInput  string
+	filterCursor int
 }
 
 // New creates an audit log viewer.
@@ -80,7 +80,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m.updateFilterInput(msg)
 		}
 		switch {
-		case key.Matches(msg, shared.Keys.Back), key.Matches(msg, shared.Keys.Back):
+		case key.Matches(msg, shared.Keys.Back):
 			return m, func() tea.Msg {
 				return shared.ViewChangeMsg{View: "serverlist"}
 			}
@@ -130,7 +130,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) updateFilterInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, shared.Keys.Back), key.Matches(msg, shared.Keys.Back):
+	case key.Matches(msg, shared.Keys.Back):
 		m.filterMode = FilterNone
 		m.filterInput = ""
 		m.applyFilter()
@@ -244,10 +244,17 @@ func (m Model) View() string {
 	}
 
 	b.WriteString(shared.StyleHelp.Render("  a=action r=resource d=date c=clear ↑↓ navigate esc=back") + "\n")
-	b.WriteString("  " + strings.Repeat("─", m.width-4) + "\n")
+	sep := m.width - 4
+	if sep < 1 {
+		sep = 1
+	}
+	b.WriteString("  " + strings.Repeat("─", sep) + "\n")
 
 	// Column headers
-	cols := []struct{ w int; title string }{
+	cols := []struct {
+		w     int
+		title string
+	}{
 		{20, "Timestamp"},
 		{12, "Action"},
 		{14, "Resource"},
@@ -261,7 +268,7 @@ func (m Model) View() string {
 		b.WriteString(lipgloss.NewStyle().Width(c.w).Bold(true).Render(c.title))
 	}
 	b.WriteString("\n")
-	b.WriteString("  " + strings.Repeat("─", m.width-4) + "\n")
+	b.WriteString("  " + strings.Repeat("─", sep) + "\n")
 
 	if len(m.filtered) == 0 {
 		b.WriteString("  " + shared.StyleHelp.Render("No entries") + "\n")

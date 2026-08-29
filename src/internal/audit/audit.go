@@ -73,25 +73,25 @@ const (
 
 // Entry is a single audit log record.
 type Entry struct {
-	Timestamp   time.Time       `json:"timestamp"`
-	Cloud       string          `json:"cloud"`
-	Project     string          `json:"project,omitempty"`
-	Action      ActionType      `json:"action"`
-	ResourceType string         `json:"resource_type"`
-	ResourceID  string          `json:"resource_id,omitempty"`
-	ResourceName string        `json:"resource_name,omitempty"`
-	Result      string          `json:"result"` // success, error, cancelled
-	Error       string          `json:"error,omitempty"`
-	Details     json.RawMessage `json:"details,omitempty"`
+	Timestamp    time.Time       `json:"timestamp"`
+	Cloud        string          `json:"cloud"`
+	Project      string          `json:"project,omitempty"`
+	Action       ActionType      `json:"action"`
+	ResourceType string          `json:"resource_type"`
+	ResourceID   string          `json:"resource_id,omitempty"`
+	ResourceName string          `json:"resource_name,omitempty"`
+	Result       string          `json:"result"` // success, error, cancelled
+	Error        string          `json:"error,omitempty"`
+	Details      json.RawMessage `json:"details,omitempty"`
 }
 
 // Logger writes structured audit entries to a rotating JSON log file.
 type Logger struct {
-	mu        sync.Mutex
-	path      string
-	maxSize   int64
-	maxFiles  int
-	enabled   bool
+	mu       sync.Mutex
+	path     string
+	maxSize  int64
+	maxFiles int
+	enabled  bool
 }
 
 // NewLogger creates an audit logger.
@@ -145,7 +145,14 @@ func (l *Logger) Log(entry Entry) error {
 
 	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("audit open: %w", err)
+		// The parent directory may be missing on fresh installs; create it
+		// once and retry before giving up.
+		if mkErr := os.MkdirAll(filepath.Dir(l.path), 0o700); mkErr != nil {
+			return fmt.Errorf("audit mkdir: %w", mkErr)
+		}
+		if f, err = os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err != nil {
+			return fmt.Errorf("audit open: %w", err)
+		}
 	}
 	defer f.Close()
 
