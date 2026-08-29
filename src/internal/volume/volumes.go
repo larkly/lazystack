@@ -9,8 +9,29 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
+	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumetypes"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/volumeattach"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 )
+
+// requireBlockStorageClient guards against a nil Cinder client on clouds
+// lacking the block storage service; gophercloud methods panic on nil
+// *ServiceClient receivers.
+func requireBlockStorageClient(client *gophercloud.ServiceClient) error {
+	if client == nil {
+		return fmt.Errorf("block storage (Cinder) service is not available in this cloud")
+	}
+	return nil
+}
+
+// requireComputeClient guards against a nil Nova client on clouds lacking the
+// compute service; gophercloud methods panic on nil *ServiceClient receivers.
+func requireComputeClient(client *gophercloud.ServiceClient) error {
+	if client == nil {
+		return fmt.Errorf("compute (Nova) service is not available in this cloud")
+	}
+	return nil
+}
 
 // VolumeAttachment represents a single volume-to-server attachment.
 type VolumeAttachment struct {
@@ -68,6 +89,9 @@ func (v Volume) IsMultiAttached() bool {
 
 // ListVolumes fetches all volumes.
 func ListVolumes(ctx context.Context, client *gophercloud.ServiceClient) ([]Volume, error) {
+	if err := requireBlockStorageClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[volume] ListVolumes: starting")
 	var result []Volume
 	err := volumes.List(client, volumes.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -112,6 +136,9 @@ func ListVolumes(ctx context.Context, client *gophercloud.ServiceClient) ([]Volu
 
 // GetVolume fetches a single volume by ID.
 func GetVolume(ctx context.Context, client *gophercloud.ServiceClient, id string) (*Volume, error) {
+	if err := requireBlockStorageClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[volume] GetVolume: starting, id=%s", id)
 	v, err := volumes.Get(ctx, client, id).Extract()
 	if err != nil {
@@ -146,6 +173,9 @@ func GetVolume(ctx context.Context, client *gophercloud.ServiceClient, id string
 
 // CreateVolume creates a new volume.
 func CreateVolume(ctx context.Context, client *gophercloud.ServiceClient, opts volumes.CreateOpts) (*Volume, error) {
+	if err := requireBlockStorageClient(client); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[volume] CreateVolume: starting, name=%s size=%d", opts.Name, opts.Size)
 	r := volumes.Create(ctx, client, opts, nil)
 	v, err := r.Extract()
@@ -172,24 +202,24 @@ type VolumeType struct {
 
 // ListVolumeTypes fetches all volume types.
 func ListVolumeTypes(ctx context.Context, client *gophercloud.ServiceClient) ([]VolumeType, error) {
-	shared.Debugf("[volume] ListVolumeTypes: starting")
-	url := client.ServiceURL("types")
-	var body struct {
-		VolumeTypes []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"volume_types"`
+	if err := requireBlockStorageClient(client); err != nil {
+		return nil, err
 	}
-	resp, err := client.Get(ctx, url, &body, nil)
+	shared.Debugf("[volume] ListVolumeTypes: starting")
+	var result []VolumeType
+	err := volumetypes.List(client, volumetypes.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+		extracted, err := volumetypes.ExtractVolumeTypes(page)
+		if err != nil {
+			return false, err
+		}
+		for _, vt := range extracted {
+			result = append(result, VolumeType{ID: vt.ID, Name: vt.Name})
+		}
+		return true, nil
+	})
 	if err != nil {
 		shared.Debugf("[volume] ListVolumeTypes: error: %v", err)
 		return nil, fmt.Errorf("listing volume types: %w", err)
-	}
-	resp.Body.Close()
-
-	result := make([]VolumeType, len(body.VolumeTypes))
-	for i, vt := range body.VolumeTypes {
-		result[i] = VolumeType{ID: vt.ID, Name: vt.Name}
 	}
 	shared.Debugf("[volume] ListVolumeTypes: success, count=%d", len(result))
 	return result, nil
@@ -197,6 +227,9 @@ func ListVolumeTypes(ctx context.Context, client *gophercloud.ServiceClient) ([]
 
 // DeleteVolume deletes a volume.
 func DeleteVolume(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	if err := requireBlockStorageClient(client); err != nil {
+		return err
+	}
 	shared.Debugf("[volume] DeleteVolume: starting, id=%s", id)
 	r := volumes.Delete(ctx, client, id, volumes.DeleteOpts{})
 	if r.Err != nil {
@@ -207,35 +240,64 @@ func DeleteVolume(ctx context.Context, client *gophercloud.ServiceClient, id str
 	return nil
 }
 
-// AttachVolume attaches a volume to a server using Nova's os-volume_attachments.
-func AttachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient, serverID, volumeID string) error {
-	shared.Debugf("[volume] AttachVolume: starting, serverID=%s volumeID=%s", serverID, volumeID)
-	body := map[string]interface{}{
-		"volumeAttachment": map[string]interface{}{
-			"volumeId": volumeID,
-		},
+// AttachVolume attaches a volume to a server using Nova's os-volume_attachments
+// and returns the resulting attachment ID. With newer Nova/Cinder the attachment
+// ID differs from the volume ID and is required to detach the volume.
+func AttachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient, serverID, volumeID string) (string, error) {
+	if err := requireComputeClient(computeClient); err != nil {
+		return "", err
 	}
-	resp, err := computeClient.Post(ctx, computeClient.ServiceURL("servers", serverID, "os-volume_attachments"), body, nil, &gophercloud.RequestOpts{
-		OkCodes: []int{200, 201, 202},
-	})
+	shared.Debugf("[volume] AttachVolume: starting, serverID=%s volumeID=%s", serverID, volumeID)
+	att, err := volumeattach.Create(ctx, computeClient, serverID, volumeattach.CreateOpts{VolumeID: volumeID}).Extract()
 	if err != nil {
 		shared.Debugf("[volume] AttachVolume: error: %v", err)
-		return fmt.Errorf("attaching volume %s to server %s: %w", volumeID, serverID, err)
+		return "", fmt.Errorf("attaching volume %s to server %s: %w", volumeID, serverID, err)
 	}
-	resp.Body.Close()
-	shared.Debugf("[volume] AttachVolume: success, serverID=%s volumeID=%s", serverID, volumeID)
-	return nil
+	shared.Debugf("[volume] AttachVolume: success, serverID=%s volumeID=%s attachmentID=%s", serverID, volumeID, att.ID)
+	return att.ID, nil
 }
 
-// DetachVolume detaches a volume from a server.
+// DetachVolume detaches a volume from a server. Nova's DELETE expects the
+// attachment ID, which with newer Cinder/Nova differs from the volume ID, so
+// the server's attachments are listed first to resolve it. If the lookup fails
+// or finds no match, it falls back to deleting by volume ID.
 func DetachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient, serverID, volumeID string) error {
+	if err := requireComputeClient(computeClient); err != nil {
+		return err
+	}
 	shared.Debugf("[volume] DetachVolume: starting, serverID=%s volumeID=%s", serverID, volumeID)
-	resp, err := computeClient.Delete(ctx, computeClient.ServiceURL("servers", serverID, "os-volume_attachments", volumeID), nil)
+	attachmentID := ""
+	err := volumeattach.List(computeClient, serverID).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+		attachments, err := volumeattach.ExtractVolumeAttachments(page)
+		if err != nil {
+			return false, err
+		}
+		for _, att := range attachments {
+			if att.VolumeID == volumeID {
+				attachmentID = att.ID
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		shared.Debugf("[volume] DetachVolume: listing attachments failed, falling back to volume ID: %v", err)
+	} else if attachmentID != "" {
+		shared.Debugf("[volume] DetachVolume: resolved attachmentID=%s for volumeID=%s", attachmentID, volumeID)
+	} else {
+		shared.Debugf("[volume] DetachVolume: no attachment found for volumeID=%s, falling back to volume ID", volumeID)
+	}
+
+	target := attachmentID
+	if target == "" {
+		target = volumeID
+	}
+	resp, err := computeClient.Delete(ctx, computeClient.ServiceURL("servers", serverID, "os-volume_attachments", target), nil)
 	if err != nil {
 		shared.Debugf("[volume] DetachVolume: error: %v", err)
 		return fmt.Errorf("detaching volume %s from server %s: %w", volumeID, serverID, err)
 	}
 	resp.Body.Close()
-	shared.Debugf("[volume] DetachVolume: success, serverID=%s volumeID=%s", serverID, volumeID)
+	shared.Debugf("[volume] DetachVolume: success, serverID=%s volumeID=%s attachmentID=%s", serverID, volumeID, target)
 	return nil
 }

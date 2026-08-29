@@ -459,3 +459,35 @@ func TestGetVolumeQuotas_InvalidProjectID(t *testing.T) {
 		t.Errorf("expected error to contain 'projectID is required', got: %v", err)
 	}
 }
+
+func TestNilClientGuards(t *testing.T) {
+	tests := []struct {
+		name    string
+		call    func() error
+		wantMsg string
+	}{
+		{"GetComputeQuotas", func() error {
+			_, err := GetComputeQuotas(context.Background(), nil, "proj-1")
+			return err
+		}, "compute (Nova) service is not available in this cloud"},
+		{"GetNetworkQuotas", func() error {
+			_, err := GetNetworkQuotas(context.Background(), nil, "proj-1")
+			return err
+		}, "networking (Neutron) service is not available in this cloud"},
+		{"GetVolumeQuotas", func() error {
+			_, err := GetVolumeQuotas(context.Background(), nil, "proj-1")
+			return err
+		}, "block storage (Cinder) service is not available in this cloud"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call()
+			if err == nil {
+				t.Fatal("expected error for nil client, got nil")
+			}
+			if err.Error() != tt.wantMsg {
+				t.Errorf("error = %q, want %q", err.Error(), tt.wantMsg)
+			}
+		})
+	}
+}

@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/volume"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/volume"
 )
 
 type serversLoadedMsg struct{ servers []compute.Server }
@@ -215,7 +215,7 @@ func (m Model) View() string {
 			if srv.Status == "ACTIVE" {
 				statusStyle = statusStyle.Foreground(shared.ColorSuccess)
 			}
-			line := cursor + style.Render(srv.Name) + " " + statusStyle.Render(shared.StatusIcon(srv.Status) + srv.Status)
+			line := cursor + style.Render(srv.Name) + " " + statusStyle.Render(shared.StatusIcon(srv.Status)+srv.Status)
 			lines = append(lines, line)
 		}
 		body = strings.Join(lines, "\n")
@@ -270,7 +270,7 @@ func (m Model) attachVolume(srv compute.Server) tea.Cmd {
 	_ = volumeName // used in the msg struct
 	return func() tea.Msg {
 		shared.Debugf("[serverpicker] attaching volume %s to server %s (%s)", volumeID, serverID, serverName)
-		err := volume.AttachVolume(context.Background(), client, serverID, volumeID)
+		_, err := volume.AttachVolume(context.Background(), client, serverID, volumeID)
 		if err != nil {
 			shared.Debugf("[serverpicker] error attaching volume %s to server %s: %v", volumeID, serverID, err)
 			return attachErrMsg{err: err}

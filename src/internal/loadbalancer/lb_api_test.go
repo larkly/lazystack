@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
 )
@@ -208,5 +209,128 @@ func TestListListeners(t *testing.T) {
 	}
 	if l2.ProtocolPort != 80 {
 		t.Errorf("unexpected ProtocolPort: %d", l2.ProtocolPort)
+	}
+}
+
+// lbGetFixture renders a single-LB GET response with the given provisioning
+// status, as returned by loadbalancers.Get.
+func lbGetFixture(status string) string {
+	return `{"loadbalancer": {"id": "lb-123", "name": "test-lb", "provisioning_status": "` + status + `", "operating_status": "ONLINE"}}`
+}
+
+// lbResponse is one scripted HTTP response for the polling tests: either an
+// error status code or a 200 with a JSON body. A zero code means 200.
+type lbResponse struct {
+	code int
+	body string
+}
+
+// scriptHandler serves responses in order, repeating the last one once the
+// script is exhausted, and records the number of handled requests.
+func scriptHandler(responses []lbResponse, calls *int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		*calls++
+		i := *calls - 1
+		if i >= len(responses) {
+			i = len(responses) - 1
+		}
+		resp := responses[i]
+		if resp.code != http.StatusOK && resp.code != 0 {
+			w.WriteHeader(resp.code)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(resp.body))
+	}
+}
+
+func TestWaitForActive(t *testing.T) {
+	tests := []struct {
+		name       string
+		responses  []lbResponse
+		wantErr    bool
+		wantErrMsg string
+	}{
+		{
+			name: "returns success once status ACTIVE",
+			responses: []lbResponse{
+				{body: lbGetFixture("PENDING_CREATE")},
+				{body: lbGetFixture("ACTIVE")},
+			},
+		},
+		{
+			name: "retries past transient 500s then succeeds",
+			responses: []lbResponse{
+				{code: http.StatusInternalServerError},
+				{code: http.StatusInternalServerError},
+				{body: lbGetFixture("ACTIVE")},
+			},
+		},
+		{
+			name:       "aborts immediately on 404",
+			responses:  []lbResponse{{code: http.StatusNotFound}},
+			wantErr:    true,
+			wantErrMsg: "load balancer lb-123 not found",
+		},
+		{
+			name:       "aborts on ERROR provisioning status",
+			responses:  []lbResponse{{body: lbGetFixture("ERROR_DELETING")}},
+			wantErr:    true,
+			wantErrMsg: "LB lb-123 entered ERROR_DELETING",
+		},
+		{
+			name: "auth errors abort immediately",
+			responses: []lbResponse{
+				{code: http.StatusForbidden},
+				{body: lbGetFixture("ACTIVE")},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int
+			client := fakeLBClient(scriptHandler(tt.responses, &calls))
+			ctx := context.Background()
+
+			err := WaitForActive(ctx, client, "lb-123", 30*time.Second)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("WaitForActive() error = nil, want %q", tt.wantErrMsg)
+				}
+				if tt.wantErrMsg != "" && err.Error() != tt.wantErrMsg {
+					t.Errorf("WaitForActive() error = %q, want %q", err.Error(), tt.wantErrMsg)
+				}
+				if calls != 1 {
+					t.Errorf("expected immediate abort after 1 poll, got %d", calls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("WaitForActive() error: %v", err)
+			}
+		})
+	}
+}
+
+func TestWaitForActiveNilClient(t *testing.T) {
+	err := WaitForActive(context.Background(), nil, "lb-123", time.Second)
+	if err == nil {
+		t.Fatal("expected error for nil client, got nil")
+	}
+	want := "load balancer (Octavia) service is not available in this cloud"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestListLoadBalancersNilClient(t *testing.T) {
+	_, err := ListLoadBalancers(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for nil client, got nil")
+	}
+	want := "load balancer (Octavia) service is not available in this cloud"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
 }

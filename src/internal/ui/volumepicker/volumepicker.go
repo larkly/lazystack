@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/volume"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/volume"
 )
 
 type volumesLoadedMsg struct{ volumes []volume.Volume }
@@ -280,7 +280,7 @@ func (m Model) attachVolume(vol volume.Volume) tea.Cmd {
 		volumeName = vol.ID[:12]
 	}
 	return func() tea.Msg {
-		err := volume.AttachVolume(context.Background(), client, serverID, volumeID)
+		_, err := volume.AttachVolume(context.Background(), client, serverID, volumeID)
 		if err != nil {
 			return attachErrMsg{err: err}
 		}
