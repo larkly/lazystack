@@ -16,16 +16,25 @@ var (
 )
 
 // EnableDebug opens a debug log file under the user cache directory.
+// The path can be overridden with LAZYSTACK_DEBUG_LOG (used by tests running
+// in parallel, which would otherwise race on the shared default path).
 func EnableDebug() error {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		return fmt.Errorf("determine user cache dir: %w", err)
+	path := os.Getenv("LAZYSTACK_DEBUG_LOG")
+	if path == "" {
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			return fmt.Errorf("determine user cache dir: %w", err)
+		}
+		dir := filepath.Join(cacheDir, "lazystack")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		path = filepath.Join(dir, "debug.log")
+	} else if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
 	}
-	dir := filepath.Join(cacheDir, "lazystack")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	path := filepath.Join(dir, "debug.log")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
