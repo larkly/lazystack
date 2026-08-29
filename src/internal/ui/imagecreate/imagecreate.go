@@ -12,14 +12,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/larkly/lazystack/internal/image"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/image"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 const (
@@ -62,8 +62,8 @@ type importStartedMsg struct{ name string }
 
 // Model is the image upload modal.
 type Model struct {
-	Active   bool
-	client   *gophercloud.ServiceClient
+	Active bool
+	client *gophercloud.ServiceClient
 
 	source       int
 	nameInput    textinput.Model

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/larkly/lazystack/internal/shared"
 	tea "charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 func TestNew(t *testing.T) {

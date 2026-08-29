@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/volume"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -15,6 +13,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/volume"
 )
 
 const (

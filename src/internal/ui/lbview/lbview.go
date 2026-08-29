@@ -102,9 +102,9 @@ type Model struct {
 	refreshInterval time.Duration
 
 	// Adaptive polling state
-	detailRefreshInterval time.Duration  // Current adaptive interval for detail fetches
-	lastDetailFetch       time.Time      // When detail was last fetched
-	pollMode              string         // Current polling mode label ("fast", "medium", "slow", "capped")
+	detailRefreshInterval time.Duration // Current adaptive interval for detail fetches
+	lastDetailFetch       time.Time     // When detail was last fetched
+	pollMode              string        // Current polling mode label ("fast", "medium", "slow", "capped")
 }
 
 // New creates a load balancer view model.

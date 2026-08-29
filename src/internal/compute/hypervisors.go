@@ -10,19 +10,19 @@ import (
 
 // Hypervisor is a simplified representation of an OpenStack hypervisor.
 type Hypervisor struct {
-	ID               string
-	Name             string // HypervisorHostname
-	Type             string // HypervisorType
-	Status           string
-	State            string
-	VCPUs            int
-	VCPUsUsed        int
-	MemoryMB         int
-	MemoryMBUsed     int
-	LocalGB          int
-	LocalGBUsed      int
-	RunningVMs       int
-	HostIP           string
+	ID           string
+	Name         string // HypervisorHostname
+	Type         string // HypervisorType
+	Status       string
+	State        string
+	VCPUs        int
+	VCPUsUsed    int
+	MemoryMB     int
+	MemoryMBUsed int
+	LocalGB      int
+	LocalGBUsed  int
+	RunningVMs   int
+	HostIP       string
 }
 
 // ListHypervisors returns all hypervisors visible to the user.
@@ -36,19 +36,19 @@ func ListHypervisors(ctx context.Context, client *gophercloud.ServiceClient) ([]
 		}
 		for _, h := range list {
 			result = append(result, Hypervisor{
-				ID:         h.ID,
-				Name:       h.HypervisorHostname,
-				Type:       h.HypervisorType,
-				Status:     h.Status,
-				State:      h.State,
-				VCPUs:      h.VCPUs,
-				VCPUsUsed:  h.VCPUsUsed,
-				MemoryMB:   h.MemoryMB,
+				ID:           h.ID,
+				Name:         h.HypervisorHostname,
+				Type:         h.HypervisorType,
+				Status:       h.Status,
+				State:        h.State,
+				VCPUs:        h.VCPUs,
+				VCPUsUsed:    h.VCPUsUsed,
+				MemoryMB:     h.MemoryMB,
 				MemoryMBUsed: h.MemoryMBUsed,
-				LocalGB:    h.LocalGB,
-				LocalGBUsed: h.LocalGBUsed,
-				RunningVMs: h.RunningVMs,
-				HostIP:     h.HostIP,
+				LocalGB:      h.LocalGB,
+				LocalGBUsed:  h.LocalGBUsed,
+				RunningVMs:   h.RunningVMs,
+				HostIP:       h.HostIP,
 			})
 		}
 		return true, nil

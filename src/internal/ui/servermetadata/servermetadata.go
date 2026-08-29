@@ -29,22 +29,22 @@ type metaOpErrMsg struct {
 
 // Model is the server metadata editor modal.
 type Model struct {
-	Active      bool
-	client      *gophercloud.ServiceClient
-	serverID    string
-	serverName  string
-	width       int
-	height      int
-	metadata    map[string]string
-	cursor      int
-	mode        string // "" = viewing, "add" = adding, "edit" = editing
-	editKey     string
-	keyInput    textinput.Model
-	valueInput  textinput.Model
-	loading     bool
-	submitting  bool
-	err         string
-	spinner     spinner.Model
+	Active     bool
+	client     *gophercloud.ServiceClient
+	serverID   string
+	serverName string
+	width      int
+	height     int
+	metadata   map[string]string
+	cursor     int
+	mode       string // "" = viewing, "add" = adding, "edit" = editing
+	editKey    string
+	keyInput   textinput.Model
+	valueInput textinput.Model
+	loading    bool
+	submitting bool
+	err        string
+	spinner    spinner.Model
 }
 
 // New creates a metadata editor modal.

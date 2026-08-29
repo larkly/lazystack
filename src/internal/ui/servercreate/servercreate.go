@@ -9,10 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/compute"
-	img "github.com/larkly/lazystack/internal/image"
-	"github.com/larkly/lazystack/internal/network"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -21,6 +17,10 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/keypairs"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
+	"github.com/larkly/lazystack/internal/compute"
+	img "github.com/larkly/lazystack/internal/image"
+	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Field indices.
@@ -86,15 +86,15 @@ type Model struct {
 	imageClient   *gophercloud.ServiceClient
 	networkClient *gophercloud.ServiceClient
 
-	nameInput      textinput.Model
-	templateInput  textinput.Model
-	countInput     textinput.Model
+	nameInput     textinput.Model
+	templateInput textinput.Model
+	countInput    textinput.Model
 
-	images     []img.Image
-	flavors    []compute.Flavor
-	networks   []network.Network
-	keypairs   []compute.KeyPair
-	secGroups  []network.SecurityGroup
+	images    []img.Image
+	flavors   []compute.Flavor
+	networks  []network.Network
+	keypairs  []compute.KeyPair
+	secGroups []network.SecurityGroup
 
 	selectedImage     int
 	selectedFlavor    int
@@ -991,7 +991,7 @@ func (m Model) View() string {
 		if tmpl != "" && count > 1 {
 			names := previewNames(tmpl, count, 5)
 			if len(names) > 0 {
-				b.WriteString(shared.StyleHelp.Render("  Preview: " + strings.Join(names, ", ")) + "\n")
+				b.WriteString(shared.StyleHelp.Render("  Preview: "+strings.Join(names, ", ")) + "\n")
 			}
 		}
 	}

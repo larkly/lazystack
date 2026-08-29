@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkly/lazystack/internal/shared"
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/ui/copypicker"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
 type keypairsLoadedMsg struct{ keypairs []compute.KeyPair }
@@ -25,16 +25,16 @@ var kpSortColumns = []string{"name", "type"}
 
 // Model is the keypair list view.
 type Model struct {
-	client  *gophercloud.ServiceClient
-	pairs   []compute.KeyPair
-	cursor  int
-	width   int
-	height  int
-	loading       bool
-	spinner       spinner.Model
-	err           string
-	sortCol       int
-	sortAsc       bool
+	client          *gophercloud.ServiceClient
+	pairs           []compute.KeyPair
+	cursor          int
+	width           int
+	height          int
+	loading         bool
+	spinner         spinner.Model
+	err             string
+	sortCol         int
+	sortAsc         bool
 	sortHighlight   bool
 	sortClearAt     time.Time
 	refreshInterval time.Duration

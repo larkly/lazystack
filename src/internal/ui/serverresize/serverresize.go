@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 type flavorsLoadedMsg struct{ flavors []compute.Flavor }
@@ -28,17 +28,17 @@ type Model struct {
 	serverIDs     []string // for bulk resize
 	serverName    string
 	currentFlavor string
-	flavors    []compute.Flavor
-	cursor     int
-	filter     textinput.Model
-	filtering  bool
-	filtered   []compute.Flavor
-	loading    bool
-	submitting bool
-	spinner    spinner.Model
-	width      int
-	height     int
-	err        string
+	flavors       []compute.Flavor
+	cursor        int
+	filter        textinput.Model
+	filtering     bool
+	filtered      []compute.Flavor
+	loading       bool
+	submitting    bool
+	spinner       spinner.Model
+	width         int
+	height        int
+	err           string
 }
 
 // NewBulk creates a resize picker for multiple servers.
@@ -64,9 +64,9 @@ func New(client *gophercloud.ServiceClient, serverID, serverName, currentFlavor 
 		serverID:      serverID,
 		serverName:    serverName,
 		currentFlavor: currentFlavor,
-		loading:    true,
-		spinner:    s,
-		filter:     fi,
+		loading:       true,
+		spinner:       s,
+		filter:        fi,
 	}
 }
 

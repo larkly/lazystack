@@ -6,13 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/larkly/lazystack/internal/compute"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 type actionsLoadedMsg struct {

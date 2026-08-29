@@ -274,11 +274,11 @@ func DeleteSubnet(ctx context.Context, client *gophercloud.ServiceClient, id str
 
 // SubnetUpdateOpts holds options for updating a subnet.
 type SubnetUpdateOpts struct {
-	Name           *string
-	EnableDHCP     *bool
-	GatewayIP      *string
-	DNSNameservers *[]string
-	HostRoutes     *[]HostRoute
+	Name            *string
+	EnableDHCP      *bool
+	GatewayIP       *string
+	DNSNameservers  *[]string
+	HostRoutes      *[]HostRoute
 	AllocationPools []AllocationPool
 }
 

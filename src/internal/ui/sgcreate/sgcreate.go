@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/network"
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Mode determines the modal's behavior.
@@ -37,10 +37,10 @@ type sgCreateErrMsg struct{ err error }
 
 // Model is the security group create/rename/clone modal.
 type Model struct {
-	Active    bool
-	client    *gophercloud.ServiceClient
-	nameInput textinput.Model
-	descInput textinput.Model
+	Active     bool
+	client     *gophercloud.ServiceClient
+	nameInput  textinput.Model
+	descInput  textinput.Model
 	focusField int
 	submitting bool
 	spinner    spinner.Model

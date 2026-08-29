@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/larkly/lazystack/internal/shared"
 	"charm.land/lipgloss/v2"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Model holds the status bar state.

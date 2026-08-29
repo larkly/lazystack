@@ -24,7 +24,7 @@ import (
 type FocusPane int
 
 const (
-	FocusSelector   FocusPane = iota
+	FocusSelector FocusPane = iota
 	FocusInfo
 	FocusProperties
 	FocusServers

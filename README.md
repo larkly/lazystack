@@ -303,7 +303,7 @@ Built with:
 
 ```
 src/internal/
-  app/            # Root model, routing, actions, rendering (8 files)
+  app/            # Root model, routing, actions, rendering
   cloud/          # Auth, service detection, project listing
   compute/        # Nova: servers, flavors, keypairs, actions
   image/          # Glance: images
@@ -313,7 +313,7 @@ src/internal/
   quota/          # Quota fetching (compute, network, storage)
   selfupdate/     # GitHub release self-update
   shared/         # Keys, styles, messages
-  ui/             # All view components (38 packages)
+  ui/             # All view components
 ```
 
 ## License

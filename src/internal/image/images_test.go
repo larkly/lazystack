@@ -121,19 +121,19 @@ func TestProgressReader_ConcurrentAccess(t *testing.T) {
 
 func TestImageFromGophercloud(t *testing.T) {
 	img := images.Image{
-		ID:                 "img-123",
-		Name:               "ubuntu-22.04",
-		Status:             images.ImageStatusActive,
-		SizeBytes:          2 << 30, // 2GB
-		MinDiskGigabytes:   10,
-		MinRAMMegabytes:    1024,
-		Visibility:         images.ImageVisibilityPublic,
-		DiskFormat:         "qcow2",
-		ContainerFormat:    "bare",
-		Tags:               []string{"ubuntu", "lts"},
-		Checksum:           "abc123",
-		Owner:              "project-xyz",
-		Protected:          true,
+		ID:               "img-123",
+		Name:             "ubuntu-22.04",
+		Status:           images.ImageStatusActive,
+		SizeBytes:        2 << 30, // 2GB
+		MinDiskGigabytes: 10,
+		MinRAMMegabytes:  1024,
+		Visibility:       images.ImageVisibilityPublic,
+		DiskFormat:       "qcow2",
+		ContainerFormat:  "bare",
+		Tags:             []string{"ubuntu", "lts"},
+		Checksum:         "abc123",
+		Owner:            "project-xyz",
+		Protected:        true,
 	}
 
 	result := imageFromGophercloud(img)
