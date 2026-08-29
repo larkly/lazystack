@@ -48,7 +48,7 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 	// Version discovery returns the API versions supported by the deployment.
 	url := compute.ServiceURL("")
 	resp, err := compute.Get(ctx, url, nil, &gophercloud.RequestOpts{
-		// Version discovery does not need a microversion
+		KeepResponseBody: true,
 	})
 	if err != nil {
 		shared.Debugf("[cloud] negotiateMicroversion: version discovery failed: %v, falling back to %s", err, ceiling)
@@ -82,6 +82,9 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 			maxVersion = v.Version
 			break
 		}
+	}
+	if (maxVersion == "" || maxVersion == "unknown") && versionDoc.Version.Version != "" {
+		maxVersion = versionDoc.Version.Version
 	}
 
 	// If we couldn't parse it, fall back
