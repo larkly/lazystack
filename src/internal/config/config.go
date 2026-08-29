@@ -86,9 +86,9 @@ func DefaultPath() string {
 func Defaults() Config {
 	return Config{
 		General: GeneralConfig{
-			RefreshInterval: 5,
-			IdleTimeout:     0,
-			PlainMode:       false,
+			RefreshInterval:     5,
+			IdleTimeout:         0,
+			PlainMode:           false,
 			CheckForUpdates:     true,
 			AlwaysPickCloud:     false,
 			IgnoreSSHHostKeys:   false,
@@ -113,61 +113,61 @@ func Defaults() Config {
 // DefaultKeybindings returns the default key bindings map.
 func DefaultKeybindings() map[string]string {
 	return map[string]string{
-		"quit":           "q,ctrl+c",
-		"help":           "?",
-		"cloud_pick":     "C",
-		"filter":         "/",
-		"enter":          "enter",
-		"back":           "esc",
-		"create":         "ctrl+n",
-		"delete":         "ctrl+d",
-		"reboot":         "ctrl+o",
-		"hard_reboot":    "ctrl+p",
-		"refresh":        "R",
-		"up":             "up,k",
-		"down":           "down,j",
-		"left":           "left,h",
-		"right":          "right,l",
-		"tab":            "tab",
-		"shift_tab":      "shift+tab",
-		"pause":          "p",
-		"suspend":        "ctrl+z",
-		"shelve":         "ctrl+e",
-		"resize":         "ctrl+f",
-		"confirm_resize": "ctrl+y",
-		"revert_resize":  "ctrl+x",
-		"actions":        "a",
-		"console":        "L",
-		"select":         "space",
-		"confirm":        "y",
-		"deny":           "n",
-		"restart":        "ctrl+r",
-		"attach":         "ctrl+a",
-		"assign_fip":     "ctrl+u",
-		"detach":         "ctrl+t",
-		"allocate":       "ctrl+n",
-		"page_up":        "pgup",
-		"page_down":      "pgdown",
-		"sort":           "s",
-		"reverse_sort":   "S",
-		"project_pick":   "P",
-		"quota":          "Q",
-		"stop_start":     "o",
-		"lock":           "ctrl+l",
-		"rename":         "r",
-		"rebuild":        "ctrl+g",
-		"snapshot":       "ctrl+s",
-		"deactivate":     "d",
-		"rescue":         "ctrl+w",
-		"clone":          "c",
-		"jump_volumes":   "v",
+		"quit":            "q,ctrl+c",
+		"help":            "?",
+		"cloud_pick":      "C",
+		"filter":          "/",
+		"enter":           "enter",
+		"back":            "esc",
+		"create":          "ctrl+n",
+		"delete":          "ctrl+d",
+		"reboot":          "ctrl+o",
+		"hard_reboot":     "ctrl+p",
+		"refresh":         "R",
+		"up":              "up,k",
+		"down":            "down,j",
+		"left":            "left,h",
+		"right":           "right,l",
+		"tab":             "tab",
+		"shift_tab":       "shift+tab",
+		"pause":           "p",
+		"suspend":         "ctrl+z",
+		"shelve":          "ctrl+e",
+		"resize":          "ctrl+f",
+		"confirm_resize":  "ctrl+y",
+		"revert_resize":   "ctrl+x",
+		"actions":         "a",
+		"console":         "L",
+		"select":          "space",
+		"confirm":         "y",
+		"deny":            "n",
+		"restart":         "ctrl+r",
+		"attach":          "ctrl+a",
+		"assign_fip":      "ctrl+u",
+		"detach":          "ctrl+t",
+		"allocate":        "ctrl+n",
+		"page_up":         "pgup",
+		"page_down":       "pgdown",
+		"sort":            "s",
+		"reverse_sort":    "S",
+		"project_pick":    "P",
+		"quota":           "Q",
+		"stop_start":      "o",
+		"lock":            "ctrl+l",
+		"rename":          "r",
+		"rebuild":         "ctrl+g",
+		"snapshot":        "ctrl+s",
+		"deactivate":      "d",
+		"rescue":          "ctrl+w",
+		"clone":           "c",
+		"jump_volumes":    "v",
 		"jump_sec_groups": "g",
-		"jump_networks":  "N",
-		"ssh":            "x",
-		"copy_ssh":       "y",
-		"console_url":    "V",
-		"config":         "ctrl+k",
-		"column_pick":    "ctrl+shift+c",
+		"jump_networks":   "N",
+		"ssh":             "x",
+		"copy_ssh":        "y",
+		"console_url":     "V",
+		"config":          "ctrl+k",
+		"column_pick":     "ctrl+shift+c",
 	}
 }
 
@@ -263,8 +263,11 @@ func LoadFrom(path string) (Config, error) {
 // mergeWithDefaults fills zero-valued fields in file with defaults.
 // Bool fields are handled in LoadFrom via rawGeneral pointer detection.
 func mergeWithDefaults(file, defaults Config) Config {
-	if file.General.RefreshInterval == 0 {
+	if file.General.RefreshInterval <= 0 {
 		file.General.RefreshInterval = defaults.General.RefreshInterval
+	}
+	if file.General.IdleTimeout < 0 {
+		file.General.IdleTimeout = 0
 	}
 	if file.General.UpdateCheckInterval == 0 {
 		file.General.UpdateCheckInterval = defaults.General.UpdateCheckInterval
@@ -316,12 +319,18 @@ func mergeWithDefaults(file, defaults Config) Config {
 
 // Merge applies CLI flag overrides on top of file config.
 // CLI flags take precedence when explicitly set (non-nil pointers).
+// Negative values are clamped: refresh falls back to the existing
+// interval, idle timeout is disabled.
 func Merge(file Config, flags CLIFlags) Config {
 	if flags.RefreshInterval != nil {
-		file.General.RefreshInterval = int(flags.RefreshInterval.Seconds())
+		if d := int(flags.RefreshInterval.Seconds()); d > 0 {
+			file.General.RefreshInterval = d
+		}
 	}
 	if flags.IdleTimeout != nil {
-		file.General.IdleTimeout = int(flags.IdleTimeout.Minutes())
+		if d := int(flags.IdleTimeout.Minutes()); d >= 0 {
+			file.General.IdleTimeout = d
+		}
 	}
 	if flags.PlainMode != nil {
 		file.General.PlainMode = *flags.PlainMode
@@ -357,7 +366,7 @@ func (c *Config) SaveTo(path string) error {
 		shared.Debugf("[config] SaveTo: error marshaling: %v", err)
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		shared.Debugf("[config] SaveTo: error writing: %v", err)
 		return err
 	}
