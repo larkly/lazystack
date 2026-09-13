@@ -1,0 +1,343 @@
+package app
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"time"
+
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
+	"github.com/larkly/lazystack/internal/cloud"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/modal"
+)
+
+// Each fixture uses real gophercloud HTTP requests and an isolated on-disk audit log.
+func actionFixture(t *testing.T, handler http.HandlerFunc) (Model, string) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	c := &gophercloud.ServiceClient{ProviderClient: &gophercloud.ProviderClient{}, Endpoint: srv.URL + "/"}
+	m := initTestModel()
+	m.client = &cloud.Client{Compute: c, BlockStorage: c, Network: c, Image: c, LoadBalancer: c, DNS: c}
+	m.cloudName, m.currentProjectID = "test-cloud", "test-project"
+	path := filepath.Join(t.TempDir(), "audit.log")
+	m.auditLogger = audit.NewLogger(path, true)
+	return m, path
+}
+
+type serverActionCase struct {
+	action, body, label string
+	audit               audit.ActionType
+}
+
+var serverActionCases = []serverActionCase{
+	{"delete", "", "Delete", audit.ActionDelete},
+	{"soft reboot", `{"reboot":{"type":"SOFT"}}`, "Reboot", audit.ActionReboot},
+	{"hard reboot", `{"reboot":{"type":"HARD"}}`, "Hard reboot", audit.ActionReboot},
+	{"pause", `{"pause":null}`, "Pause", audit.ActionPause},
+	{"unpause", `{"unpause":null}`, "Unpause", audit.ActionUnpause},
+	{"suspend", `{"suspend":null}`, "Suspend", audit.ActionSuspend},
+	{"resume", `{"resume":null}`, "Resume", audit.ActionResume},
+	{"shelve", `{"shelve":null}`, "Shelve", audit.ActionShelve},
+	{"unshelve", `{"unshelve":null}`, "Unshelve", audit.ActionUnshelve},
+	{"stop", `{"os-stop":null}`, "Stop", audit.ActionStop},
+	{"start", `{"os-start":null}`, "Start", audit.ActionStart},
+	{"lock", `{"lock":null}`, "Lock", audit.ActionLock},
+	{"unlock", `{"unlock":null}`, "Unlock", audit.ActionUnlock},
+	{"rescue", `{"rescue":{}}`, "Rescue (password: fixture-password)", audit.ActionRescue},
+	{"unrescue", `{"unrescue":null}`, "Unrescue", audit.ActionUnrescue},
+}
+
+func checkJSON(t *testing.T, got []byte, want string) {
+	t.Helper()
+	var a, b any
+	if err := json.Unmarshal(got, &a); err != nil {
+		t.Errorf("request JSON: %v (%s)", err, got)
+		return
+	}
+	if err := json.Unmarshal([]byte(want), &b); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("request body = %s, want %s", got, want)
+	}
+}
+
+func checkAudit(t *testing.T, path string, action audit.ActionType, resource, id, name string, failed bool) {
+	t.Helper()
+	entries, err := audit.ReadEntries(path, 10)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("audit entries=%+v err=%v", entries, err)
+	}
+	e := entries[0]
+	result := "success"
+	if failed {
+		result = "error"
+	}
+	if e.Action != action || e.ResourceType != resource || e.ResourceID != id || e.ResourceName != name || e.Cloud != "test-cloud" || e.Project != "test-project" || e.Result != result || e.Timestamp.IsZero() {
+		t.Errorf("audit = %+v", e)
+	}
+	if failed != (e.Error != "") {
+		t.Errorf("audit error = %q, failed=%v", e.Error, failed)
+	}
+	if strings.Contains(e.Error, "fixture-password") {
+		t.Error("password leaked to audit")
+	}
+}
+
+func TestConfirmedServerActionsHTTPAndAudit(t *testing.T) {
+	for _, tc := range serverActionCases {
+		for _, failed := range []bool{false, true} {
+			for _, bulk := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/error=%v/bulk=%v", tc.action, failed, bulk), func(t *testing.T) {
+					calls := 0
+					m, path := actionFixture(t, func(w http.ResponseWriter, r *http.Request) {
+						calls++
+						wantPath, wantMethod := "/servers/id/action", "POST"
+						if tc.action == "delete" {
+							wantPath, wantMethod = "/servers/id", "DELETE"
+						}
+						if r.URL.Path != wantPath || r.Method != wantMethod {
+							t.Errorf("request %s %s, want %s %s", r.Method, r.URL, wantMethod, wantPath)
+						}
+						body, _ := io.ReadAll(r.Body)
+						if tc.body != "" {
+							checkJSON(t, body, tc.body)
+						}
+						w.Header().Set("Content-Type", "application/json")
+						if failed {
+							w.WriteHeader(409)
+							fmt.Fprint(w, `{"conflictingRequest":{"message":"fixture failure"}}`)
+							return
+						}
+						if tc.action == "rescue" {
+							fmt.Fprint(w, `{"adminPass":"fixture-password"}`)
+							return
+						}
+						if tc.action == "delete" {
+							w.WriteHeader(204)
+						} else {
+							w.WriteHeader(202)
+						}
+					})
+					action := modal.ConfirmAction{Confirm: true, Action: tc.action, ServerID: "id", Name: "name"}
+					if bulk {
+						action.Servers = []modal.ServerRef{{ID: "id", Name: "name"}}
+					}
+					m.activeModal = modalConfirm
+					next, cmd := m.Update(action)
+					if next.(Model).activeModal != modalNone || cmd == nil {
+						t.Fatal("confirmation did not dismiss modal and schedule action")
+					}
+					if calls != 0 {
+						t.Fatal("action ran before command execution")
+					}
+					msg := cmd()
+					if calls != 1 {
+						t.Fatalf("HTTP calls=%d", calls)
+					}
+					if failed {
+						e, ok := msg.(shared.ServerActionErrMsg)
+						if !ok || e.Err == nil || !strings.Contains(e.Err.Error(), "fixture failure") {
+							t.Fatalf("result=%#v", msg)
+						}
+					} else {
+						s, ok := msg.(shared.ServerActionMsg)
+						if !ok {
+							t.Fatalf("result=%#v", msg)
+						}
+						label, name := tc.label, "name"
+						if bulk {
+							label, name = tc.action, "1 servers"
+							if tc.action == "rescue" {
+								label = "rescue (passwords: name: fixture-password)"
+							}
+						}
+						if s.Action != label || s.Name != name {
+							t.Errorf("result=%+v want %s/%s", s, label, name)
+						}
+					}
+					checkAudit(t, path, tc.audit, "server", "id", "name", failed)
+				})
+			}
+		}
+	}
+}
+
+func TestCancelledConfirmDoesNotExecuteOrAudit(t *testing.T) {
+	for _, bulk := range []bool{false, true} {
+		t.Run(fmt.Sprint(bulk), func(t *testing.T) {
+			m, path := actionFixture(t, func(w http.ResponseWriter, r *http.Request) { t.Errorf("unexpected request %s", r.URL) })
+			m.activeModal = modalConfirm
+			a := modal.ConfirmAction{Action: "delete", ServerID: "id", Name: "name", Confirm: false}
+			if bulk {
+				a.Servers = []modal.ServerRef{{ID: "id", Name: "name"}}
+			}
+			next, cmd := m.Update(a)
+			if cmd != nil || next.(Model).activeModal != modalNone {
+				t.Fatal("cancel should only close modal")
+			}
+			entries, err := audit.ReadEntries(path, 10)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("cancel audit=%v err=%v", entries, err)
+			}
+		})
+	}
+}
+
+func TestBulkMixedActionsAggregateErrorsAndContinue(t *testing.T) {
+	var requested []string
+	m, path := actionFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.Path)
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(r.URL.Path, "good") {
+			checkJSON(t, body, `{"os-start":null}`)
+			w.WriteHeader(202)
+			return
+		}
+		checkJSON(t, body, `{"os-stop":null}`)
+		http.Error(w, "cannot stop "+r.URL.Path, 409)
+	})
+	_, cmd := m.executeAction(modal.ConfirmAction{Action: "stop", Servers: []modal.ServerRef{{ID: "bad1", Name: "first"}, {ID: "good", Name: "middle", Action: "start"}, {ID: "bad2", Name: "last"}}})
+	msg, ok := cmd().(shared.ServerActionErrMsg)
+	if !ok || msg.Action != "mixed action (start:1, stop:2)" || msg.Name != "3 servers" {
+		t.Fatalf("result=%+v", msg)
+	}
+	if !strings.Contains(msg.Err.Error(), "first (stop):") || !strings.Contains(msg.Err.Error(), "; last (stop):") || strings.Contains(msg.Err.Error(), "middle") {
+		t.Fatalf("aggregation=%v", msg.Err)
+	}
+	if !reflect.DeepEqual(requested, []string{"/servers/bad1/action", "/servers/good/action", "/servers/bad2/action"}) {
+		t.Fatalf("requests=%v", requested)
+	}
+	entries, err := audit.ReadEntries(path, 10)
+	if err != nil || len(entries) != 3 {
+		t.Fatalf("audit=%v err=%v", entries, err)
+	}
+	byID := map[string]audit.Entry{}
+	for _, e := range entries {
+		byID[e.ResourceID] = e
+	}
+	for _, id := range []string{"bad1", "bad2"} {
+		if e := byID[id]; e.Result != "error" || e.Action != audit.ActionStop || e.Error == "" {
+			t.Errorf("audit=%+v", e)
+		}
+	}
+	if e := byID["good"]; e.Result != "success" || e.Action != audit.ActionStart || e.Error != "" {
+		t.Errorf("audit=%+v", e)
+	}
+}
+
+// Exercise the real production wait interval, including its bounded timeout.
+func TestDeleteWithVolumesWaitsBeforeDeleting(t *testing.T) {
+	for _, mode := range []string{"available", "retry", "exhausted", "lookup-error", "volume-errors", "server-error", "no-block-storage", "keep-volumes"} {
+		t.Run(mode, func(t *testing.T) {
+			func() {
+				var requests []string
+				polls := 0
+				m, path := actionFixture(t, func(w http.ResponseWriter, r *http.Request) {
+					requests = append(requests, r.Method+" "+r.URL.Path)
+					w.Header().Set("Content-Type", "application/json")
+					switch {
+					case r.Method == "GET" && strings.Contains(r.URL.Path, "os-volume_attachments"):
+						fmt.Fprint(w, `{"volumeAttachments":[{"id":"vol","volumeId":"vol"}]}`)
+					case r.Method == "GET":
+						polls++
+						if mode == "lookup-error" {
+							http.Error(w, "lookup failed", 500)
+							return
+						}
+						status := "available"
+						if mode == "exhausted" || (mode == "retry" && polls == 1) {
+							status = "in-use"
+						}
+						fmt.Fprintf(w, `{"volume":{"id":"vol","status":%q}}`, status)
+					case strings.Contains(r.URL.Path, "os-volume_attachments"):
+						if mode == "volume-errors" {
+							http.Error(w, "detach failed", 409)
+							return
+						}
+						w.WriteHeader(202)
+					case r.URL.Path == "/servers/id":
+						if mode == "server-error" {
+							http.Error(w, "server failed", 409)
+							return
+						}
+						w.WriteHeader(204)
+					case r.URL.Path == "/volumes/vol":
+						if mode == "volume-errors" {
+							http.Error(w, "delete failed", 409)
+							return
+						}
+						w.WriteHeader(202)
+					default:
+						t.Errorf("unexpected %s %s", r.Method, r.URL)
+						w.WriteHeader(404)
+					}
+				})
+				if mode == "no-block-storage" {
+					m.client.BlockStorage = nil
+				}
+				_, cmd := m.executeAction(modal.ConfirmAction{Action: "delete", ServerID: "id", Name: "name", DeleteVolumes: mode != "keep-volumes", VolumeIDs: []string{"vol"}})
+				start := time.Now()
+				msg := cmd()
+				elapsed := time.Since(start)
+				wantPolls := 1
+				wantDelay := time.Duration(0)
+				switch mode {
+				case "retry":
+					wantPolls = 2
+					wantDelay = 3 * time.Second
+				case "exhausted":
+					wantPolls = 10
+					wantDelay = 30 * time.Second
+				case "no-block-storage", "keep-volumes":
+					wantPolls = 0
+				}
+				if polls != wantPolls || elapsed < wantDelay {
+					t.Errorf("polls=%d want=%d elapsed=%v minimum=%v", polls, wantPolls, elapsed, wantDelay)
+				}
+				want := []string{}
+				if wantPolls > 0 {
+					want = append(want, "GET /servers/id/os-volume_attachments", "DELETE /servers/id/os-volume_attachments/vol")
+					for range wantPolls {
+						want = append(want, "GET /volumes/vol")
+					}
+				}
+				want = append(want, "DELETE /servers/id")
+				if wantPolls > 0 && mode != "server-error" {
+					want = append(want, "DELETE /volumes/vol")
+				}
+				if !reflect.DeepEqual(requests, want) {
+					t.Errorf("request order=%v want=%v", requests, want)
+				}
+				if mode == "server-error" {
+					if _, ok := msg.(shared.ServerActionErrMsg); !ok {
+						t.Fatalf("result=%#v", msg)
+					}
+				} else {
+					s, ok := msg.(shared.ServerActionMsg)
+					if !ok {
+						t.Fatalf("result=%#v", msg)
+					}
+					label := "Delete"
+					if mode == "volume-errors" {
+						label = "Delete (warning: 2 volume error(s))"
+					}
+					if s.Action != label {
+						t.Errorf("action=%q want=%q", s.Action, label)
+					}
+				}
+				checkAudit(t, path, audit.ActionDelete, "server", "id", "name", mode == "server-error")
+			}()
+		})
+	}
+}
