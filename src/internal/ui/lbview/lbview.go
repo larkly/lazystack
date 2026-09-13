@@ -414,7 +414,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		// Trigger detail fetch if needed
 		var cmd tea.Cmd
 		if lb := m.SelectedLB(); lb != nil && lb.ID != m.lastDetailID {
-			_, cmd = m.onSelectorChange()
+			m, cmd = m.onSelectorChange()
 		}
 		return m, cmd
 
@@ -586,7 +586,8 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		_, selCmd := m.onSelectorChange()
+		var selCmd tea.Cmd
+		m, selCmd = m.onSelectorChange()
 		if selCmd != nil {
 			cmds = append(cmds, selCmd)
 		}
@@ -839,6 +840,9 @@ func (m *Model) sortLBs() {
 	asc := m.sortAsc
 	sort.SliceStable(m.lbs, func(i, j int) bool {
 		a, b := m.lbs[i], m.lbs[j]
+		if !asc {
+			a, b = b, a
+		}
 		var less bool
 		switch colKey {
 		case "name":
@@ -851,9 +855,6 @@ func (m *Model) sortLBs() {
 			less = a.OperatingStatus < b.OperatingStatus
 		default:
 			less = false
-		}
-		if !asc {
-			return !less
 		}
 		return less
 	})

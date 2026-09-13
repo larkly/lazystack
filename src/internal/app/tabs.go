@@ -58,6 +58,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 	switch td.Key {
 	case "servers":
 		m.view = viewServerList
+		m.serverList.SetSize(m.width, m.height)
 		m.statusBar.CurrentView = "serverlist"
 		m.statusBar.Hint = m.serverList.Hints()
 		return m, nil
@@ -73,6 +74,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.volumeList.Init()
 		}
 		m.statusBar.Hint = m.volumeList.Hints()
+		m.volumeList.SetSize(m.width, m.height)
 		return m, m.volumeList.ForceRefresh()
 
 	case "floatingips":
@@ -86,6 +88,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.floatingIPList.Init()
 		}
 		m.statusBar.Hint = m.floatingIPList.Hints()
+		m.floatingIPList.SetSize(m.width, m.height)
 		return m, m.floatingIPList.ForceRefresh()
 
 	case "secgroups":
@@ -100,6 +103,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.secGroupView.Init()
 		}
 		m.statusBar.Hint = m.secGroupView.Hints()
+		m.secGroupView.SetSize(m.width, m.height)
 		return m, m.secGroupView.ForceRefresh()
 
 	case "networks":
@@ -114,6 +118,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.networkView.Init()
 		}
 		m.statusBar.Hint = m.networkView.Hints()
+		m.networkView.SetSize(m.width, m.height)
 		return m, m.networkView.ForceRefresh()
 
 	case "loadbalancers":
@@ -127,6 +132,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.lbView.Init()
 		}
 		m.statusBar.Hint = m.lbView.Hints()
+		m.lbView.SetSize(m.width, m.height)
 		return m, m.lbView.ForceRefresh()
 
 	case "routers":
@@ -142,6 +148,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[tabs] routers: re-activation, calling ForceRefresh()")
 		m.statusBar.Hint = m.routerView.Hints()
+		m.routerView.SetSize(m.width, m.height)
 		return m, m.routerView.ForceRefresh()
 
 	case "keypairs":
@@ -155,6 +162,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.keypairList.Init()
 		}
 		m.statusBar.Hint = m.keypairList.Hints()
+		m.keypairList.SetSize(m.width, m.height)
 		return m, m.keypairList.ForceRefresh()
 
 	case "images":
@@ -168,6 +176,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.imageView.Init()
 		}
 		m.statusBar.Hint = m.imageView.Hints()
+		m.imageView.SetSize(m.width, m.height)
 		return m, m.imageView.ForceRefresh()
 
 	case "dns":
@@ -181,6 +190,7 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 			return m, m.dnsList.Init()
 		}
 		m.statusBar.Hint = m.dnsList.Hints()
+		m.dnsList.SetSize(m.width, m.height)
 		return m, m.dnsList.ForceRefresh()
 	}
 	return m, nil

@@ -62,6 +62,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case consoleLoadedMsg:
 		m.loading = false
 		m.lines = strings.Split(msg.output, "\n")
+		if msg.output == "" {
+			m.lines = nil
+		}
 		m.err = ""
 		// Scroll to bottom
 		m.scroll = m.maxScroll()
@@ -166,8 +169,9 @@ func (m Model) View() string {
 
 	for i := m.scroll; i < end; i++ {
 		line := m.lines[i]
-		if len(line) > m.width-2 {
-			line = line[:m.width-2]
+		lineWidth := max(0, m.width-2)
+		if len(line) > lineWidth {
+			line = line[:lineWidth]
 		}
 		b.WriteString("  " + line + "\n")
 	}
