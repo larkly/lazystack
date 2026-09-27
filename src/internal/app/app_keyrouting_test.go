@@ -12,26 +12,26 @@ import (
 	"github.com/larkly/lazystack/internal/ui/serverlist"
 )
 
-func TestServerDetailCtrlAOpensVolumePicker(t *testing.T) {
+func TestServerDetailAttachKeyOpensVolumePicker(t *testing.T) {
 	m := newTestModel("dev", false)
 	m.client = &cloud.Client{BlockStorage: &gophercloud.ServiceClient{}}
 	m.view = viewServerDetail
 	m.serverDetail = testServerDetailWithServer("srv-1", "srv-1")
 
-	res, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModCtrl}))
+	res, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'i', Text: "i"}))
 	updated := res.(Model)
 	if !updated.volumePicker.Active {
-		t.Fatalf("volume picker should be active after ctrl+a on server detail")
+		t.Fatalf("volume picker should be active after the attach key on server detail")
 	}
 }
 
-func TestServerDetailCtrlAWithoutBlockStorageIsGated(t *testing.T) {
+func TestServerDetailAttachKeyWithoutBlockStorageIsGated(t *testing.T) {
 	m := newTestModel("dev", false)
 	m.client = &cloud.Client{}
 	m.view = viewServerDetail
 	m.serverDetail = testServerDetailWithServer("srv-1", "srv-1")
 
-	res, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModCtrl}))
+	res, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'i', Text: "i"}))
 	updated := res.(Model)
 	if updated.volumePicker.Active {
 		t.Fatalf("volume picker should not open when block storage is unavailable")

@@ -162,6 +162,9 @@ func (m Model) updateAllViews(msg tea.Msg) (Model, tea.Cmd) {
 	case viewServiceCatalog:
 		m.serviceCatalog, cmd = m.serviceCatalog.Update(msg)
 		cmds = append(cmds, cmd)
+	case viewAuditLog:
+		m.auditLog, cmd = m.auditLog.Update(msg)
+		cmds = append(cmds, cmd)
 	case viewUserManagement:
 		m.userManagement, cmd = m.userManagement.Update(msg)
 		cmds = append(cmds, cmd)

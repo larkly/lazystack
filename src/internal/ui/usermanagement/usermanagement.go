@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -23,20 +24,45 @@ type usersErrMsg struct {
 	err error
 }
 
+// userMutatedMsg reports a toggle or delete. err is the mutation's own
+// failure; refreshErr is a failure of the follow-up list, which must not
+// hide a mutation that did succeed.
+type userMutatedMsg struct {
+	action     actionKind
+	user       compute.User
+	err        error
+	items      []compute.User
+	refreshErr error
+}
+
+type actionKind int
+
+const (
+	actionToggle actionKind = iota + 1
+	actionDelete
+)
+
+// pendingAction is a mutation waiting for explicit confirmation.
+type pendingAction struct {
+	kind actionKind
+	user compute.User
+}
+
 // Model is the user management viewer.
 type Model struct {
-	providerClient   *gophercloud.ProviderClient
-	endpointOpts     gophercloud.EndpointOpts
-	items            []compute.User
-	cursor           int
-	scroll           int
-	width            int
-	height           int
-	loading          bool
-	spinner          spinner.Model
-	err              string
-	confirmingDelete string // user ID pending delete confirmation
-	toggling         string // user ID being toggled
+	providerClient *gophercloud.ProviderClient
+	endpointOpts   gophercloud.EndpointOpts
+	items          []compute.User
+	cursor         int
+	scroll         int
+	width          int
+	height         int
+	loading        bool
+	spinner        spinner.Model
+	err            string
+	notice         string         // result of the last mutation, or why it was refused
+	pending        *pendingAction // mutation awaiting confirmation
+	busy           bool           // a mutation request is in flight
 }
 
 // New creates a user management model.
@@ -61,24 +87,38 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case usersLoadedMsg:
 		m.loading = false
-		m.items = msg.items
+		m.setItems(msg.items)
 		m.err = ""
-		m.confirmingDelete = ""
-		m.toggling = ""
-		if m.cursor >= len(m.items) && len(m.items) > 0 {
-			m.cursor = len(m.items) - 1
-		}
+		m.pending = nil
+		m.busy = false
 		return m, nil
 
 	case usersErrMsg:
 		m.loading = false
 		m.err = msg.err.Error()
-		m.confirmingDelete = ""
-		m.toggling = ""
+		m.pending = nil
+		m.busy = false
+		return m, nil
+
+	case userMutatedMsg:
+		m.loading = false
+		m.busy = false
+		m.notice = mutationNotice(msg)
+		if msg.err != nil {
+			return m, nil
+		}
+		if msg.refreshErr == nil {
+			m.err = ""
+			m.setItems(msg.items)
+			return m, nil
+		}
+		// The change went through but the list could not be reloaded:
+		// reflect it locally rather than showing stale state.
+		m.setItems(applyMutation(m.items, msg))
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.loading {
+		if m.loading || m.busy {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -91,15 +131,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// If confirming a delete
-		if m.confirmingDelete != "" {
+		if m.pending != nil {
 			switch {
-			case msg.String() == "y":
-				uid := m.confirmingDelete
-				m.confirmingDelete = ""
-				return m, m.doDelete(uid)
-			case msg.String() == "n" || key.Matches(msg, shared.Keys.Back):
-				m.confirmingDelete = ""
+			case key.Matches(msg, shared.Keys.Confirm):
+				p := *m.pending
+				m.pending = nil
+				m.busy = true
+				m.notice = ""
+				return m, tea.Batch(m.spinner.Tick, m.doAction(p))
+			case key.Matches(msg, shared.Keys.Deny, shared.Keys.Back):
+				m.pending = nil
 				return m, nil
 			}
 			return m, nil
@@ -146,18 +187,104 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, shared.Keys.Enter):
-			if m.cursor >= 0 && m.cursor < len(m.items) {
-				return m, m.doToggle(m.items[m.cursor])
-			}
+			m.request(actionToggle)
 
-		case msg.String() == "d":
-			if m.cursor >= 0 && m.cursor < len(m.items) {
-				m.confirmingDelete = m.items[m.cursor].ID
-			}
+		case key.Matches(msg, shared.Keys.Delete):
+			m.request(actionDelete)
 		}
 	}
 
 	return m, nil
+}
+
+// request asks for confirmation of an action on the selected user, unless
+// it would disable or delete the identity lazystack is authenticated as
+// (which would revoke the session's own token).
+func (m *Model) request(kind actionKind) {
+	if m.busy || m.cursor < 0 || m.cursor >= len(m.items) {
+		return
+	}
+	u := m.items[m.cursor]
+	removesAccess := kind == actionDelete || u.Enabled
+	if removesAccess && u.ID != "" && u.ID == m.currentUserID() {
+		m.notice = fmt.Sprintf("Refusing to %s %s: it is the user this session is authenticated as.",
+			actionVerb(kind, u), userLabel(u))
+		return
+	}
+	m.notice = ""
+	m.pending = &pendingAction{kind: kind, user: u}
+}
+
+// currentUserID returns the authenticated user's ID from the Keystone token,
+// or "" when it cannot be determined.
+func (m Model) currentUserID() string {
+	if m.providerClient == nil {
+		return ""
+	}
+	result, ok := m.providerClient.GetAuthResult().(interface {
+		ExtractUser() (*tokens.User, error)
+	})
+	if !ok {
+		return ""
+	}
+	user, err := result.ExtractUser()
+	if err != nil || user == nil {
+		return ""
+	}
+	return user.ID
+}
+
+func (m *Model) setItems(items []compute.User) {
+	m.items = items
+	if m.cursor >= len(m.items) && len(m.items) > 0 {
+		m.cursor = len(m.items) - 1
+	}
+}
+
+func actionVerb(kind actionKind, u compute.User) string {
+	switch {
+	case kind == actionDelete:
+		return "delete"
+	case u.Enabled:
+		return "disable"
+	default:
+		return "enable"
+	}
+}
+
+func userLabel(u compute.User) string {
+	if u.Name == "" {
+		return u.ID
+	}
+	return fmt.Sprintf("%s (%s)", u.Name, u.ID)
+}
+
+func mutationNotice(msg userMutatedMsg) string {
+	verb := actionVerb(msg.action, msg.user)
+	if msg.err != nil {
+		return fmt.Sprintf("Failed to %s %s: %v", verb, userLabel(msg.user), msg.err)
+	}
+	past := map[string]string{"delete": "Deleted", "disable": "Disabled", "enable": "Enabled"}[verb]
+	notice := fmt.Sprintf("%s %s.", past, userLabel(msg.user))
+	if msg.refreshErr != nil {
+		notice += fmt.Sprintf(" Refreshing the user list failed: %v", msg.refreshErr)
+	}
+	return notice
+}
+
+// applyMutation updates items locally after a successful mutation.
+func applyMutation(items []compute.User, msg userMutatedMsg) []compute.User {
+	out := make([]compute.User, 0, len(items))
+	for _, u := range items {
+		if u.ID == msg.user.ID {
+			if msg.action == actionDelete {
+				continue
+			}
+			u.Enabled = !msg.user.Enabled
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 func (m Model) visibleRows() int {
@@ -173,14 +300,21 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	title := shared.StyleTitle.Render("User Management")
-	if m.loading {
+	if m.loading || m.busy {
 		title += " " + m.spinner.View()
 	}
 	b.WriteString(title + "\n")
 
-	if m.confirmingDelete != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorWarning).Render(
-			"  Really delete user? (y/n) ") + "\n\n")
+	if m.pending != nil {
+		u := m.pending.user
+		prompt := fmt.Sprintf("  Really %s user %s? %s confirm • %s cancel ",
+			actionVerb(m.pending.kind, u), userLabel(u),
+			shared.Keys.Confirm.Help().Key, shared.Keys.Deny.Help().Key)
+		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorWarning).Render(prompt) + "\n\n")
+	}
+
+	if m.notice != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorWarning).Render("  "+m.notice) + "\n\n")
 	}
 
 	if m.err != "" {
@@ -241,8 +375,9 @@ func (m Model) View() string {
 
 	// Footer
 	b.WriteString("\n")
-	footer := fmt.Sprintf("%d users — enter toggle • d delete • esc back • R refresh",
-		len(m.items))
+	footer := fmt.Sprintf("%d users — %s toggle • %s delete • %s back • %s refresh",
+		len(m.items), shared.Keys.Enter.Help().Key, shared.Keys.Delete.Help().Key,
+		shared.Keys.Back.Help().Key, shared.Keys.Refresh.Help().Key)
 	b.WriteString(shared.StyleHelp.Render(footer))
 
 	return b.String()
@@ -250,7 +385,13 @@ func (m Model) View() string {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
-	return "↑↓ select • enter toggle • d delete • esc back • R refresh • ? help"
+	if m.pending != nil {
+		return fmt.Sprintf("%s confirm • %s/%s cancel",
+			shared.Keys.Confirm.Help().Key, shared.Keys.Deny.Help().Key, shared.Keys.Back.Help().Key)
+	}
+	return fmt.Sprintf("↑↓ select • %s toggle • %s delete • %s back • %s refresh • ? help",
+		shared.Keys.Enter.Help().Key, shared.Keys.Delete.Help().Key,
+		shared.Keys.Back.Help().Key, shared.Keys.Refresh.Help().Key)
 }
 
 // ForceRefresh triggers a reload.
@@ -277,38 +418,25 @@ func (m Model) fetch() tea.Cmd {
 	}
 }
 
-func (m Model) doToggle(u compute.User) tea.Cmd {
-	pc := m.providerClient
-	eo := m.endpointOpts
-	uid := u.ID
-	wantEnabled := !u.Enabled
-	return func() tea.Msg {
-		err := compute.SetUserEnabled(context.Background(), pc, eo, uid, wantEnabled)
-		if err != nil {
-			return usersErrMsg{err: err}
-		}
-		// Re-fetch to get updated state
-		items, err := compute.ListUsers(context.Background(), pc, eo)
-		if err != nil {
-			return usersErrMsg{err: err}
-		}
-		return usersLoadedMsg{items: items}
-	}
-}
-
-func (m Model) doDelete(uid string) tea.Cmd {
+// doAction performs a confirmed toggle or delete, then reloads the list.
+func (m Model) doAction(p pendingAction) tea.Cmd {
 	pc := m.providerClient
 	eo := m.endpointOpts
 	return func() tea.Msg {
-		err := compute.DeleteUser(context.Background(), pc, eo, uid)
-		if err != nil {
-			return usersErrMsg{err: err}
+		ctx := context.Background()
+		var err error
+		switch p.kind {
+		case actionToggle:
+			err = compute.SetUserEnabled(ctx, pc, eo, p.user.ID, !p.user.Enabled)
+		case actionDelete:
+			err = compute.DeleteUser(ctx, pc, eo, p.user.ID)
 		}
-		items, err := compute.ListUsers(context.Background(), pc, eo)
+		msg := userMutatedMsg{action: p.kind, user: p.user, err: err}
 		if err != nil {
-			return usersErrMsg{err: err}
+			return msg
 		}
-		return usersLoadedMsg{items: items}
+		msg.items, msg.refreshErr = compute.ListUsers(ctx, pc, eo)
+		return msg
 	}
 }
 

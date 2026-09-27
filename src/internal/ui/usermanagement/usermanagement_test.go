@@ -18,11 +18,11 @@ func TestUpdateNavigationConfirmationAndViews(t *testing.T) {
 	m := New(nil, gophercloud.EndpointOpts{})
 	m.SetSize(150, 8)
 	m.cursor = 9
-	m.confirmingDelete = "old"
-	m.toggling = "old"
+	m.pending = &pendingAction{kind: actionDelete, user: compute.User{ID: "old"}}
+	m.busy = true
 	m.err = "old error"
 	m, _ = m.Update(usersLoadedMsg{items: []compute.User{{ID: "a", Name: "Alice", Email: "alice@example.test", Enabled: true}, {ID: "b", Name: "Bob"}, {ID: "c", Name: "Carol"}}})
-	if m.loading || m.cursor != 2 || m.err != "" || m.confirmingDelete != "" || m.toggling != "" {
+	if m.loading || m.cursor != 2 || m.err != "" || m.pending != nil || m.busy {
 		t.Fatal("load did not clear operation state and clamp")
 	}
 	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
@@ -36,8 +36,8 @@ func TestUpdateNavigationConfirmationAndViews(t *testing.T) {
 	if m.cursor != 1 {
 		t.Fatal("down")
 	}
-	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
-	if m.confirmingDelete != "b" || !strings.Contains(m.View(), "Really delete user") {
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Mod: tea.ModCtrl}))
+	if m.pending == nil || m.pending.user.ID != "b" || !strings.Contains(m.View(), "Really delete user") {
 		t.Fatal("delete not confirmed first")
 	}
 	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
@@ -45,12 +45,12 @@ func TestUpdateNavigationConfirmationAndViews(t *testing.T) {
 		t.Fatal("navigation escaped confirmation")
 	}
 	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Text: "n"}))
-	if m.confirmingDelete != "" {
+	if m.pending != nil {
 		t.Fatal("cancel delete")
 	}
-	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Mod: tea.ModCtrl}))
 	m, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Text: "y"}))
-	if cmd == nil || m.confirmingDelete != "" {
+	if cmd == nil || m.pending != nil {
 		t.Fatal("confirm delete command")
 	}
 	m, _ = m.Update(usersErrMsg{err: errors.New("permission denied")})
@@ -115,23 +115,29 @@ func TestUserOperationsHTTP(t *testing.T) {
 				m := New(pc, gophercloud.EndpointOpts{Region: "test-region"})
 				cmd := m.fetch()
 				if operation == "toggle" {
-					cmd = m.doToggle(compute.User{ID: "u", Enabled: true})
+					cmd = m.doAction(pendingAction{kind: actionToggle, user: compute.User{ID: "u", Enabled: true}})
 				}
 				if operation == "delete" {
-					cmd = m.doDelete("u")
+					cmd = m.doAction(pendingAction{kind: actionDelete, user: compute.User{ID: "u"}})
 				}
 				msg := cmd()
-				if e, ok := msg.(usersErrMsg); ok {
-					t.Logf("operation error: %v", e.err)
+				var items []compute.User
+				var opErr error
+				switch got := msg.(type) {
+				case usersErrMsg:
+					opErr = got.err
+				case usersLoadedMsg:
+					items = got.items
+				case userMutatedMsg:
+					opErr, items = got.err, got.items
 				}
 				if fail {
-					if _, ok := msg.(usersErrMsg); !ok || len(methods) != 1 {
+					if opErr == nil || len(methods) != 1 {
 						t.Fatalf("want error without follow-up: %#v %v", msg, methods)
 					}
 					return
 				}
-				got, ok := msg.(usersLoadedMsg)
-				if !ok || len(got.items) != 1 || got.items[0].Name != "Alice" || got.items[0].Enabled {
+				if opErr != nil || len(items) != 1 || items[0].Name != "Alice" || items[0].Enabled {
 					t.Fatalf("result %#v", msg)
 				}
 				want := "GET"

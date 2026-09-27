@@ -1590,9 +1590,10 @@ func (m Model) Hints() string {
 		return "\u2191\u2193 scroll interfaces \u2022 " + base
 	case focusVolumes:
 		if m.blockClient == nil {
-			return "\u2191\u2193 select \u2022 enter detail \u2022 ^b assign FIP \u2022 " + base
+			return "\u2191\u2193 select \u2022 enter detail \u2022 " + shared.Keys.AssignFIP.Help().Key + " assign FIP \u2022 " + base
 		}
-		return "\u2191\u2193 select \u2022 enter detail \u2022 ^a attach volume \u2022 ^t detach \u2022 ^b assign FIP \u2022 " + base
+		return "\u2191\u2193 select \u2022 enter detail \u2022 " + shared.Keys.Attach.Help().Key + " attach volume \u2022 ^t detach \u2022 " +
+			shared.Keys.AssignFIP.Help().Key + " assign FIP \u2022 " + base
 	case focusConsole:
 		return "\u2191\u2193 scroll log \u2022 g top \u2022 G bottom \u2022 " + base
 	case focusActions:
