@@ -137,7 +137,7 @@ func (m Model) choose(idx int) (Model, tea.Cmd) {
 	}
 	e := m.entries[idx]
 	m.Active = false
-	return m, func() tea.Msg { return ChosenMsg{Label: e.Label, Value: e.Value} }
+	return m, func() tea.Msg { return ChosenMsg(e) }
 }
 
 func (m *Model) SetSize(w, h int) {

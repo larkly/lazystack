@@ -99,3 +99,52 @@ func TestKeyDiscoveryFilteringAndPicker(t *testing.T) {
 		t.Fatal("escape should cancel modal")
 	}
 }
+
+func TestKeyPickerFilterAcceptsJK(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"alpha", "jack", "kube-a", "kube-b"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("test fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := New("web", nil, nil, nil, "", false)
+	m.SetSize(80, 40)
+	m.focusField = fieldKeyPath
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if !m.pickerOpen {
+		t.Fatal("picker not open")
+	}
+	for _, r := range "jack" {
+		m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+	}
+	if got := m.pickerFilter.Value(); got != "jack" {
+		t.Fatalf("filter=%q", got)
+	}
+	m.pickerFilter.SetValue("")
+	for _, r := range "kube" {
+		m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+	}
+	if got := m.pickerFilter.Value(); got != "kube" {
+		t.Fatalf("filter=%q", got)
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	if m.pickerCursor != 1 {
+		t.Fatalf("down arrow cursor=%d", m.pickerCursor)
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if m.pickerOpen || m.keyInput.Value() != filepath.Join(dir, "kube-b") {
+		t.Fatalf("enter selected %q", m.keyInput.Value())
+	}
+	m.focusField = fieldKeyPath
+	m.openPicker()
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if !m.Active || m.pickerOpen || m.keyInput.Value() != filepath.Join(dir, "kube-b") {
+		t.Fatal("escape should close picker without changing the key")
+	}
+}

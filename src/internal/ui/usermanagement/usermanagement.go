@@ -180,7 +180,7 @@ func (m Model) View() string {
 
 	if m.confirmingDelete != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorWarning).Render(
-			fmt.Sprintf("  Really delete user? (y/n) ")) + "\n\n")
+			"  Really delete user? (y/n) ") + "\n\n")
 	}
 
 	if m.err != "" {

@@ -48,7 +48,7 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 - **Column sorting** on all list views
 - **Client-side filtering** with `/`
 - **Bulk select** with `space` for multi-server operations
-- **Self-update** — `--update` flag to update to latest release
+- **Self-update** — `--update` flag to update to the latest release; the download must match a `SHA256SUMS` signed with the project's release key (see [SECURITY.md](SECURITY.md#release-signing-and-self-update-verification))
 - **Solarized Dark** color scheme with status-aware coloring
 
 ## Installation
@@ -83,37 +83,103 @@ sudo rpm -i lazystack-*.rpm
 
 ### Pre-built binaries
 
-Grab the latest release for your platform from the [releases page](https://github.com/larkly/lazystack/releases/latest).
+Each release publishes raw binaries named `lazystack-<os>-<arch>` for
+`linux-amd64`, `linux-arm64`, `darwin-amd64` and `darwin-arm64`, plus a
+`SHA256SUMS` manifest. Pick your asset, download it with its checksum, verify
+and install it (example for Linux on x86-64):
+
+```bash
+asset=lazystack-linux-amd64
+curl -fLO "https://github.com/larkly/lazystack/releases/latest/download/${asset}"
+curl -fLO "https://github.com/larkly/lazystack/releases/latest/download/SHA256SUMS"
+sha256sum --ignore-missing -c SHA256SUMS
+mkdir -p ~/.local/bin
+install -m 0755 "$asset" ~/.local/bin/lazystack
+lazystack --version
+```
+
+On macOS, check the hash with `shasum -a 256 "$asset"` against the matching
+line in `SHA256SUMS`. Any directory on your `PATH` works in place of
+`~/.local/bin`. Release signing is described in [SECURITY.md](SECURITY.md).
 
 ### From source
 
-```bash
-cd src
-make build
-```
-
-### With `go install`
+Requires Go 1.26+ and git. The Go module lives in `src/`:
 
 ```bash
-go install github.com/larkly/lazystack/cmd/lazystack@latest
+git clone https://github.com/larkly/lazystack.git
+cd lazystack/src
+make build                 # writes ./lazystack, version from git describe
+./lazystack --version
+mkdir -p ~/.local/bin
+install -m 0755 lazystack ~/.local/bin/lazystack
 ```
+
+`go build -o lazystack ./cmd/lazystack` from `src/` works too (the version is
+then reported as `dev`). Running `make build` from the repository root writes
+`bin/lazystack` instead. `go install github.com/larkly/lazystack/...@latest`
+is **not** supported: the module is not at the repository root, so the Go
+toolchain cannot resolve it.
 
 ### Requirements
 
-- Go 1.26+ (build only)
+- Go 1.26+ (build from source only)
 - OpenStack cloud with Keystone v3 and Nova v2.1+
 - A valid `clouds.yaml`
 
 ## Configuration
 
-lazystack reads `clouds.yaml` from these locations (first match wins):
+### clouds.yaml
 
-1. `./clouds.yaml` (current directory)
-2. `$OS_CLIENT_CONFIG_FILE`
-3. `~/.config/openstack/clouds.yaml`
-4. `/etc/openstack/clouds.yaml`
+lazystack uses your standard OpenStack `clouds.yaml`. It looks for it in this
+order:
 
-No additional configuration is needed. If only one cloud is defined, lazystack connects automatically.
+1. `$OS_CLIENT_CONFIG_FILE`, if set. This file is then the only one used: if it
+   is missing, unreadable, invalid, or defines no clouds, lazystack reports an
+   error and there is no fallback to the locations below.
+2. `$XDG_CONFIG_HOME/openstack/clouds.yaml` (`~/.config/openstack/clouds.yaml`
+   when `XDG_CONFIG_HOME` is unset or not an absolute path)
+3. `/etc/openstack/clouds.yaml`
+4. `./clouds.yaml` in the current directory, searched last so that a file in
+   whatever directory you start lazystack from cannot override your real
+   configuration
+
+Without `OS_CLIENT_CONFIG_FILE`, a location whose file does not exist or
+defines no clouds is skipped and the search continues. The first file that
+defines at least one cloud is used both for the cloud list and for
+authentication (a `secure.yaml` is read from the same directory). A file that
+exists but cannot be read or parsed stops the search with an error rather than
+silently falling through.
+
+If only one cloud is defined, lazystack connects to it automatically; use
+`--pick-cloud` to always show the picker or `--cloud NAME` to skip it.
+
+### Application settings (optional)
+
+No configuration file is required. Settings are read from
+`~/.config/lazystack/config.yaml` when it exists, and defaults are used
+otherwise. Press `Ctrl+K` inside lazystack to edit general settings, colors
+and keybindings; changes are applied immediately and saved to that file.
+
+```yaml
+general:
+  refresh_interval: 5          # seconds (default 5)
+  idle_timeout: 0              # minutes without input before polling pauses; 0 = never
+  plain_mode: false            # ASCII instead of Unicode status icons
+  check_for_updates: true      # check GitHub for a newer release on startup
+  update_check_interval: 24    # hours between update checks
+  always_pick_cloud: false
+  ignore_ssh_host_keys: false
+colors:
+  primary: "#7D56F4"           # hex colors; unset entries use the default theme
+keybindings:
+  attach: "i"                  # action name: comma-separated keys
+audit:
+  enabled: true                # record actions to ~/.local/share/lazystack/audit.log (view with T)
+```
+
+Command-line flags override the file for the current run. Ctrl+A and Ctrl+B
+are reserved for GNU Screen and tmux and cannot be used as keybindings.
 
 ### CLI flags
 
@@ -123,6 +189,8 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `--cloud NAME` | | Connect directly to named cloud, skip picker |
 | `--refresh N` | `5` | Auto-refresh interval in seconds |
 | `--idle-timeout N` | `0` | Pause polling after N minutes of no input (0 = disabled) |
+| `--plain` | `false` | Use plain ASCII status indicators instead of Unicode icons |
+| `--debug` | `false` | Write a debug log (recreated each run, path printed at startup) to `~/.cache/lazystack/debug.log` on Linux (under `$XDG_CACHE_HOME` if set), `~/Library/Caches/lazystack/debug.log` on macOS, or to `$LAZYSTACK_DEBUG_LOG` when set |
 | `--no-check-update` | `false` | Skip the automatic update check on startup |
 | `--update` | `false` | Self-update to the latest release |
 | `--version` | | Print version and exit |
@@ -138,10 +206,14 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `C` | Switch cloud |
 | `P` | Switch project |
 | `Q` | Quota overlay |
-| `1-9` / `Left` / `Right` | Switch tab |
+| `1-9` / `Left` / `Right` (`h` / `l`) | Switch tab (from list views) |
 | `R` | Force refresh |
 | `s` / `S` | Sort column / reverse sort |
 | `PgUp` / `PgDn` | Page up / down |
+| `Y` | Copy field (ID, IP, name, …) |
+| `H` | Hypervisors (admin) |
+| `B` | Browse service catalog |
+| `Ctrl+K` | Configuration editor |
 | `Ctrl+R` | Restart app |
 
 ### Server list
@@ -152,9 +224,10 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Enter` | View detail |
 | `Space` | Select for bulk action |
 | `/` | Filter |
+| `f` / `F` | Save current filter / load next saved filter |
 | `Ctrl+N` | Create server |
 | `Ctrl+D` | Delete |
-| `Ctrl+O` | Soft reboot |
+| `Ctrl+O` / `Ctrl+P` | Soft / hard reboot |
 | `o` | Stop / start |
 | `p` | Pause / unpause |
 | `Ctrl+Z` | Suspend / resume |
@@ -162,7 +235,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+L` | Lock / unlock |
 | `Ctrl+W` | Rescue / unrescue |
 | `Ctrl+F` | Resize |
-| `Ctrl+A` | Attach volume |
+| `i` | Attach volume |
 | `Ctrl+U` | Assign floating IP |
 | `r` | Rename |
 | `Ctrl+G` | Rebuild with new image |
@@ -175,6 +248,10 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `L` | Console log |
 | `T` | Audit trail |
 | `a` | Action history |
+| `W` | Retrieve admin password |
+| `A` | Admin actions |
+| `M` | Server metadata |
+| `U` | User management |
 
 ### Server detail
 
@@ -191,7 +268,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Ctrl+W` | Rescue / unrescue |
 | `Ctrl+F` | Resize |
 | `Ctrl+Y` / `Ctrl+X` | Confirm / revert resize |
-| `Ctrl+A` | Attach volume |
+| `i` | Attach volume |
 | `Ctrl+U` | Assign floating IP |
 | `r` | Rename |
 | `Ctrl+G` | Rebuild with new image |
@@ -207,6 +284,10 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `L` | Console log |
 | `T` | Audit trail |
 | `a` | Action history |
+| `W` | Retrieve admin password |
+| `A` | Admin actions |
+| `M` | Server metadata |
+| `U` | User management |
 | `Esc` | Back to list |
 
 ### Volumes
@@ -216,8 +297,8 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Enter` | View detail |
 | `Ctrl+N` | Create volume |
 | `Ctrl+D` | Delete |
-| `Ctrl+A` | Attach to server (from detail) |
-| `Ctrl+T` | Detach (from detail) |
+| `i` | Attach to server |
+| `Ctrl+T` | Detach |
 | `Y` | Copy field (ID, name) |
 
 ### Floating IPs
@@ -254,7 +335,7 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 | `Enter` | View detail (interfaces) |
 | `Ctrl+N` | Create router |
 | `Ctrl+D` | Delete router |
-| `Ctrl+A` | Add interface (from detail) |
+| `i` | Add interface (from detail) |
 | `Ctrl+T` | Remove interface (from detail) |
 | `Y` | Copy field (ID, name, gateway IP, interface subnet/port/IP) |
 
@@ -279,8 +360,14 @@ No additional configuration is needed. If only one cloud is defined, lazystack c
 
 | Key | Action |
 |-----|--------|
-| `Enter` | View detail |
-| `Ctrl+D` | Delete image |
+| `Tab` / `Shift+Tab` | Cycle panes |
+| `/` | Search / filter |
+| `Space` | Select for bulk delete |
+| `Ctrl+N` | Upload image (list pane) |
+| `Ctrl+D` | Delete image(s) |
+| `d` | Deactivate / reactivate (list or info pane) |
+| `Ctrl+G` | Download image (properties pane) |
+| `Enter` | Edit image (info pane) / open server (servers pane) |
 | `Y` | Copy field (ID, name, checksum, owner, attached server ID) |
 
 ### Create form

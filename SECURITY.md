@@ -31,3 +31,74 @@ Out of scope:
 ## Supported Versions
 
 Only the latest release line of this project receives security updates.
+
+## Release Signing and Self-Update Verification
+
+Every release publishes `SHA256SUMS` (one SHA-256 line per released binary and
+package) and `SHA256SUMS.sig`, a detached Ed25519 signature of `SHA256SUMS`
+(base64-encoded, one line).
+
+`lazystack --update` trusts a download only if all of the following hold, and
+refuses the update otherwise:
+
+1. `SHA256SUMS.sig` exists next to `SHA256SUMS` in the release.
+2. The signature verifies against the Ed25519 public key compiled into the
+   running binary (`ReleaseSigningPublicKey` in
+   `src/internal/selfupdate/signature.go`).
+3. The downloaded binary's SHA-256 matches its line in the signed `SHA256SUMS`.
+
+There is no fallback: a release without a signature, with a malformed
+signature, or signed by any other key is rejected. Releases published before
+signing was introduced cannot be installed with `--update`; install those
+from the releases page or a package manager instead. A build whose embedded
+key is still the empty placeholder rejects every update.
+
+### What this protects against, and what it does not
+
+The signature protects against substituted or modified release assets (for
+example a replaced binary or an edited `SHA256SUMS`) by anyone who does not
+hold the signing key.
+
+It does **not** protect against a compromised signer: anyone who can run the
+release workflow with the `RELEASE_SIGNING_KEY` secret, or who obtains that
+secret, or who gets malicious code into a tagged commit that the workflow
+builds, can produce a validly signed malicious release. The signature proves
+who published the checksums, not that the build is benign. Homebrew, AUR,
+`.deb` and `.rpm` installs are verified by those package managers, not by
+this mechanism.
+
+### Maintainer setup
+
+1. Generate a key pair (offline, on a trusted machine):
+
+   ```bash
+   cd src && go run ./internal/selfupdate/cmd/releasesign keygen
+   ```
+
+2. Store the printed `RELEASE_SIGNING_KEY` value (base64 of the 32-byte
+   Ed25519 seed) as the `RELEASE_SIGNING_KEY` repository secret, restricted to
+   the release workflow. Keep an offline backup; never commit it.
+3. Set `ReleaseSigningPublicKey` in `src/internal/selfupdate/signature.go` to
+   the printed public key and commit that before tagging.
+
+The release job fails, and nothing is published, if the secret is missing or
+if its public key does not match `ReleaseSigningPublicKey` at the tag being
+released.
+
+Installed clients trust only the key they were built with. After rotating the
+key (new secret plus new `ReleaseSigningPublicKey`), clients built with the old
+key reject the new releases, so their users must reinstall once from the
+releases page or a package manager. Rotate only when the key is lost or
+compromised.
+
+### Verifying a download manually
+
+With OpenSSL 3 and the base64 public key from `signature.go` in `$PUB`:
+
+```bash
+{ printf '302a300506032b6570032100' | xxd -r -p; printf '%s' "$PUB" | base64 -d; } > release.der
+openssl pkey -pubin -inform DER -in release.der -out release.pem
+base64 -d SHA256SUMS.sig > SHA256SUMS.sig.bin
+openssl pkeyutl -verify -pubin -inkey release.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig.bin
+sha256sum --ignore-missing -c SHA256SUMS
+```

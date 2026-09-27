@@ -115,7 +115,7 @@ func TestConfirmedServerActionsHTTPAndAudit(t *testing.T) {
 						}
 						w.Header().Set("Content-Type", "application/json")
 						if failed {
-							w.WriteHeader(409)
+							w.WriteHeader(http.StatusConflict)
 							fmt.Fprint(w, `{"conflictingRequest":{"message":"fixture failure"}}`)
 							return
 						}
@@ -205,7 +205,7 @@ func TestBulkMixedActionsAggregateErrorsAndContinue(t *testing.T) {
 			return
 		}
 		checkJSON(t, body, `{"os-stop":null}`)
-		http.Error(w, "cannot stop "+r.URL.Path, 409)
+		http.Error(w, "cannot stop "+r.URL.Path, http.StatusConflict)
 	})
 	_, cmd := m.executeAction(modal.ConfirmAction{Action: "stop", Servers: []modal.ServerRef{{ID: "bad1", Name: "first"}, {ID: "good", Name: "middle", Action: "start"}, {ID: "bad2", Name: "last"}}})
 	msg, ok := cmd().(shared.ServerActionErrMsg)
@@ -262,19 +262,19 @@ func TestDeleteWithVolumesWaitsBeforeDeleting(t *testing.T) {
 						fmt.Fprintf(w, `{"volume":{"id":"vol","status":%q}}`, status)
 					case strings.Contains(r.URL.Path, "os-volume_attachments"):
 						if mode == "volume-errors" {
-							http.Error(w, "detach failed", 409)
+							http.Error(w, "detach failed", http.StatusConflict)
 							return
 						}
 						w.WriteHeader(202)
 					case r.URL.Path == "/servers/id":
 						if mode == "server-error" {
-							http.Error(w, "server failed", 409)
+							http.Error(w, "server failed", http.StatusConflict)
 							return
 						}
 						w.WriteHeader(204)
 					case r.URL.Path == "/volumes/vol":
 						if mode == "volume-errors" {
-							http.Error(w, "delete failed", 409)
+							http.Error(w, "delete failed", http.StatusConflict)
 							return
 						}
 						w.WriteHeader(202)
