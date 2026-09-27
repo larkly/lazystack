@@ -982,6 +982,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = viewServerList
 		m.statusBar.CurrentView = "serverlist"
 		m.statusBar.Hint = m.serverList.Hints()
+		// Shown once per connect (until the next key press), never on refresh.
+		m.statusBar.StickyHint = msg.Warning
 		cmds := []tea.Cmd{m.serverList.Init(), m.refreshTickCmd()}
 		// Background-fetch accessible projects for project switching
 		if msg.ProviderClient != nil {
@@ -1066,6 +1068,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ProviderClient:     client.ProviderClient,
 				EndpointOpts:       client.EndpointOpts,
 				Region:             client.Region,
+				Warning:            client.CapabilityWarning,
 			}
 		}
 

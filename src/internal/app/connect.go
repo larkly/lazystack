@@ -28,6 +28,7 @@ func (m Model) connectToCloud(name string) tea.Cmd {
 			ProviderClient:     client.ProviderClient,
 			EndpointOpts:       client.EndpointOpts,
 			Region:             client.Region,
+			Warning:            client.CapabilityWarning,
 		}
 	}
 }

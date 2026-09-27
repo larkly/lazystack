@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/larkly/lazystack/internal/shared"
 
@@ -15,37 +15,67 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack"
 	"github.com/gophercloud/gophercloud/v2/openstack/config"
 	"github.com/gophercloud/gophercloud/v2/openstack/config/clouds"
+	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
+)
+
+const (
+	// novaCeilingMicroversion is the newest Nova microversion lazystack is
+	// known to work with.
+	novaCeilingMicroversion = "2.100"
+	// novaBaseMicroversion is the first microversion of the v2.1 API, which
+	// every Nova that serves v2.1 accepts. It is used whenever the supported
+	// range cannot be determined.
+	novaBaseMicroversion = "2.1"
 )
 
 // resolveMicroversion determines which Nova microversion to use.
 // It checks OS_COMPUTE_API_VERSION first (user override), then falls back
 // to runtime negotiation. Returns (maxVersion, usedVersion, degradationWarning).
+//
+// The override must be a plain Nova microversion "X.Y" of at least 2.1: no
+// whitespace, sign, "v" prefix, leading zeros or third component. Anything
+// else (including "latest") is ignored with a warning and the version is
+// negotiated instead; nothing is silently truncated or normalised. A valid
+// override above the ceiling is capped at 2.100.
 func resolveMicroversion(ctx context.Context, compute *gophercloud.ServiceClient) (string, string, string) {
-	// Check for user-specified microversion via environment variable
-	if userVersion := os.Getenv("OS_COMPUTE_API_VERSION"); userVersion != "" {
-		// Validate microversion format (X.Y or X.Y.Z)
-		if _, _, err := parseMicroversion(userVersion); err != nil {
-			shared.Debugf("[cloud] resolveMicroversion: invalid OS_COMPUTE_API_VERSION=%q: %v, ignoring", userVersion, err)
-		} else {
-			ceiling := "2.100"
-			used := minMicroversion(userVersion, ceiling)
-			if used != userVersion {
-				shared.Debugf("[cloud] resolveMicroversion: user requested %s, capped at %s", userVersion, used)
-			}
-			shared.Debugf("[cloud] resolveMicroversion: using user-specified microversion %s", used)
-			return "user-specified", used, ""
-		}
+	userVersion := os.Getenv("OS_COMPUTE_API_VERSION")
+	if userVersion == "" {
+		return negotiateNovaMicroversion(ctx, compute)
 	}
-	return negotiateNovaMicroversion(ctx, compute)
+	if err := validateNovaMicroversion(userVersion); err != nil {
+		shared.Debugf("[cloud] resolveMicroversion: invalid OS_COMPUTE_API_VERSION=%q: %v, ignoring", userVersion, err)
+		maxVersion, used, warning := negotiateNovaMicroversion(ctx, compute)
+		ignored := fmt.Sprintf("Ignoring OS_COMPUTE_API_VERSION=%q (expected a Nova microversion such as 2.60).", userVersion)
+		if warning != "" {
+			ignored += " " + warning
+		}
+		return maxVersion, used, ignored
+	}
+	used := minMicroversion(userVersion, novaCeilingMicroversion)
+	if used != userVersion {
+		shared.Debugf("[cloud] resolveMicroversion: user requested %s, capped at %s", userVersion, used)
+	}
+	shared.Debugf("[cloud] resolveMicroversion: using user-specified microversion %s", used)
+	return "user-specified", used, ""
 }
 
 // negotiateNovaMicroversion queries the Nova API for the max supported microversion,
 // caps at 2.100 (our known-good ceiling), and returns the negotiated version.
 // Returns (maxVersion, usedVersion, degradationWarning).
+//
+// If discovery fails (HTTP error, undecodable body, missing or malformed
+// version) the base microversion 2.1 is used, since assuming the ceiling
+// would make every later request fail on an older Nova, and a warning is
+// returned so the degradation is visible.
 func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.ServiceClient) (string, string, string) {
-	const ceiling = "2.100"
+	const ceiling = novaCeilingMicroversion
+	fallback := func(reason string) (string, string, string) {
+		shared.Debugf("[cloud] negotiateMicroversion: %s, falling back to %s", reason, novaBaseMicroversion)
+		return "unknown", novaBaseMicroversion, fmt.Sprintf(
+			"Nova version discovery failed; using base microversion %s. Some features may be unavailable.",
+			novaBaseMicroversion)
+	}
 
-	// Save current microversion and set to base for version discovery
 	// Version discovery returns the API versions supported by the deployment.
 	url := compute.ServiceURL("")
 	// 300 Multiple Choices is served by unversioned compute endpoints and
@@ -55,8 +85,7 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 		KeepResponseBody: true,
 	})
 	if err != nil {
-		shared.Debugf("[cloud] negotiateMicroversion: version discovery failed: %v, falling back to %s", err, ceiling)
-		return "unknown", ceiling, ""
+		return fallback(fmt.Sprintf("version discovery failed: %v", err))
 	}
 
 	var versionDoc struct {
@@ -73,28 +102,27 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(&versionDoc); err != nil {
-		shared.Debugf("[cloud] negotiateMicroversion: JSON parse failed: %v, falling back to %s", err, ceiling)
-		return "unknown", ceiling, ""
+		return fallback(fmt.Sprintf("JSON parse failed: %v", err))
 	}
 
 	// Parse the latest supported version from the response
 	// Nova version document has versions array with IDs like "v2.1"
 	// "version" field = max supported microversion, "min_version" = minimum
-	maxVersion := "unknown"
+	maxVersion := ""
 	for _, v := range versionDoc.Versions {
 		if v.ID == "v2.1" {
 			maxVersion = v.Version
 			break
 		}
 	}
-	if (maxVersion == "" || maxVersion == "unknown") && versionDoc.Version.Version != "" {
+	if maxVersion == "" {
 		maxVersion = versionDoc.Version.Version
 	}
-
-	// If we couldn't parse it, fall back
-	if maxVersion == "" || maxVersion == "unknown" {
-		shared.Debugf("[cloud] negotiateMicroversion: couldn't determine max version, using %s", ceiling)
-		return "unknown", ceiling, ""
+	if maxVersion == "" {
+		return fallback("couldn't determine max version")
+	}
+	if err := validateNovaMicroversion(maxVersion); err != nil {
+		return fallback(fmt.Sprintf("discovered version unusable: %v", err))
 	}
 
 	// Compare: use the lower of maxVersion and ceiling (2.100)
@@ -102,8 +130,7 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 	degradeWarning := ""
 	if usedVersion != ceiling {
 		degradeWarning = fmt.Sprintf(
-			"Nova microversion %s (max supported: %s, requested: %s). Some features may be limited."+
-				" Upgrade to OpenStack Zed (2023.1) or later for full functionality.",
+			"Nova microversion %s (max supported: %s, requested: %s). Some features may be limited.",
 			usedVersion, maxVersion, ceiling,
 		)
 		shared.Debugf("[cloud] negotiateMicroversion: degraded: %s", degradeWarning)
@@ -113,7 +140,7 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 }
 
 // minMicroversion returns the numerically lower of two microversion strings.
-// Microversions are formatted as "X.Y" — compare major then minor.
+// Both must already be valid (see parseMicroversion); callers validate first.
 func minMicroversion(a, b string) string {
 	ma, mi, _ := parseMicroversion(a)
 	mb, mj, _ := parseMicroversion(b)
@@ -124,26 +151,42 @@ func minMicroversion(a, b string) string {
 	return a
 }
 
+// microversionPattern matches Nova's own microversion syntax: "X.Y" with no
+// leading zeros, sign, whitespace, prefix or extra components.
+var microversionPattern = regexp.MustCompile(`^([1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
 func parseMicroversion(v string) (int, int, error) {
-	parts := strings.Split(v, ".")
-	if len(parts) < 2 {
-		return 0, 0, fmt.Errorf("invalid microversion %q: expected format X.Y or X.Y.Z", v)
+	m := microversionPattern.FindStringSubmatch(v)
+	if m == nil {
+		return 0, 0, fmt.Errorf("invalid microversion %q: expected format X.Y", v)
 	}
-	ma, err := strconv.Atoi(parts[0])
+	ma, err := strconv.Atoi(m[1])
 	if err != nil {
-		return 0, 0, fmt.Errorf("invalid microversion major %q: %w", parts[0], err)
+		return 0, 0, fmt.Errorf("invalid microversion major %q: %w", m[1], err)
 	}
-	mi, err := strconv.Atoi(parts[1])
+	mi, err := strconv.Atoi(m[2])
 	if err != nil {
-		return 0, 0, fmt.Errorf("invalid microversion minor %q: %w", parts[1], err)
+		return 0, 0, fmt.Errorf("invalid microversion minor %q: %w", m[2], err)
 	}
 	return ma, mi, nil
+}
+
+// validateNovaMicroversion reports whether v is a well-formed microversion
+// that can be sent to Nova's v2.1 API, i.e. at least 2.1.
+func validateNovaMicroversion(v string) error {
+	if _, _, err := parseMicroversion(v); err != nil {
+		return err
+	}
+	if minMicroversion(v, novaBaseMicroversion) != novaBaseMicroversion || v == "2.0" {
+		return fmt.Errorf("microversion %q is below %s", v, novaBaseMicroversion)
+	}
+	return nil
 }
 
 // Client holds authenticated OpenStack service clients.
 type Client struct {
 	CloudName            string
-	Region               string
+	Region               string // configured region, else the selected compute endpoint's region, else "auto"
 	Compute              *gophercloud.ServiceClient
 	Image                *gophercloud.ServiceClient
 	Network              *gophercloud.ServiceClient
@@ -154,6 +197,50 @@ type Client struct {
 	EndpointOpts         gophercloud.EndpointOpts
 	NovaMicroversionMax  string // max supported by this deployment
 	NovaMicroversionUsed string // actual microversion in use (≤ 2.100)
+	// CapabilityWarning describes reduced functionality (older Nova, failed
+	// version discovery, ignored override). Empty when fully capable. It
+	// never contains credentials, tokens or endpoint URLs.
+	CapabilityWarning string
+}
+
+// resolveRegion returns the region to display. A configured region is used
+// as-is. Otherwise the SDK picked the first matching catalog endpoint, so the
+// region of the compute endpoint actually in use is looked up in the token's
+// catalog. "auto" is returned when that cannot be determined.
+func resolveRegion(pc *gophercloud.ProviderClient, region, computeURL string) string {
+	if region != "" {
+		return region
+	}
+	if pc == nil {
+		return "auto"
+	}
+	result, ok := pc.GetAuthResult().(interface {
+		ExtractServiceCatalog() (*tokens.ServiceCatalog, error)
+	})
+	if !ok {
+		return "auto"
+	}
+	catalog, err := result.ExtractServiceCatalog()
+	if err != nil || catalog == nil {
+		return "auto"
+	}
+	for _, entry := range catalog.Entries {
+		if entry.Type != "compute" {
+			continue
+		}
+		for _, ep := range entry.Endpoints {
+			if gophercloud.NormalizeURL(ep.URL) != computeURL {
+				continue
+			}
+			if ep.Region != "" {
+				return ep.Region
+			}
+			if ep.RegionID != "" {
+				return ep.RegionID
+			}
+		}
+	}
+	return "auto"
 }
 
 // parseCloud reads the named cloud's settings from the clouds.yaml chosen by
@@ -262,10 +349,7 @@ func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gopherc
 		shared.Debugf("[cloud] connectWithOpts: DNS client unavailable")
 	}
 
-	region := eo.Region
-	if region == "" {
-		region = "default"
-	}
+	region := resolveRegion(providerClient, eo.Region, compute.Endpoint)
 
 	shared.Debugf("[cloud] connectWithOpts: success, cloud=%s region=%s nova_version=%s (max=%s)", cloudName, region, usedVersion, maxVersion)
 	if degradeWarning != "" {
@@ -284,6 +368,7 @@ func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gopherc
 		EndpointOpts:         eo,
 		NovaMicroversionMax:  maxVersion,
 		NovaMicroversionUsed: usedVersion,
+		CapabilityWarning:    degradeWarning,
 	}, nil
 }
 
