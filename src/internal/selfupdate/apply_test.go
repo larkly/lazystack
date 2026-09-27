@@ -37,7 +37,7 @@ func sumLine(data []byte) string {
 	return hex.EncodeToString(h[:]) + "  " + assetName + "\n"
 }
 
-// release serves a binary and its SHA256SUMS over TLS and routes the
+// release serves a binary, its SHA256SUMS and a signature by a test key over TLS and routes the
 // package's HTTP clients to it by swapping only their transport, so the
 // production HTTPS and redirect checks stay in force.
 type release struct {
@@ -57,6 +57,8 @@ func newRelease(t *testing.T, bin []byte, configure func(*release)) *release {
 	if configure != nil {
 		configure(r)
 	}
+	pub, priv := testKey(7)
+	useReleaseKey(t, pub)
 	r.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		r.hits.Add(1)
 		switch req.URL.Path {
@@ -69,6 +71,8 @@ func newRelease(t *testing.T, bin []byte, configure func(*release)) *release {
 			w.Write(r.bin)
 		case "/SHA256SUMS":
 			fmt.Fprint(w, r.sums)
+		case "/SHA256SUMS.sig":
+			w.Write(encodeSig(priv, []byte(r.sums)))
 		default:
 			if r.extra != nil {
 				r.extra(w, req)
