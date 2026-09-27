@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -71,7 +72,7 @@ func New(client *gophercloud.ServiceClient, port network.Port) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "port name"
-	ni.CharLimit = 255
+	ni.CharLimit = fitLimit(255, port.Name)
 	ni.SetWidth(40)
 	ni.SetValue(port.Name)
 	ni.Focus()
@@ -88,7 +89,9 @@ func New(client *gophercloud.ServiceClient, port network.Port) Model {
 	ai := textinput.New()
 	ai.Prompt = ""
 	ai.Placeholder = "ip;ip,mac (semicolons between entries)"
-	ai.CharLimit = 500
+	// Unlimited: textinput truncates SetValue to CharLimit, so any cap would
+	// silently drop (or cut mid-address) existing pairs on an unrelated save.
+	ai.CharLimit = 0
 	ai.SetWidth(40)
 	ai.SetValue(strings.Join(apStrs, "; "))
 
@@ -123,6 +126,12 @@ func New(client *gophercloud.ServiceClient, port network.Port) Model {
 		loadingSGs:     true,
 		spinner:        s,
 	}
+}
+
+// fitLimit returns limit, raised if needed so that pre-filling v is not
+// truncated by textinput's CharLimit.
+func fitLimit(limit int, v string) int {
+	return max(limit, utf8.RuneCountInString(v))
 }
 
 // Init returns the initial command.

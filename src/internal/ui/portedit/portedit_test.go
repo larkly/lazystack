@@ -3,6 +3,7 @@ package portedit
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -134,5 +135,32 @@ func TestUnnamedPortWithShortIDSubmits(t *testing.T) {
 		if !ok || !utf8.ValidString(msg.name) {
 			t.Fatalf("id %q: result %#v", id, msg)
 		}
+	}
+}
+
+// Many allowed-address-pairs must survive the pre-fill: textinput truncates
+// SetValue to CharLimit, which would drop pairs (or cut one mid-address) on
+// a save that only touched the name.
+func TestLongAddressPairsNotTruncatedOnPrefill(t *testing.T) {
+	var bodies []string
+	client, cleanup := testutil.FakeServiceClient(putRecorder(t, &bodies))
+	t.Cleanup(cleanup)
+	port := network.Port{ID: "port-1", Name: strings.Repeat("p", 300), AdminStateUp: true, PortSecurityEnabled: true}
+	for i := range 40 {
+		port.AllowedAddressPairs = append(port.AllowedAddressPairs, network.AddressPair{
+			IPAddress: fmt.Sprintf("10.0.0.%d", 100+i), MACAddress: fmt.Sprintf("fa:16:3e:00:00:%02x", i),
+		})
+	}
+	m := New(client, port)
+	if got := m.nameInput.Value(); got != port.Name {
+		t.Errorf("name truncated to %d chars", len(got))
+	}
+	m.nameInput.SetValue("renamed")
+	m, cmd := m.submit()
+	if _, ok := run(cmd).(portUpdatedMsg); !ok {
+		t.Fatalf("submit failed: err=%q bodies=%q", m.err, bodies)
+	}
+	if len(bodies) != 1 || strings.Contains(bodies[0], "allowed_address_pairs") {
+		t.Fatalf("PUT bodies = %q, unchanged allowed_address_pairs should be omitted", bodies)
 	}
 }
