@@ -3,6 +3,7 @@ package portcreate
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sort"
 	"strings"
 
@@ -440,6 +441,12 @@ func (m Model) submit() (Model, tea.Cmd) {
 	})
 }
 
+// parseFixedIPs parses a comma-separated list of fixed IP entries. Each
+// entry is either a bare address, or subnet:address where subnet is a
+// subnet name, ID or unambiguous ID prefix and the address may be empty to
+// let Neutron allocate one. A bare address is checked first, so IPv6
+// addresses need no subnet prefix; it goes to the network's only subnet, or
+// to the single subnet whose CIDR contains it.
 func (m Model) parseFixedIPs(raw string) ([]network.FixedIP, error) {
 	var result []network.FixedIP
 	for _, part := range strings.Split(raw, ",") {
@@ -447,34 +454,90 @@ func (m Model) parseFixedIPs(raw string) ([]network.FixedIP, error) {
 		if part == "" {
 			continue
 		}
-		if idx := strings.Index(part, ":"); idx >= 0 {
-			subnetName := strings.TrimSpace(part[:idx])
-			ip := strings.TrimSpace(part[idx+1:])
-			subnetID := m.resolveSubnet(subnetName)
-			if subnetID == "" {
-				return nil, fmt.Errorf("unknown subnet %q", subnetName)
+		if addr, err := netip.ParseAddr(part); err == nil {
+			subnetID, err := m.subnetForAddress(addr)
+			if err != nil {
+				return nil, err
 			}
-			result = append(result, network.FixedIP{SubnetID: subnetID, IPAddress: ip})
-		} else {
-			if len(m.subnets) == 0 {
-				return nil, fmt.Errorf("no subnets on network to assign IP %q", part)
-			}
-			if len(m.subnets) > 1 {
-				return nil, fmt.Errorf("multiple subnets on network, use subnet:ip format")
-			}
-			result = append(result, network.FixedIP{SubnetID: m.subnets[0].ID, IPAddress: part})
+			result = append(result, network.FixedIP{SubnetID: subnetID, IPAddress: part})
+			continue
 		}
+		idx := strings.Index(part, ":")
+		if idx < 0 {
+			return nil, fmt.Errorf("invalid IP address %q", part)
+		}
+		subnetName := strings.TrimSpace(part[:idx])
+		ip := strings.TrimSpace(part[idx+1:])
+		if subnetName == "" {
+			return nil, fmt.Errorf("missing subnet before %q", part[idx:])
+		}
+		if ip != "" {
+			if _, err := netip.ParseAddr(ip); err != nil {
+				return nil, fmt.Errorf("invalid IP address %q for subnet %q", ip, subnetName)
+			}
+		}
+		subnetID, err := m.resolveSubnet(subnetName)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, network.FixedIP{SubnetID: subnetID, IPAddress: ip})
 	}
 	return result, nil
 }
 
-func (m Model) resolveSubnet(name string) string {
+// subnetForAddress picks the subnet for a bare address.
+func (m Model) subnetForAddress(addr netip.Addr) (string, error) {
+	switch len(m.subnets) {
+	case 0:
+		return "", fmt.Errorf("no subnets on network to assign IP %q", addr)
+	case 1:
+		return m.subnets[0].ID, nil
+	}
+	var match string
 	for _, s := range m.subnets {
-		if s.Name == name || s.ID == name || (len(s.ID) >= len(name) && s.ID[:len(name)] == name) {
-			return s.ID
+		prefix, err := netip.ParsePrefix(s.CIDR)
+		if err != nil || !prefix.Contains(addr) {
+			continue
+		}
+		if match != "" {
+			return "", fmt.Errorf("several subnets contain %s, use subnet:ip format", addr)
+		}
+		match = s.ID
+	}
+	if match == "" {
+		return "", fmt.Errorf("no subnet on this network contains %s, use subnet:ip format", addr)
+	}
+	return match, nil
+}
+
+// resolveSubnet resolves a subnet by exact ID, exact name or unique ID
+// prefix. Ambiguous names or prefixes are rejected rather than guessed.
+func (m Model) resolveSubnet(name string) (string, error) {
+	for _, s := range m.subnets {
+		if s.ID == name {
+			return s.ID, nil
 		}
 	}
-	return ""
+	var byName, byPrefix []string
+	for _, s := range m.subnets {
+		if s.Name == name {
+			byName = append(byName, s.ID)
+		}
+		if strings.HasPrefix(s.ID, name) {
+			byPrefix = append(byPrefix, s.ID)
+		}
+	}
+	switch {
+	case len(byName) == 1:
+		return byName[0], nil
+	case len(byName) > 1:
+		return "", fmt.Errorf("subnet name %q is ambiguous, use the subnet ID", name)
+	case len(byPrefix) == 1:
+		return byPrefix[0], nil
+	case len(byPrefix) > 1:
+		return "", fmt.Errorf("subnet ID prefix %q is ambiguous", name)
+	}
+	return "", fmt.Errorf("unknown subnet %q", name)
 }
 
 func parseAddressPairs(raw string) ([]network.AddressPair, error) {
