@@ -28,14 +28,14 @@ func TestLoadPreservesSelectionAndDetailLifecycle(t *testing.T) {
 	if m.cursor != 0 || m.lastDetailNetID != "a" || !m.detailLoading || len(m.ports) != 0 || cmd == nil {
 		t.Fatal("changed selection did not reset/fetch detail")
 	}
-	m, _ = m.Update(detailLoadedMsg{netID: "b", ports: []network.Port{{ID: "stale"}}})
-	m, _ = m.Update(detailErrMsg{netID: "b", err: errors.New("stale")})
+	m, _ = m.Update(detailLoadedMsg{seq: 1, netID: "b", ports: []network.Port{{ID: "stale"}}})
+	m, _ = m.Update(detailErrMsg{seq: 1, netID: "b", err: errors.New("stale")})
 	if len(m.ports) != 0 || m.detailErr != "" || !m.detailLoading {
 		t.Fatal("stale detail applied")
 	}
 	m.portsCursor = 8
 	m.subnetCursor = 8
-	m, _ = m.Update(detailLoadedMsg{netID: "a", ports: []network.Port{{ID: "p", Name: "Port"}}, serverNames: map[string]string{"vm": "VM"}, sgNames: map[string]string{"sg": "Default"}})
+	m, _ = m.Update(detailLoadedMsg{seq: 1, netID: "a", ports: []network.Port{{ID: "p", Name: "Port"}}, serverNames: map[string]string{"vm": "VM"}, sgNames: map[string]string{"sg": "Default"}})
 	if m.detailLoading || m.portsCursor != 0 || m.subnetCursor != 0 || m.SGNames()["sg"] != "Default" {
 		t.Fatal("detail not applied/clamped")
 	}
@@ -58,7 +58,7 @@ func TestLoadPreservesSelectionAndDetailLifecycle(t *testing.T) {
 			t.Fatal(view)
 		}
 	}
-	m, _ = m.Update(detailErrMsg{netID: "a", err: errors.New("detail failed")})
+	m, _ = m.Update(detailErrMsg{seq: 1, netID: "a", err: errors.New("detail failed")})
 	if m.detailLoading || m.detailErr != "detail failed" {
 		t.Fatal("detail error")
 	}
@@ -124,6 +124,47 @@ func TestKeyboardNavigationAndPendingHighlightFetch(t *testing.T) {
 	}
 }
 
+// Background refreshes must not overlap, and a reply from an older fetch
+// (success or error) must never overwrite a newer one: otherwise a slow tick
+// reply can briefly bring back a just-deleted port.
+func TestRefreshGateDropsStaleReplies(t *testing.T) {
+	m := New(nil, time.Second)
+	m, _ = m.Update(networksLoadedMsg{networks: []network.Network{{ID: "n", Name: "Net"}}})
+	m, _ = m.Update(detailLoadedMsg{seq: 1, netID: "n", ports: []network.Port{{ID: "p"}}})
+	if len(m.ports) != 1 {
+		t.Fatalf("initial detail not applied: %+v", m.ports)
+	}
+
+	// Tick starts networks #1 and detail #2; a second tick while both are
+	// in flight must start nothing.
+	m, cmd := m.Update(shared.TickMsg{})
+	if cmd == nil || !m.refresh.Busy() || !m.detailRefresh.Busy() {
+		t.Fatal("tick did not start refreshes")
+	}
+	if m, cmd = m.Update(shared.TickMsg{}); cmd != nil {
+		t.Fatal("tick overlapped in-flight refreshes")
+	}
+
+	// The port is deleted and a manual refresh (networks #2, detail #3)
+	// completes before the older tick replies.
+	m.ForceRefresh()
+	m, _ = m.Update(networksLoadedMsg{seq: 2, networks: []network.Network{{ID: "n", Name: "Net"}}})
+	m, _ = m.Update(detailLoadedMsg{seq: 3, netID: "n", ports: nil})
+	m, _ = m.Update(networksLoadedMsg{seq: 1, networks: []network.Network{{ID: "n", Name: "Net"}, {ID: "gone"}}})
+	m, _ = m.Update(detailLoadedMsg{seq: 2, netID: "n", ports: []network.Port{{ID: "p"}}})
+	if len(m.ports) != 0 || len(m.networks) != 1 {
+		t.Fatalf("stale reply applied: networks=%+v ports=%+v", m.networks, m.ports)
+	}
+	m, _ = m.Update(networksErrMsg{seq: 1, err: errors.New("old list error")})
+	m, _ = m.Update(detailErrMsg{seq: 2, netID: "n", err: errors.New("old detail error")})
+	if m.err != "" || m.detailErr != "" {
+		t.Fatalf("stale error applied: err=%q detailErr=%q", m.err, m.detailErr)
+	}
+	if m.refresh.Busy() || m.detailRefresh.Busy() {
+		t.Fatal("newest replies did not end the in-flight period")
+	}
+}
+
 func TestFetchOperationsHTTP(t *testing.T) {
 	for _, fail := range []string{"", "/networks", "/subnets", "/ports", "/security-groups"} {
 		t.Run("fail="+fail, func(t *testing.T) {
@@ -152,27 +193,27 @@ func TestFetchOperationsHTTP(t *testing.T) {
 			}))
 			defer server.Close()
 			m := New(&gophercloud.ServiceClient{ProviderClient: &gophercloud.ProviderClient{}, Endpoint: server.URL + "/"}, time.Second)
-			msg := m.fetchNetworks()()
+			msg := m.fetchNetworks(7)()
 			if fail == "/networks" || fail == "/subnets" {
 				if _, ok := msg.(networksErrMsg); !ok {
 					t.Fatalf("want list error, got %#v", msg)
 				}
 			} else {
 				got, ok := msg.(networksLoadedMsg)
-				if !ok || len(got.networks) != 1 || got.allSubnets["s"].NetworkID != "n" || !got.externalIDs["n"] {
+				if !ok || got.seq != 7 || len(got.networks) != 1 || got.allSubnets["s"].NetworkID != "n" || !got.externalIDs["n"] {
 					t.Fatalf("list result %#v", msg)
 				}
 			}
-			msg = m.fetchDetail("n")()
+			msg = m.fetchDetail("n", 9)()
 			if fail == "/ports" {
 				e, ok := msg.(detailErrMsg)
-				if !ok || e.netID != "n" {
+				if !ok || e.seq != 9 || e.netID != "n" {
 					t.Fatalf("want scoped detail error %#v", msg)
 				}
 				return
 			}
 			got, ok := msg.(detailLoadedMsg)
-			if !ok || got.netID != "n" || len(got.ports) != 3 || got.ports[0].ID != "a" || got.ports[1].ID != "b" || got.ports[2].ID != "z" {
+			if !ok || got.seq != 9 || got.netID != "n" || len(got.ports) != 3 || got.ports[0].ID != "a" || got.ports[1].ID != "b" || got.ports[2].ID != "z" {
 				t.Fatalf("sorted detail %#v", msg)
 			}
 			if fail == "/security-groups" {

@@ -18,7 +18,7 @@ func TestNetworkViewTruncatesUnicodeSafely(t *testing.T) {
 				"s":  {ID: "s", CIDR: "10.0.0.0/24", IPVersion: 4},
 			},
 		})
-		m, _ = m.Update(detailLoadedMsg{netID: "n",
+		m, _ = m.Update(detailLoadedMsg{seq: 1, netID: "n",
 			ports: []network.Port{
 				{ID: "p", Name: testutil.UnicodeName, DeviceID: "d", DeviceOwner: "compute:" + testutil.UnicodeName, Status: "ACTIVE",
 					FixedIPs:       []network.FixedIP{{SubnetID: "s1", IPAddress: "2001:db8:1234:5678:9abc:def0:1234:5678"}},
