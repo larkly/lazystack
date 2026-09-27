@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -1012,6 +1013,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			shared.Debugf("[action] deleting router %s", name)
 			err := network.DeleteRouter(ctx, netClient, id)
 			if err != nil {
+				// Not wrapped with %w: the generic 409 text ("resource is busy")
+				// would otherwise replace this actionable message in the modal.
+				if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
+					err = fmt.Errorf("router still in use; remove its interfaces first (Interfaces pane, %s): %v", shared.Keys.Detach.Help().Key, err)
+				}
 				shared.Debugf("[action] delete router %s failed: %s", name, err)
 				m.logAudit(audit.ActionDeleteRouter, "router", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete router", Name: name, Err: err}
@@ -1021,39 +1027,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			return shared.ResourceActionMsg{Action: "Deleted router", Name: name}
 		}
 	case "remove_router_interface":
-		netClient := m.client.Network
-		routerID := action.ServerID
-		name := action.Name
-		iface := m.routerView.SelectedInterface()
-		if iface == nil {
+		target, ok := decodeRouterInterfaceTarget(action.ServerID)
+		if !ok {
 			return m, nil
 		}
-		subnetID := iface.SubnetID
-		portID := iface.PortID
-		portIPCount := m.routerView.InterfacesOnPort(portID)
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			if portIPCount > 1 {
-				// Multi-IP port: remove just this fixed IP, keep the port.
-				shared.Debugf("[action] removing fixed IP (subnet %s) from port %s on router %s", subnetID, portID, name)
-				err := network.RemoveFixedIPFromPort(ctx, netClient, portID, subnetID)
-				if err != nil {
-					shared.Debugf("[action] remove fixed IP from port %s failed: %s", portID, err)
-					return shared.ResourceActionErrMsg{Action: "Remove interface", Name: name, Err: err}
-				}
-			} else {
-				// Single-IP port: detach the whole interface.
-				shared.Debugf("[action] removing router interface from %s", name)
-				err := network.RemoveRouterInterface(ctx, netClient, routerID, subnetID)
-				if err != nil {
-					shared.Debugf("[action] remove router interface from %s failed: %s", name, err)
-					return shared.ResourceActionErrMsg{Action: "Remove interface", Name: name, Err: err}
-				}
-			}
-			shared.Debugf("[action] removed interface (subnet %s) from %s", subnetID, name)
-			return shared.ResourceActionMsg{Action: "Removed interface from", Name: name}
-		}
+		return m, m.removeRouterInterfaceCmd(target, action.Name)
 	case "delete_port":
 		netClient := m.client.Network
 		id := action.ServerID

@@ -144,7 +144,7 @@ func TestRouterInterfaceRemovalChoosesDetachOrFixedIPUpdate(t *testing.T) {
 					case "/ports":
 						fmt.Fprintf(w, `{"ports":[{"id":"port","device_owner":"network:router_interface","fixed_ips":%s}]}`, ips)
 					case "/ports/port":
-						fmt.Fprintf(w, `{"port":{"id":"port","fixed_ips":%s}}`, ips)
+						fmt.Fprintf(w, `{"port":{"id":"port","device_id":"router","fixed_ips":%s}}`, ips)
 					case "/networks":
 						fmt.Fprint(w, `{"networks":[]}`)
 					case "/subnets":
@@ -166,7 +166,8 @@ func TestRouterInterfaceRemovalChoosesDetachOrFixedIPUpdate(t *testing.T) {
 					t.Fatalf("fixture selected interface=%+v", iface)
 				}
 				executing = true
-				_, cmd := m.executeAction(modal.ConfirmAction{Action: "remove_router_interface", ServerID: "router", Name: "fixture-router"})
+				m, _ = m.openRemoveRouterInterfaceConfirm()
+				_, cmd := m.executeAction(confirmCurrent(m))
 				if cmd == nil {
 					t.Fatal("missing removal command")
 				}
