@@ -156,10 +156,22 @@ type Client struct {
 	NovaMicroversionUsed string // actual microversion in use (≤ 2.100)
 }
 
+// parseCloud reads the named cloud's settings from the clouds.yaml chosen by
+// selectCloudsYaml. Passing that single file (rather than the whole search
+// list) keeps gophercloud from picking a different file than the one the
+// cloud list came from, and pairs secure.yaml with the selected directory.
+func parseCloud(cloudName string) (gophercloud.AuthOptions, gophercloud.EndpointOpts, *tls.Config, error) {
+	path, _, err := selectCloudsYaml()
+	if err != nil {
+		return gophercloud.AuthOptions{}, gophercloud.EndpointOpts{}, nil, err
+	}
+	return clouds.Parse(clouds.WithCloudName(cloudName), clouds.WithLocations(path))
+}
+
 // Connect authenticates to the given cloud and initializes service clients.
 func Connect(ctx context.Context, cloudName string) (*Client, error) {
 	shared.Debugf("[cloud] Connect: starting, cloud=%s", cloudName)
-	ao, eo, tlsConfig, err := clouds.Parse(clouds.WithCloudName(cloudName), clouds.WithLocations(CloudsYamlPaths()...))
+	ao, eo, tlsConfig, err := parseCloud(cloudName)
 	if err != nil {
 		shared.Debugf("[cloud] Connect: error parsing cloud config: %v", err)
 		return nil, fmt.Errorf("parsing cloud %q: %w", cloudName, err)
@@ -170,7 +182,7 @@ func Connect(ctx context.Context, cloudName string) (*Client, error) {
 // ConnectWithProject authenticates scoped to a specific project.
 func ConnectWithProject(ctx context.Context, cloudName, projectID string) (*Client, error) {
 	shared.Debugf("[cloud] ConnectWithProject: starting, cloud=%s projectID=%s", cloudName, projectID)
-	ao, eo, tlsConfig, err := clouds.Parse(clouds.WithCloudName(cloudName), clouds.WithLocations(CloudsYamlPaths()...))
+	ao, eo, tlsConfig, err := parseCloud(cloudName)
 	if err != nil {
 		shared.Debugf("[cloud] ConnectWithProject: error parsing cloud config: %v", err)
 		return nil, fmt.Errorf("parsing cloud %q: %w", cloudName, err)
