@@ -492,9 +492,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.configView.Height = m.height
 				m.configView.Open()
 				return m, nil
-			case key.Matches(msg, shared.Keys.Hypervisors) && m.view != viewCloudPicker:
+			case key.Matches(msg, shared.Keys.Hypervisors) && m.view != viewCloudPicker && m.view != viewHypervisorList:
 				return m.openHypervisorList()
-			case key.Matches(msg, shared.Keys.Browse) && m.view != viewCloudPicker:
+			case key.Matches(msg, shared.Keys.Browse) && m.view != viewCloudPicker && m.view != viewServiceCatalog:
 				return m.openServiceCatalog()
 			}
 
@@ -515,17 +515,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if s := msg.String(); len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
 					idx := int(s[0] - '1')
 					if idx < len(m.tabs) {
-						m.returnToView = 0 // clear cross-resource back-nav
+						m.clearBackNav() // explicit tab choice starts fresh
 						return m.switchTab(idx)
 					}
 				}
 				switch {
 				case key.Matches(msg, shared.Keys.Right):
-					m.returnToView = 0
+					m.clearBackNav()
 					next := (m.activeTab + 1) % len(m.tabs)
 					return m.switchTab(next)
 				case key.Matches(msg, shared.Keys.Left):
-					m.returnToView = 0
+					m.clearBackNav()
 					prev := (m.activeTab - 1 + len(m.tabs)) % len(m.tabs)
 					return m.switchTab(prev)
 				}
@@ -983,8 +983,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case shared.CloudConnectedMsg:
 		m.lastActivity = time.Now()
 		m.idlePaused = false
-		// Reset any cross-resource back-nav from a previous cloud/project.
-		m.returnToView = 0
+		// Reset back-navigation and drill-down views from the previous
+		// cloud/project so nothing can restore models bound to old clients.
+		m.clearBackNav()
+		m.resetConnectionViews()
 		m.client = &cloud.Client{
 			CloudName:      m.cloudName,
 			Compute:        msg.ComputeClient,

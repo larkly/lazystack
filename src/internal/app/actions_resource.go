@@ -47,6 +47,7 @@ func (m Model) openVolumeDetail() (Model, tea.Cmd) {
 	}
 	m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, v.ID)
 	m.volumeDetail.SetSize(m.width, m.height)
+	m.pushNav(m.view, m.activeTab)
 	m.view = viewVolumeDetail
 	m.statusBar.CurrentView = "volumedetail"
 	m.statusBar.Hint = m.volumeDetail.Hints()
