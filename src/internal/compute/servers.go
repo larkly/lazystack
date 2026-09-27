@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -307,14 +308,64 @@ func CreateSnapshot(ctx context.Context, client *gophercloud.ServiceClient, id, 
 	r := servers.CreateImage(ctx, client, id, servers.CreateImageOpts{Name: snapshotName})
 	if r.Err != nil {
 		if gophercloud.ResponseCodeIs(r.Err, 409) {
-			shared.Debugf("[compute] create snapshot server %s: snapshot already in progress", id)
-			return fmt.Errorf("server already has a snapshot in progress")
+			shared.Debugf("[compute] create snapshot server %s: conflict: %v", id, r.Err)
+			return snapshotConflict(id, r.Err)
 		}
 		shared.Debugf("[compute] create snapshot server %s: %v", id, r.Err)
 		return fmt.Errorf("creating snapshot of server %s: %w", id, r.Err)
 	}
 	shared.Debugf("[compute] created snapshot %q of server %s", snapshotName, id)
 	return nil
+}
+
+// conflictError carries a concise user-facing message for a Nova 409 while
+// keeping the underlying HTTP error inspectable via errors.As/Unwrap.
+type conflictError struct {
+	msg   string
+	cause error
+}
+
+func (e *conflictError) Error() string { return e.msg }
+func (e *conflictError) Unwrap() error { return e.cause }
+
+// snapshotConflict turns a 409 from createImage into a readable error. Nova
+// answers 409 for any conflicting state (locked, error vm_state, another
+// task running), so only a snapshot-related task_state is reported as a
+// snapshot in progress; anything else keeps Nova's own reason.
+func snapshotConflict(id string, err error) error {
+	reason := novaFaultMessage(err)
+	var msg string
+	switch {
+	case strings.Contains(reason, "task_state image_"):
+		msg = fmt.Sprintf("server %s already has a snapshot in progress", id)
+	case reason != "":
+		msg = fmt.Sprintf("server %s cannot be snapshotted: %s", id, reason)
+	default:
+		msg = fmt.Sprintf("server %s cannot be snapshotted in its current state", id)
+	}
+	return &conflictError{msg: msg, cause: err}
+}
+
+// novaFaultMessage extracts the message from a Nova fault body such as
+// {"conflictingRequest": {"code": 409, "message": "..."}}. It returns ""
+// when err carries no parseable body.
+func novaFaultMessage(err error) string {
+	var codeErr gophercloud.ErrUnexpectedResponseCode
+	if !errors.As(err, &codeErr) || len(codeErr.Body) == 0 {
+		return ""
+	}
+	var fault map[string]struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(codeErr.Body, &fault) != nil {
+		return ""
+	}
+	for _, f := range fault {
+		if m := strings.TrimSpace(f.Message); m != "" {
+			return m
+		}
+	}
+	return ""
 }
 
 // RebuildServer rebuilds a server with a new image.
