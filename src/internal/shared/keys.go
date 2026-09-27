@@ -356,7 +356,7 @@ var Keys = KeyMap{
 		key.WithHelp("U", "user management"),
 	),
 	ColumnPick: key.NewBinding(
-		key.WithKeys("ctrl+shift+c"),
-		key.WithHelp("ctrl+shift+c", "columns"),
+		key.WithKeys("O"),
+		key.WithHelp("O", "columns"),
 	),
 }

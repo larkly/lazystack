@@ -176,7 +176,7 @@ func DefaultKeybindings() map[string]string {
 		"config":          "ctrl+k",
 		"hypervisors":     "H",
 		"user_management": "U",
-		"column_pick":     "ctrl+shift+c",
+		"column_pick":     "O",
 	}
 }
 

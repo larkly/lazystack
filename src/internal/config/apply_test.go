@@ -206,10 +206,10 @@ func TestApplyKeybindings_ColumnPick(t *testing.T) {
 	prev := shared.Keys.ColumnPick
 	defer func() { shared.Keys.ColumnPick = prev }()
 
-	ApplyKeybindings(map[string]string{"column_pick": "ctrl+shift+x"})
+	ApplyKeybindings(map[string]string{"column_pick": "K"})
 	h := shared.Keys.ColumnPick.Help()
-	if h.Key != "ctrl+shift+x" || h.Desc != "columns" {
-		t.Errorf("ColumnPick help = %q/%q, want ctrl+shift+x/columns", h.Key, h.Desc)
+	if h.Key != "K" || h.Desc != "columns" {
+		t.Errorf("ColumnPick help = %q/%q, want K/columns", h.Key, h.Desc)
 	}
 }
 
@@ -240,7 +240,7 @@ func TestDefaultKeybindingsMatchSharedKeys(t *testing.T) {
 		"copy":            "Y",
 		"hypervisors":     "H",
 		"user_management": "U",
-		"column_pick":     "ctrl+shift+c",
+		"column_pick":     "O",
 	}
 	d := DefaultKeybindings()
 	for name, want := range cases {
