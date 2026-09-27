@@ -3,11 +3,11 @@ package imagecreate
 import (
 	"context"
 	"fmt"
-	"io"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -84,11 +84,12 @@ type Model struct {
 	pickerEntries []pickerEntry
 	pickerCursor  int
 
-	// Progress tracking via shared atomics
-	sharedBytesRead *atomic.Int64
-	sharedTotal     int64
-	bytesRead       int64
-	totalBytes      int64
+	// Progress tracking: the upload goroutine publishes its reader, the
+	// progress tick reads its byte count.
+	sharedUpload *atomic.Pointer[image.UploadReader]
+	sharedTotal  int64
+	bytesRead    int64
+	totalBytes   int64
 
 	// Large file warning
 	warnLargeFile bool
@@ -166,8 +167,10 @@ func (m Model) pathLabel() string {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case progressTickMsg:
-		if m.sharedBytesRead != nil {
-			m.bytesRead = m.sharedBytesRead.Load()
+		if m.sharedUpload != nil {
+			if ur := m.sharedUpload.Load(); ur != nil {
+				m.bytesRead = ur.BytesRead()
+			}
 			m.totalBytes = m.sharedTotal
 		}
 		if m.uploading {
@@ -380,10 +383,23 @@ func (m *Model) updateFocus() {
 
 func (m Model) submit() (Model, tea.Cmd) {
 	path := strings.TrimSpace(m.pathInput.Value())
+	var importURL *url.URL
+	if m.source != 0 && path != "" {
+		u, err := validateImportURL(path)
+		if err != nil {
+			m.err = err.Error()
+			return m, nil
+		}
+		importURL = u
+	}
 	// Auto-fill name from filename if empty
 	name := strings.TrimSpace(m.nameInput.Value())
 	if name == "" && path != "" {
-		name = baseImageName(filepath.Base(path))
+		if importURL != nil {
+			name = urlImageName(importURL)
+		} else {
+			name = baseImageName(filepath.Base(path))
+		}
 		m.nameInput.SetValue(name)
 	}
 	if name == "" {
@@ -396,6 +412,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		} else {
 			m.err = "URL is required"
 		}
+		return m, nil
+	}
+	if _, _, err := m.minimums(); err != nil {
+		m.err = err.Error()
 		return m, nil
 	}
 
@@ -620,18 +640,6 @@ func (m Model) renderPicker() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
-// countingReader wraps a reader and atomically tracks bytes read.
-type countingReader struct {
-	reader  io.Reader
-	counter *atomic.Int64
-}
-
-func (cr *countingReader) Read(p []byte) (int, error) {
-	n, err := cr.reader.Read(p)
-	cr.counter.Add(int64(n))
-	return n, err
-}
-
 func scheduleProgressTick() tea.Cmd {
 	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
 		return progressTickMsg{}
@@ -639,25 +647,33 @@ func scheduleProgressTick() tea.Cmd {
 }
 
 func (m Model) doUpload() (Model, tea.Cmd) {
-	m.submitting = true
-	m.uploading = true
-	m.bytesRead = 0
-
 	name := strings.TrimSpace(m.nameInput.Value())
 	path := strings.TrimSpace(m.pathInput.Value())
 	diskFmt := diskFormatOpts[m.diskFormat]
 	vis := visibilityOpts[m.visibility]
-	minDisk := parseIntOr(m.minDiskInput.Value(), 0)
-	minRAM := parseIntOr(m.minRAMInput.Value(), 0)
+	minDisk, minRAM, err := m.minimums()
+	if err != nil {
+		m.err = err.Error()
+		return m, nil
+	}
 
-	// Get file size for progress tracking
-	info, _ := os.Stat(path)
-	m.totalBytes = info.Size()
-	m.sharedTotal = info.Size()
+	// The size seen here is the exact byte count the upload must deliver.
+	info, err := os.Stat(path)
+	if err != nil {
+		m.err = "File not found: " + path
+		return m, nil
+	}
+	size := info.Size()
 
-	// Shared atomic counter — goroutine increments, tick reads
-	sharedBytes := &atomic.Int64{}
-	m.sharedBytesRead = sharedBytes
+	m.submitting = true
+	m.uploading = true
+	m.bytesRead = 0
+	m.totalBytes = size
+	m.sharedTotal = size
+
+	// The goroutine publishes its reader; the progress tick reads from it.
+	sharedUpload := &atomic.Pointer[image.UploadReader]{}
+	m.sharedUpload = sharedUpload
 
 	client := m.client
 	return m, tea.Batch(m.spinner.Tick, scheduleProgressTick(), func() tea.Msg {
@@ -676,17 +692,16 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 
 		f, err := os.Open(path)
 		if err != nil {
-			_ = image.DeleteImage(ctx, client, img.ID)
-			return uploadErrMsg{err: fmt.Errorf("opening file: %w", err)}
+			return uploadErrMsg{err: cleanupFailedImage(ctx, client, img.ID, fmt.Errorf("opening file: %w", err))}
 		}
 		defer f.Close()
 
-		pr := &countingReader{reader: f, counter: sharedBytes}
+		ur := image.NewUploadReader(f, size)
+		sharedUpload.Store(ur)
 
-		err = image.UploadImageData(ctx, client, img.ID, pr)
+		err = image.UploadImageData(ctx, client, img.ID, ur)
 		if err != nil {
-			_ = image.DeleteImage(ctx, client, img.ID)
-			return uploadErrMsg{err: err}
+			return uploadErrMsg{err: cleanupFailedImage(ctx, client, img.ID, err)}
 		}
 
 		return uploadDoneMsg{name: name}
@@ -694,15 +709,17 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 }
 
 func (m Model) doURLImport() (Model, tea.Cmd) {
-	m.submitting = true
-
 	name := strings.TrimSpace(m.nameInput.Value())
 	url := strings.TrimSpace(m.pathInput.Value())
 	diskFmt := diskFormatOpts[m.diskFormat]
 	vis := visibilityOpts[m.visibility]
-	minDisk := parseIntOr(m.minDiskInput.Value(), 0)
-	minRAM := parseIntOr(m.minRAMInput.Value(), 0)
+	minDisk, minRAM, err := m.minimums()
+	if err != nil {
+		m.err = err.Error()
+		return m, nil
+	}
 
+	m.submitting = true
 	client := m.client
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx := context.Background()
@@ -720,8 +737,7 @@ func (m Model) doURLImport() (Model, tea.Cmd) {
 
 		err = image.ImportImageURL(ctx, client, img.ID, url)
 		if err != nil {
-			_ = image.DeleteImage(ctx, client, img.ID)
-			return uploadErrMsg{err: err}
+			return uploadErrMsg{err: cleanupFailedImage(ctx, client, img.ID, err)}
 		}
 
 		return importStartedMsg{name: name}
@@ -745,16 +761,52 @@ func expandHome(p string) string {
 	return p
 }
 
-func parseIntOr(s string, def int) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return def
+// cleanupFailedImage deletes an image whose data step failed. The primary
+// error is always kept; a failed delete is appended with the image ID so the
+// user knows which resource was left behind.
+func cleanupFailedImage(ctx context.Context, client *gophercloud.ServiceClient, imageID string, primary error) error {
+	if err := image.DeleteImage(ctx, client, imageID); err != nil {
+		shared.Debugf("[imagecreate] cleanup of image %s failed: %v", imageID, err)
+		return fmt.Errorf("%w (cleanup failed, image %s may be left behind: %v)", primary, imageID, err)
 	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
+	return primary
+}
+
+// minimums parses the Min Disk and Min RAM fields; blank means 0.
+func (m Model) minimums() (disk, ram int, err error) {
+	if disk, err = image.ParseMinimum("Min Disk", m.minDiskInput.Value()); err != nil {
+		return 0, 0, err
 	}
-	return n
+	if ram, err = image.ParseMinimum("Min RAM", m.minRAMInput.Value()); err != nil {
+		return 0, 0, err
+	}
+	return disk, ram, nil
+}
+
+// validateImportURL checks a web-download source before any image is
+// created. Glance's web-download method only accepts http and https URLs
+// by default, and the URL is passed to it unchanged.
+func validateImportURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Opaque != "" || u.Hostname() == "" {
+		return nil, fmt.Errorf("URL must be an absolute http:// or https:// address")
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+	default:
+		return nil, fmt.Errorf("URL scheme %q is not supported for import (use http or https)", u.Scheme)
+	}
+	return u, nil
+}
+
+// urlImageName derives a default image name from the last URL path segment,
+// ignoring any query string or fragment.
+func urlImageName(u *url.URL) string {
+	base := path.Base(u.Path)
+	if base == "/" || base == "." {
+		return ""
+	}
+	return base
 }
 
 // SetSize updates dimensions.

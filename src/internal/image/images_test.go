@@ -1,7 +1,6 @@
 package image
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -11,113 +10,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/images"
 )
-
-func TestProgressReader(t *testing.T) {
-	data := []byte("hello world")
-	pr := &ProgressReader{
-		Reader: bytes.NewReader(data),
-		Total:  int64(len(data)),
-	}
-
-	// Read in chunks — bytes.Reader may return fewer bytes than buffer size
-	totalRead := int64(0)
-	buf := make([]byte, 5)
-	for {
-		n, err := pr.Read(buf)
-		if n > 0 {
-			// Verify each chunk is a substring of the original data
-			expectedStart := string(data[totalRead : totalRead+int64(n)])
-			got := string(buf[:n])
-			if got != expectedStart {
-				t.Errorf("got %q, want %q at offset %d", got, expectedStart, totalRead)
-			}
-		}
-		totalRead += int64(n)
-		if err != nil {
-			break // io.EOF or other error
-		}
-	}
-
-	if totalRead != 11 {
-		t.Errorf("total bytes read = %d, want 11", totalRead)
-	}
-	if pr.BytesRead() != 11 {
-		t.Errorf("BytesRead = %d, want 11", pr.BytesRead())
-	}
-}
-
-func TestProgressReader_LargeData(t *testing.T) {
-	// Test with larger data to verify atomic counting
-	size := 10000
-	data := bytes.Repeat([]byte("x"), size)
-	pr := &ProgressReader{
-		Reader: bytes.NewReader(data),
-		Total:  int64(size),
-	}
-
-	// Read in small chunks
-	buf := make([]byte, 37) // prime number to avoid alignment
-	totalRead := int64(0)
-	for {
-		n, err := pr.Read(buf)
-		totalRead += int64(n)
-		if err != nil {
-			break
-		}
-	}
-
-	if totalRead != int64(size) {
-		t.Errorf("total bytes read = %d, want %d", totalRead, size)
-	}
-	if pr.BytesRead() != totalRead {
-		t.Errorf("BytesRead = %d, want %d", pr.BytesRead(), totalRead)
-	}
-}
-
-func TestProgressReader_ZeroBytesRead(t *testing.T) {
-	pr := &ProgressReader{
-		Reader: strings.NewReader(""),
-	}
-
-	n, _ := pr.Read(make([]byte, 1))
-	if n != 0 {
-		t.Errorf("expected n=0, got %d", n)
-	}
-	if pr.BytesRead() != 0 {
-		t.Errorf("BytesRead should be 0, got %d", pr.BytesRead())
-	}
-}
-
-func TestProgressReader_ConcurrentAccess(t *testing.T) {
-	// Verify atomic safety
-	pr := &ProgressReader{
-		Reader: bytes.NewReader(bytes.Repeat([]byte("a"), 1000)),
-		Total:  1000,
-	}
-
-	done := make(chan bool)
-	go func() {
-		buf := make([]byte, 1)
-		for {
-			_, err := pr.Read(buf)
-			if err != nil {
-				break
-			}
-		}
-		done <- true
-	}()
-
-	// Read BytesRead concurrently while goroutine is running
-	for i := 0; i < 100; i++ {
-		_ = pr.BytesRead() // Just verify it doesn't panic
-	}
-
-	<-done
-
-	if pr.BytesRead() != 1000 {
-		t.Errorf("BytesRead = %d, want 1000", pr.BytesRead())
-	}
-}
 
 func TestImageFromGophercloud(t *testing.T) {
 	img := images.Image{
