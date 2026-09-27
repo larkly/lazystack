@@ -47,6 +47,42 @@ func TestClassifyIPs(t *testing.T) {
 	}
 }
 
+func TestClassifyIPs_DeterministicAcrossNetworks(t *testing.T) {
+	addr := func(ip string, version float64, typ string) interface{} {
+		return map[string]interface{}{"addr": ip, "version": version, "OS-EXT-IPS:type": typ}
+	}
+	addresses := map[string]interface{}{}
+	for _, n := range []string{"net-f", "net-c", "net-a", "net-e", "net-b", "net-d"} {
+		suffix := n[len(n)-1:]
+		addresses[n] = []interface{}{
+			addr("10.0.0."+suffix, 4, "fixed"),
+			addr("2001:db8::"+suffix, 6, "fixed"),
+			addr("203.0.113."+suffix, 4, "floating"),
+		}
+	}
+
+	wantV4 := []string{"10.0.0.a", "10.0.0.b", "10.0.0.c", "10.0.0.d", "10.0.0.e", "10.0.0.f"}
+	wantV6 := []string{"2001:db8::a", "2001:db8::b", "2001:db8::c", "2001:db8::d", "2001:db8::e", "2001:db8::f"}
+	wantFIP := []string{"203.0.113.a", "203.0.113.b", "203.0.113.c", "203.0.113.d", "203.0.113.e", "203.0.113.f"}
+	equal := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+	for i := 0; i < 50; i++ {
+		ipv4, ipv6, floating := classifyIPs(addresses)
+		if !equal(ipv4, wantV4) || !equal(ipv6, wantV6) || !equal(floating, wantFIP) {
+			t.Fatalf("iteration %d: ipv4=%v ipv6=%v floating=%v, want network-name order", i, ipv4, ipv6, floating)
+		}
+	}
+}
+
 func TestClassifyIPs_Empty(t *testing.T) {
 	ipv4, ipv6, floating := classifyIPs(nil)
 	if len(ipv4) != 0 || len(ipv6) != 0 || len(floating) != 0 {
