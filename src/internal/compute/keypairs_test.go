@@ -40,7 +40,7 @@ func TestListKeyPairs(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNovaClient(handler)
+	client := fakeNovaClient(t, handler)
 	ctx := context.Background()
 
 	keypairs, err := ListKeyPairs(ctx, client)

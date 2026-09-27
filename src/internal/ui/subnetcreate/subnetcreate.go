@@ -198,17 +198,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Back):
 			m.Active = false
 			return m, nil
-		case key.Matches(msg, shared.Keys.Tab):
-			m.focusField = (m.focusField + 1) % numFields
-			m.updateFocus()
+		case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Enter):
+			m.moveFocus(1)
 			return m, nil
 		case key.Matches(msg, shared.Keys.ShiftTab):
-			m.focusField = (m.focusField - 1 + numFields) % numFields
-			m.updateFocus()
-			return m, nil
-		case key.Matches(msg, shared.Keys.Enter):
-			m.focusField++
-			m.updateFocus()
+			m.moveFocus(-1)
 			return m, nil
 		case msg.String() == "ctrl+s":
 			return m.submit()
@@ -240,19 +234,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
-		m.focusField = (m.focusField + 1) % numFields
-		if m.ipVersion == 0 && m.focusField >= fieldPrefixLen && m.focusField <= fieldIPv6RA {
-			m.focusField = fieldSubmit
-		}
-		m.updateFocus()
+		m.moveFocus(1)
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.ShiftTab), key.Matches(msg, shared.Keys.Up):
-		m.focusField = (m.focusField - 1 + numFields) % numFields
-		if m.ipVersion == 0 && m.focusField >= fieldPrefixLen && m.focusField <= fieldIPv6RA {
-			m.focusField = fieldDHCP
-		}
-		m.updateFocus()
+		m.moveFocus(-1)
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Right):
@@ -260,6 +246,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldIPVersion:
 			m.ipVersion = (m.ipVersion + 1) % len(ipVersions)
 			m.filterSubnetPools()
+			m.ensureVisibleFocus()
 			return m, nil
 		case fieldSubnetPool:
 			count := len(m.subnetPools) + 1
@@ -287,6 +274,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldIPVersion:
 			m.ipVersion = (m.ipVersion - 1 + len(ipVersions)) % len(ipVersions)
 			m.filterSubnetPools()
+			m.ensureVisibleFocus()
 			return m, nil
 		case fieldSubnetPool:
 			count := len(m.subnetPools) + 1
@@ -311,9 +299,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, shared.Keys.Enter):
 		switch m.focusField {
-		case fieldName, fieldCIDR, fieldIPVersion, fieldGateway, fieldDHCP, fieldPrefixLen, fieldIPv6Cfg, fieldIPv6RA:
-			m.focusField++
-			m.updateFocus()
+		case fieldName, fieldCIDR, fieldIPVersion, fieldSubnetPool, fieldGateway, fieldDHCP, fieldPrefixLen, fieldIPv6Cfg, fieldIPv6RA:
+			m.moveFocus(1)
 			return m, nil
 		case fieldSubmit:
 			return m.submit()
@@ -347,6 +334,37 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// fieldVisible reports whether a field is shown for the current IP
+// version; the prefix length and IPv6 mode fields only exist for IPv6.
+func (m Model) fieldVisible(f int) bool {
+	if f >= fieldPrefixLen && f <= fieldIPv6RA {
+		return m.ipVersion == 1
+	}
+	return true
+}
+
+// moveFocus moves focus by delta (+1 or -1) to the next visible field,
+// wrapping around. All navigation keys go through it so hidden fields are
+// never focused.
+func (m *Model) moveFocus(delta int) {
+	f := m.focusField
+	for range numFields {
+		f = (f + delta + numFields) % numFields
+		if m.fieldVisible(f) {
+			break
+		}
+	}
+	m.focusField = f
+	m.updateFocus()
+}
+
+// ensureVisibleFocus moves focus forward if the focused field became hidden.
+func (m *Model) ensureVisibleFocus() {
+	if !m.fieldVisible(m.focusField) {
+		m.moveFocus(1)
+	}
 }
 
 func (m *Model) updateFocus() {

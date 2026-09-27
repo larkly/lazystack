@@ -1,7 +1,10 @@
 package compute
 
 import (
+	"fmt"
 	"testing"
+
+	"github.com/gophercloud/gophercloud/v2"
 )
 
 func TestKnownServicesNotEmpty(t *testing.T) {
@@ -50,6 +53,58 @@ func TestServiceEntry_Type(t *testing.T) {
 	}
 	if entry.Available != true {
 		t.Error("expected available to be true")
+	}
+}
+
+// blockStorageEntry runs FetchServiceCatalog against a provider whose catalog
+// only resolves the given block storage major versions.
+func blockStorageEntry(t *testing.T, versions ...int) ServiceEntry {
+	t.Helper()
+	pc := &gophercloud.ProviderClient{}
+	pc.EndpointLocator = func(eo gophercloud.EndpointOpts) (string, error) {
+		for _, v := range versions {
+			if eo.Version == v && (eo.Type == "block-storage" || eo.Type == "volume") {
+				return fmt.Sprintf("https://cinder.example/v%d/", v), nil
+			}
+		}
+		return "", &gophercloud.ErrEndpointNotFound{}
+	}
+	for _, e := range FetchServiceCatalog(pc, gophercloud.EndpointOpts{Region: "r1"}) {
+		if e.Type == "block-storage" {
+			return e
+		}
+	}
+	t.Fatal("block-storage entry missing")
+	return ServiceEntry{}
+}
+
+func TestFetchServiceCatalog_BlockStorageFallbacks(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		versions  []int
+		available bool
+		wantURL   string
+	}{
+		{"legacy volume v1 only", []int{1}, true, "https://cinder.example/v1/"},
+		{"v2 preferred over v1", []int{1, 2}, true, "https://cinder.example/v2/"},
+		{"v3 preferred over v2 and v1", []int{1, 2, 3}, true, "https://cinder.example/v3/"},
+		{"absent", nil, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := blockStorageEntry(t, tc.versions...)
+			if e.Available != tc.available {
+				t.Fatalf("Available=%v, want %v", e.Available, tc.available)
+			}
+			if !tc.available {
+				if len(e.Endpoints) != 0 {
+					t.Fatalf("endpoints=%v, want none", e.Endpoints)
+				}
+				return
+			}
+			if len(e.Endpoints) == 0 || e.Endpoints[0].URL != tc.wantURL {
+				t.Fatalf("endpoints=%v, want first URL %s", e.Endpoints, tc.wantURL)
+			}
+		})
 	}
 }
 

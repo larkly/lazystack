@@ -108,12 +108,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Back):
 			m.Active = false
 			return m, nil
-		case key.Matches(msg, shared.Keys.Up):
+		// Only arrows navigate: j/k must reach the filter as text.
+		case msg.String() == "up":
 			if m.cursor > 0 {
 				m.cursor--
 				m.ensureVisible()
 			}
-		case key.Matches(msg, shared.Keys.Down):
+		case msg.String() == "down":
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
 				m.ensureVisible()

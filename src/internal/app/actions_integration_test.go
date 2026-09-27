@@ -113,7 +113,7 @@ func TestConfirmedServerActionsHTTPAndAudit(t *testing.T) {
 						}
 						w.Header().Set("Content-Type", "application/json")
 						if failed {
-							w.WriteHeader(409)
+							w.WriteHeader(http.StatusConflict)
 							fmt.Fprint(w, `{"conflictingRequest":{"message":"fixture failure"}}`)
 							return
 						}
@@ -226,7 +226,7 @@ func TestBulkMixedActionsAggregateErrorsAndContinue(t *testing.T) {
 			return
 		}
 		checkJSON(t, body, `{"os-stop":null}`)
-		http.Error(w, "cannot stop "+r.URL.Path, 409)
+		http.Error(w, "cannot stop "+r.URL.Path, http.StatusConflict)
 	})
 	_, cmd := m.executeAction(modal.ConfirmAction{Action: "stop", Servers: []modal.ServerRef{{ID: "bad1", Name: "first"}, {ID: "good", Name: "middle", Action: "start"}, {ID: "bad2", Name: "last"}}})
 	msg, ok := cmd().(bulkResultMsg)

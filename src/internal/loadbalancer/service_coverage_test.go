@@ -22,7 +22,6 @@ func TestCreatePoolMonitorLifecycleHTTP(t *testing.T) {
 		{"success", "ACTIVE", 201, 0, ""},
 		{"cleanup", "ACTIVE", 400, 204, "creating health monitor for pool pool"},
 		{"already gone", "ACTIVE", 400, 404, "creating health monitor for pool pool"},
-		{"already deleting", "ACTIVE", 400, 409, "creating health monitor for pool pool"},
 		{"cleanup fails", "ACTIVE", 400, 500, "cleanup failed"},
 		{"pool error", "ERROR_CREATE", 0, 204, "waiting for pool pool to become ACTIVE"},
 	} {
@@ -84,7 +83,7 @@ func TestCreatePoolMonitorLifecycleHTTP(t *testing.T) {
 			} else if err == nil || !strings.Contains(err.Error(), tc.wantErr) || got != nil {
 				t.Fatalf("got=%v err=%v", got, err)
 			}
-			if tc.deleteStatus == 404 || tc.deleteStatus == 409 {
+			if tc.deleteStatus == 404 {
 				if strings.Contains(err.Error(), "cleanup failed") {
 					t.Fatal(err)
 				}

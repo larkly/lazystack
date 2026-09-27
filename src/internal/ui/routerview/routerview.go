@@ -75,7 +75,6 @@ type Model struct {
 	spinner         spinner.Model
 	err             string
 	refreshInterval time.Duration
-	highlightNames  map[string]bool
 }
 
 // New creates a router view model.
@@ -260,7 +259,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.routers) && len(m.routers) > 0 {
 			m.cursor = len(m.routers) - 1
 		}
-		m.applyHighlightNames()
 		if r := m.selectedRouter(); r != nil && r.ID != m.lastDetailID {
 			shared.Debugf("[routerview] routersLoaded: new selection %.8s, fetching detail", r.ID)
 			m.lastDetailID = r.ID
@@ -735,8 +733,8 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		name := r.Name
-		if name == "" && len(r.ID) > 8 {
-			name = r.ID[:8] + "..."
+		if name == "" {
+			name = shared.AbbrevID(r.ID)
 		}
 
 		statusStyle := lipgloss.NewStyle().Foreground(shared.ColorSuccess)
@@ -760,9 +758,7 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		line := prefix + nameStyle.Render(name) + shared.StyleHelp.Render(meta+adminStr) + "  " + statusStr
-		if lipgloss.Width(line) > maxWidth+2 {
-			line = line[:maxWidth+1]
-		}
+		line = shared.TruncateCells(line, maxWidth+2)
 		lines = append(lines, line)
 	}
 
@@ -834,9 +830,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 			continue
 		}
 		val := p.value
-		if lipgloss.Width(val) > valW {
-			val = val[:valW-1] + "\u2026"
-		}
+		val = shared.TruncateCells(val, valW)
 		rendered := valueStyle.Render(val)
 		if p.label == "Status" {
 			statusColor := shared.ColorSuccess
@@ -925,14 +919,10 @@ func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
 		}
 
 		netName := m.resolveInterfaceNetwork(iface)
-		if len(netName) > netW {
-			netName = netName[:netW-1] + "\u2026"
-		}
+		netName = shared.TruncateCells(netName, netW)
 
 		ip := iface.IPAddress
-		if len(ip) > ipW {
-			ip = ip[:ipW-1] + "\u2026"
-		}
+		ip = shared.TruncateCells(ip, ipW)
 
 		portShort := iface.PortID
 		if len(portShort) > portW {
@@ -958,10 +948,7 @@ func (m Model) resolveInterfaceNetwork(iface network.RouterInterface) string {
 		}
 	}
 	// Fall back to subnet ID
-	if len(iface.SubnetID) > 8 {
-		return iface.SubnetID[:8] + "\u2026"
-	}
-	return iface.SubnetID
+	return shared.AbbrevID(iface.SubnetID)
 }
 
 // --- Routes rendering ---
@@ -1025,13 +1012,9 @@ func (m Model) renderRoutesContent(maxWidth, maxHeight int) string {
 		}
 
 		dest := route.DestinationCIDR
-		if len(dest) > destW {
-			dest = dest[:destW-1] + "\u2026"
-		}
+		dest = shared.TruncateCells(dest, destW)
 		hop := route.NextHop
-		if len(hop) > hopW {
-			hop = hop[:hopW-1] + "\u2026"
-		}
+		hop = shared.TruncateCells(hop, hopW)
 
 		line := fmt.Sprintf("%s%-*s%s%s", prefix, destW, dest, sep, hop)
 
@@ -1121,33 +1104,6 @@ func (m *Model) ForceRefresh() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-}
-
-// ScrollToNames positions the cursor on the first matching router name.
-func (m *Model) ScrollToNames(names []string) {
-	m.highlightNames = make(map[string]bool, len(names))
-	for _, n := range names {
-		m.highlightNames[n] = true
-	}
-	m.applyHighlightNames()
-}
-
-func (m *Model) applyHighlightNames() {
-	if len(m.highlightNames) == 0 {
-		return
-	}
-	for i, r := range m.routers {
-		if m.highlightNames[r.Name] {
-			m.cursor = i
-			m.ensureSelectorCursorVisible()
-			m.highlightNames = nil
-			if r.ID != m.lastDetailID {
-				m.lastDetailID = r.ID
-				m.resetDetailState()
-			}
-			return
-		}
-	}
 }
 
 // Hints returns key hints for the status bar.

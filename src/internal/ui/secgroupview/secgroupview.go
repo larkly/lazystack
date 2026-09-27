@@ -768,9 +768,7 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		line := prefix + nameStyle.Render(sg.Name) + shared.StyleHelp.Render(rulesCount) + desc
-		if lipgloss.Width(line) > maxWidth+2 {
-			line = line[:maxWidth+1]
-		}
+		line = shared.TruncateCells(line, maxWidth+2)
 		lines = append(lines, line)
 	}
 
@@ -822,9 +820,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 			continue
 		}
 		val := p.value
-		if lipgloss.Width(val) > valW {
-			val = val[:valW-1] + "\u2026"
-		}
+		val = shared.TruncateCells(val, valW)
 		rows = append(rows, labelStyle.Render(p.label)+valueStyle.Render(val))
 	}
 	return strings.Join(rows, "\n")
@@ -854,7 +850,7 @@ func (m Model) formatRemote(r network.SecurityRule) string {
 		if name, ok := m.groupNames[r.RemoteGroupID]; ok {
 			remote = "group:" + name
 		} else {
-			remote = "group:" + r.RemoteGroupID[:min(8, len(r.RemoteGroupID))] + "\u2026"
+			remote = "group:" + shared.AbbrevID(r.RemoteGroupID)
 		}
 	}
 	if remote == "" {
@@ -963,9 +959,7 @@ func (m Model) renderRulesContent(maxWidth, maxHeight int) string {
 		}
 
 		remote := m.formatRemote(r)
-		if len(remote) > remoteW {
-			remote = remote[:remoteW-1] + "\u2026"
-		}
+		remote = shared.TruncateCells(remote, remoteW)
 
 		prefix := "  "
 		if selected {
@@ -1043,9 +1037,7 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 		}
 
 		name := srv.Name
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		status := shared.StatusIcon(srv.Status) + srv.Status
 		line := fmt.Sprintf("%s%-*s  %s", prefix, nameW, name, status)
@@ -1123,18 +1115,14 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 		if serverName == "" {
 			serverName = "\u2014"
 		}
-		if len(serverName) > serverW {
-			serverName = serverName[:serverW-1] + "\u2026"
-		}
+		serverName = shared.TruncateCells(serverName, serverW)
 
 		var ips []string
 		for _, ip := range p.FixedIPs {
 			ips = append(ips, ip.IPAddress)
 		}
 		ipStr := strings.Join(ips, ", ")
-		if len(ipStr) > ipsW {
-			ipStr = ipStr[:ipsW-1] + "\u2026"
-		}
+		ipStr = shared.TruncateCells(ipStr, ipsW)
 		if len(ips) == 0 {
 			ipStr = "\u2014"
 		}

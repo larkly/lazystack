@@ -55,7 +55,7 @@ func TestResourceConfirmActionsHTTPAndAudit(t *testing.T) {
 					}
 					w.Header().Set("Content-Type", "application/json")
 					if failed {
-						http.Error(w, "fixture failure", 409)
+						http.Error(w, "fixture failure", http.StatusConflict)
 						return
 					}
 					w.WriteHeader(tc.code)
@@ -117,7 +117,7 @@ func TestDetachVolumeHandlesLookupAttachmentAndPartialFailure(t *testing.T) {
 				case r.Method == "DELETE":
 					detached = append(detached, r.URL.Path)
 					if mode == "partial-failure" && strings.Contains(r.URL.Path, "s1") {
-						http.Error(w, "detach failed", 409)
+						http.Error(w, "detach failed", http.StatusConflict)
 						return
 					}
 					w.WriteHeader(202)
@@ -142,7 +142,7 @@ func TestDetachVolumeHandlesLookupAttachmentAndPartialFailure(t *testing.T) {
 				}
 			}
 			if mode == "success" || mode == "partial-failure" {
-				if len(detached) != 2 || detached[0] != "/servers/s1/os-volume_attachments/attachment" || detached[1] != "/servers/s2/os-volume_attachments/attachment" {
+				if len(detached) != 2 || detached[0] != "/servers/s1/os-volume_attachments/id" || detached[1] != "/servers/s2/os-volume_attachments/id" {
 					t.Fatalf("detach requests=%v", detached)
 				}
 				checkAudit(t, path, audit.ActionDetachVolume, "volume", "id", "name", mode == "partial-failure")
@@ -178,7 +178,7 @@ func TestResourceBulkDispatchPrecedesServerGuard(t *testing.T) {
 							return
 						}
 						if failed && strings.HasSuffix(r.URL.Path, "bad2") {
-							http.Error(w, "detach failed", 409)
+							http.Error(w, "detach failed", http.StatusConflict)
 							return
 						}
 						w.WriteHeader(202)
@@ -188,7 +188,7 @@ func TestResourceBulkDispatchPrecedesServerGuard(t *testing.T) {
 						t.Errorf("resource dispatched to server endpoint %s", r.URL)
 					}
 					if failed && strings.Contains(r.URL.Path, "bad") {
-						http.Error(w, "delete failed", 409)
+						http.Error(w, "delete failed", http.StatusConflict)
 						return
 					}
 					if action == "delete_images_bulk" {

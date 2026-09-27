@@ -9,9 +9,6 @@ import (
 	"github.com/larkly/lazystack/internal/shared"
 )
 
-// colorStr returns a string representation of a color for comparison.
-func colorStr(c fmt.Stringer) string { return c.String() }
-
 func TestApplyGeneral_SetsPlainMode(t *testing.T) {
 	prev := shared.PlainMode
 	defer func() { shared.PlainMode = prev }()
