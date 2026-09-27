@@ -661,12 +661,7 @@ func (m Model) openLBMemberCreate() (Model, tea.Cmd) {
 	if lb := m.lbView.LB(); lb != nil {
 		lbVIPAddress = lb.VipAddress
 	}
-	existingMembers := m.lbView.SelectedPoolMembers()
-	existingMemberAddrs := make([]string, 0, len(existingMembers))
-	for _, member := range existingMembers {
-		existingMemberAddrs = append(existingMemberAddrs, member.Address)
-	}
-	m.lbMemberCreate = lbmembercreate.New(m.client.LoadBalancer, m.client.Compute, poolID, poolName, lbVIPAddress, existingMemberAddrs)
+	m.lbMemberCreate = lbmembercreate.New(m.client.LoadBalancer, m.client.Compute, poolID, poolName, lbVIPAddress, m.lbView.SelectedPoolMembers())
 	m.lbMemberCreate.SetSize(m.width, m.height)
 	return m, m.lbMemberCreate.Init()
 }
