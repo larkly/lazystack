@@ -80,7 +80,7 @@ lazystack fills this gap by providing a single binary that connects to any OpenS
 1. **Keyboard-first**: Every action is reachable via keyboard shortcuts. Mouse support is not a goal.
 2. **Fast startup**: Connect and show servers in under 2 seconds on a healthy cloud.
 3. **Non-destructive by default**: Destructive actions require Ctrl-prefixed shortcuts and confirmation modals.
-4. **Minimal configuration**: Reads standard `clouds.yaml` — no additional config files needed.
+4. **Minimal configuration**: Reads standard `clouds.yaml`; the application config file (`~/.config/lazystack/config.yaml`, editable in-app with `Ctrl+K`) is optional.
 5. **Single binary**: No runtime dependencies beyond the compiled Go binary.
 6. **Safe by default**: Can't accidentally trigger destructive actions by typing in the wrong window.
 
@@ -277,7 +277,8 @@ src/
 ### Phase 1: MVP (Complete)
 
 #### Cloud Connection
-- Parse `clouds.yaml` from standard locations: `./clouds.yaml`, `$OS_CLIENT_CONFIG_FILE`, `~/.config/openstack/clouds.yaml`, `/etc/openstack/clouds.yaml`
+- Locate `clouds.yaml` in this order: `$OS_CLIENT_CONFIG_FILE` (exclusive when set: missing, unreadable, invalid or with no clouds is an error, no fallback), then `$XDG_CONFIG_HOME/openstack/clouds.yaml` (default `~/.config/openstack/clouds.yaml`), then `/etc/openstack/clouds.yaml`, then `./clouds.yaml` (current directory last, so a planted file cannot shadow the user's configuration)
+- Without the override, locations whose file is absent or defines no clouds are skipped; the first file with at least one cloud is used for both the cloud list and authentication (plus `secure.yaml` from the same directory); an unreadable or unparseable file stops the search with an error
 - Cloud picker overlay when multiple clouds are configured
 - Auto-select when only one cloud exists (override with `--pick-cloud` flag)
 - Switch clouds at any time with `C`
@@ -331,7 +332,9 @@ src/
 
 #### Help Overlay
 - `?` toggles scrollable help overlay
-- Keybindings grouped by context (Global, Server List, Server Detail, Create Form, Console Log, Modals)
+- First `?` shows Global plus the current view's section; `?` again shows every section; `Esc` closes
+- Every view has a section, including hypervisors, service catalog, DNS, user management and audit trail
+- Entries for shared bindings show the currently bound keys, so config.yaml rebinding is reflected
 - Scrollable with ↑/↓ when content doesn't fit
 
 #### Status Bar
@@ -358,7 +361,7 @@ src/
 - Hard reboot (`ctrl+p`)
 - All toggle actions read server status from both list and detail views
 
-#### Console Log Viewer (`l`)
+#### Console Log Viewer (`L`)
 - Scrollable console output (last 500 lines from Nova)
 - `g`/`G` for top/bottom navigation
 - `R` to refresh
@@ -408,14 +411,14 @@ src/
 - **Volume Detail**: Enter on a volume shows full properties — Name, ID, Status, Size, Type, AZ, Bootable, Encrypted, Multiattach, Description, Created, Updated, Snapshot ID, Source Volume ID, Attached Server (resolved name), Device, Metadata (key=value)
 - **Create** (`Ctrl+N`): Form with name, size (GB), type picker (from volume types API), AZ, description
 - **Delete** (`Ctrl+D`): Confirmation modal, works from list or detail
-- **Attach** (`Ctrl+A`): Server picker modal showing ACTIVE/SHUTOFF servers with type-to-filter
+- **Attach** (`i`): Server picker modal showing ACTIVE/SHUTOFF servers with type-to-filter
 - **Detach** (`Ctrl+T`): From detail view, finds attached server and detaches
 - Status colors: available=green, in-use=cyan, creating/extending=yellow, error=red, deleting=muted
 
 #### Floating IP Management
 - **List**: Columns (Floating IP, Status, Fixed IP, Port ID), auto-refresh, sorting
 - **Allocate** (`Ctrl+N`): Allocates from first external network, shows progress in status bar
-- **Associate** (`Ctrl+A` from server list/detail): Opens FIP picker modal showing unassociated IPs + "Allocate new" option. If no unassociated IPs exist, auto-allocates and assigns
+- **Associate** (`Ctrl+U` from server list/detail): Opens FIP picker modal showing unassociated IPs + "Allocate new" option. If no unassociated IPs exist, auto-allocates and assigns
 - **Disassociate** (`Ctrl+T`): Confirmation modal, only enabled when FIP has a port
 - **Release** (`Ctrl+D`): Confirmation modal
 
@@ -453,7 +456,7 @@ src/
 - **Router Detail** (`Enter`): Properties view with interfaces section and static routes
 - **Create Router** (`Ctrl+N`): Form with name, external network selection, admin state
 - **Delete Router** (`Ctrl+D`): Confirmation modal
-- **Add Interface** (`Ctrl+A` from detail): Subnet picker modal with optional custom IP assignment
+- **Add Interface** (`i` from detail): Subnet picker modal with optional custom IP assignment
 - **Remove Interface** (`Ctrl+T` from detail): Confirmation modal. Handles removing individual IPs from multi-IP router ports
 - **IPv6 handling**: Auto-addressed IPv6 subnets handled correctly when adding interfaces. Supports routers with multiple IPs on the same network
 
@@ -466,7 +469,7 @@ src/
 
 #### Server Detail Enhancements
 - **Networks section**: Shows IPs grouped by network name instead of flat lists
-- **Assign Floating IP** (`Ctrl+A`): Opens FIP picker modal
+- **Assign Floating IP** (`Ctrl+U`): Opens FIP picker modal
 
 #### Global Keybindings
 - `R` force refresh — handled globally, dispatches to active view
@@ -545,12 +548,12 @@ src/
 
 #### Image Management
 - **Combined View**: Merged list+detail with servers-using-image panel, search/filter
-- **Image Detail** (`Enter`): Full properties view with servers using this image
+- **Image Detail**: Info, properties and servers-using-image panes beside the list (`Tab` cycles panes); `Enter` on a server opens its detail
 - **Upload** (`Ctrl+N`): Local file picker or URL import with disk format auto-detection (qcow2, raw, vmdk, vdi, iso, vhd, aki, ari, ami). Auto-fills image name from filename. Progress bar with atomic counters
-- **Download** (`d`): Stream image to local file with directory picker and overwrite protection. Progress bar
-- **Edit** (`e`): Modify name, visibility, min disk/RAM, tags, protected flag
-- **Delete Image** (`Ctrl+D`): Confirmation modal, works from list or detail
-- **Deactivate/Reactivate**: Toggle image availability
+- **Download** (`Ctrl+G`, properties pane): Stream image to local file with directory picker and overwrite protection. Progress bar
+- **Edit** (`Enter`, info pane): Modify name, visibility, min disk/RAM, tags, protected flag
+- **Delete Image** (`Ctrl+D`): Confirmation modal; deletes the selected images when a bulk selection (`Space`) exists
+- **Deactivate/Reactivate** (`d`, list or info pane): Toggle image availability
 
 #### SSH Integration (`x` / `y`)
 - Launch SSH session directly from server list or detail view (`x` key)
@@ -602,6 +605,8 @@ src/
 | `--cloud NAME` | string | "" | Connect directly to named cloud, skip picker |
 | `--refresh N` | int | 5 | Auto-refresh interval in seconds |
 | `--idle-timeout N` | int | 0 | Pause polling after N minutes of no input (0 = disabled) |
+| `--plain` | bool | false | Plain ASCII status indicators instead of Unicode icons |
+| `--debug` | bool | false | Write a debug log to `~/.cache/lazystack/debug.log` (OS user cache dir; `$LAZYSTACK_DEBUG_LOG` overrides the path) |
 | `--no-check-update` | bool | false | Skip automatic update check on startup |
 | `--update` | bool | false | Self-update to the latest version |
 
@@ -613,13 +618,19 @@ src/
 | `q` / `Ctrl+C` | Quit |
 | `?` | Toggle help (scrollable) |
 | `C` | Switch cloud |
-| `1-9` / `←/→` | Switch tab (dynamic based on available services) |
+| `1-9` / `←/→` | Switch tab (dynamic based on available services; up to ten tabs, number keys reach the first nine) |
 | `R` | Force refresh |
 | `s` / `S` | Sort column / reverse sort |
 | `P` | Switch project (when multiple projects available) |
 | `Q` | Resource quotas overlay |
 | `PgUp` / `PgDn` | Page up / page down |
+| `Y` | Copy field picker |
+| `H` | Hypervisors (admin) |
+| `B` | Browse service catalog |
+| `Ctrl+K` | Configuration editor (saved to `~/.config/lazystack/config.yaml`) |
 | `Ctrl+R` | Restart app (re-exec binary) |
+
+Ctrl+A and Ctrl+B are reserved for GNU Screen and tmux and are never bound.
 
 #### Server List
 | Key | Action |
@@ -640,8 +651,9 @@ src/
 | `r` | Rename server |
 | `Ctrl+G` | Rebuild with new image |
 | `Ctrl+S` | Create snapshot |
-| `Ctrl+A` | Assign floating IP (FIP picker modal) |
-| `l` | Console log |
+| `i` | Attach volume (volume picker modal) |
+| `Ctrl+U` | Assign floating IP |
+| `L` | Console log |
 | `a` | Action history |
 | `x` | SSH to server |
 | `y` | Copy SSH command to clipboard |
@@ -666,10 +678,11 @@ src/
 | `r` | Rename server |
 | `Ctrl+G` | Rebuild with new image |
 | `Ctrl+S` | Create snapshot |
-| `Ctrl+A` | Assign floating IP (FIP picker modal) |
+| `i` | Attach volume (volume picker modal) |
+| `Ctrl+U` | Assign floating IP |
 | `Ctrl+Y` | Confirm resize (when VERIFY_RESIZE) |
 | `Ctrl+X` | Revert resize (when VERIFY_RESIZE) |
-| `l` | Console log |
+| `L` | Console log |
 | `a` | Action history |
 | `x` | SSH to server |
 | `y` | Copy SSH command to clipboard |
@@ -701,7 +714,7 @@ src/
 |-----|--------|
 | `↑/k` `↓/j` | Scroll |
 | `Ctrl+D` | Delete volume |
-| `Ctrl+A` | Attach to server (server picker modal) |
+| `i` | Attach to server (server picker modal) |
 | `Ctrl+T` | Detach from server |
 | `Y` | Copy field picker |
 | `Esc` | Back to list |
@@ -754,7 +767,7 @@ src/
 | `Enter` | View detail (interfaces, static routes) |
 | `Ctrl+N` | Create router |
 | `Ctrl+D` | Delete router |
-| `Ctrl+A` | Add interface (from detail, with optional custom IP) |
+| `i` | Add interface (from detail, with optional custom IP) |
 | `Ctrl+T` | Remove interface (from detail) |
 | `Y` | Copy field picker |
 | `/` | Filter |
@@ -776,13 +789,17 @@ src/
 | Key | Action |
 |-----|--------|
 | `↑/k` `↓/j` | Navigate |
-| `Enter` | View detail |
-| `Ctrl+N` | Upload image (file picker or URL) |
-| `d` | Download image to local file |
-| `e` | Edit image properties |
-| `Ctrl+D` | Delete image |
+| `Tab` / `Shift+Tab` | Cycle panes (list, info, properties, servers) |
+| `/` | Search / filter (list pane) |
+| `s` / `S` | Sort / reverse sort (list pane) |
+| `Space` | Select for bulk delete |
+| `Ctrl+N` | Upload image (file picker or URL; list pane) |
+| `Ctrl+D` | Delete image (or selected images) |
+| `d` | Deactivate / reactivate (list or info pane) |
+| `Ctrl+G` | Download image to local file (properties pane) |
+| `Enter` | Edit image properties (info pane) / open server detail (servers pane) |
 | `Y` | Copy field picker |
-| `/` | Filter |
+| `Esc` | Clear filter / selection |
 
 #### Console Log / Action History
 | Key | Action |
