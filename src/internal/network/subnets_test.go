@@ -64,8 +64,10 @@ const subnetPoolsFixture = `{
   ]
 }`
 
-func fakeNeutronClientSubnets(handler http.Handler) *gophercloud.ServiceClient {
+func fakeNeutronClientSubnets(t testing.TB, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -85,7 +87,7 @@ func TestCreateSubnet(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeNeutronClientSubnets(handler)
+	client := fakeNeutronClientSubnets(t, handler)
 	ctx := context.Background()
 
 	subnet, err := CreateSubnet(ctx, client, SubnetCreateOpts{
@@ -143,7 +145,7 @@ func TestUpdateSubnet(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeNeutronClientSubnets(handler)
+	client := fakeNeutronClientSubnets(t, handler)
 	ctx := context.Background()
 
 	newName := "renamed-subnet"
@@ -167,7 +169,7 @@ func TestDeleteSubnet(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeNeutronClientSubnets(handler)
+	client := fakeNeutronClientSubnets(t, handler)
 	ctx := context.Background()
 
 	err := DeleteSubnet(ctx, client, "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
@@ -187,7 +189,7 @@ func TestListSubnetPools(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeNeutronClientSubnets(handler)
+	client := fakeNeutronClientSubnets(t, handler)
 	ctx := context.Background()
 
 	pools, err := ListSubnetPools(ctx, client)

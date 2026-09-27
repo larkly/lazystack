@@ -432,14 +432,16 @@ func TestAttachVolumeReturnsAttachmentID(t *testing.T) {
 	}
 }
 
-func TestDetachVolumeResolvesAttachmentID(t *testing.T) {
+// Nova's detach endpoint is keyed by volume ID in every microversion; the
+// Cinder attachment UUID reported as attachment_id (2.89+) must not be used.
+func TestDetachVolumeDeletesMatchedAttachmentByVolumeID(t *testing.T) {
 	var deletePath string
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "os-volume_attachments"):
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"volumeAttachments": [{"id": "att-42", "volumeId": "vol-1", "serverId": "srv-1", "device": "/dev/vdb"}]}`))
-		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "os-volume_attachments/att-42"):
+			w.Write([]byte(`{"volumeAttachments": [{"attachment_id": "att-42", "volumeId": "vol-1", "serverId": "srv-1", "device": "/dev/vdb"}]}`))
+		case r.Method == http.MethodDelete:
 			deletePath = r.URL.Path
 			w.WriteHeader(http.StatusAccepted)
 		default:
@@ -451,8 +453,8 @@ func TestDetachVolumeResolvesAttachmentID(t *testing.T) {
 	if err := DetachVolume(context.Background(), client, "srv-1", "vol-1"); err != nil {
 		t.Fatalf("DetachVolume() error: %v", err)
 	}
-	if deletePath == "" {
-		t.Error("expected DELETE by attachment ID att-42, request never seen")
+	if !strings.HasSuffix(deletePath, "/servers/srv-1/os-volume_attachments/vol-1") {
+		t.Errorf("DELETE path = %q, want it keyed by volume ID vol-1", deletePath)
 	}
 }
 

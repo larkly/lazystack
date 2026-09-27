@@ -35,6 +35,8 @@ type Model struct {
 	filtered      []compute.Flavor
 	loading       bool
 	submitting    bool
+	confirming    bool           // bulk resize awaiting explicit confirmation
+	confirmFlavor compute.Flavor // target flavor while confirming
 	spinner       spinner.Model
 	width         int
 	height        int
@@ -115,6 +117,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// While a resize is in flight, ignore all input so the request
+		// cannot be repeated and its outcome cannot be discarded.
+		if m.submitting {
+			return m, nil
+		}
+		if m.confirming {
+			return m.updateConfirm(msg)
+		}
 		if m.filtering {
 			return m.updateFilter(msg)
 		}
@@ -144,8 +154,27 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, shared.Keys.Enter):
 		if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
+			if len(m.serverIDs) > 0 {
+				// Bulk resize affects many servers; confirm first.
+				m.confirming = true
+				m.confirmFlavor = m.filtered[m.cursor]
+				m.err = ""
+				return m, nil
+			}
 			return m.doResize(m.filtered[m.cursor])
 		}
+	}
+	return m, nil
+}
+
+func (m Model) updateConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, shared.Keys.Confirm), key.Matches(msg, shared.Keys.Enter):
+		m.confirming = false
+		return m.doResize(m.confirmFlavor)
+	case key.Matches(msg, shared.Keys.Deny), key.Matches(msg, shared.Keys.Back):
+		m.confirming = false
+		return m, nil
 	}
 	return m, nil
 }
@@ -263,6 +292,15 @@ func (m Model) View() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("⚠ "+m.err) + "\n\n")
 	}
 
+	if m.confirming {
+		f := m.confirmFlavor
+		b.WriteString(fmt.Sprintf("Resize %d servers to flavor %s (%d vCPU, %dMB RAM, %dGB disk)?\n",
+			len(m.serverIDs), f.Name, f.VCPUs, f.RAM, f.Disk))
+		b.WriteString("\n")
+		b.WriteString(shared.StyleHelp.Render("y/enter confirm • n/esc cancel"))
+		return m.renderBox(b.String())
+	}
+
 	if m.filtering {
 		b.WriteString(m.filter.View() + "\n")
 	} else if m.filter.Value() != "" {
@@ -331,8 +369,12 @@ func (m Model) View() string {
 	hint := shared.StyleHelp.Render("↑↓ navigate • enter resize • / filter • esc cancel")
 	b.WriteString(hint)
 
+	return m.renderBox(b.String())
+}
+
+func (m Model) renderBox(content string) string {
 	// Size modal to fit content + border/padding (8 chars)
-	contentWidth := lipgloss.Width(b.String())
+	contentWidth := lipgloss.Width(content)
 	modalWidth := contentWidth + 8
 	maxWidth := m.width - 4
 	if modalWidth > maxWidth {
@@ -341,7 +383,7 @@ func (m Model) View() string {
 	if modalWidth < 40 {
 		modalWidth = 40
 	}
-	box := shared.StyleModal.Width(modalWidth).Render(b.String())
+	box := shared.StyleModal.Width(modalWidth).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 

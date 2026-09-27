@@ -9,9 +9,6 @@ import (
 	"github.com/larkly/lazystack/internal/shared"
 )
 
-// colorStr returns a string representation of a color for comparison.
-func colorStr(c fmt.Stringer) string { return c.String() }
-
 func TestApplyGeneral_SetsPlainMode(t *testing.T) {
 	prev := shared.PlainMode
 	defer func() { shared.PlainMode = prev }()
@@ -199,5 +196,74 @@ func TestApplyAll_Integration(t *testing.T) {
 	}
 	if shared.Keys.Quit.Help().Key != "ctrl+x" {
 		t.Errorf("expected Quit key=ctrl+x, got %s", shared.Keys.Quit.Help().Key)
+	}
+}
+
+func TestApplyKeybindings_ColumnPick(t *testing.T) {
+	prev := shared.Keys.ColumnPick
+	defer func() { shared.Keys.ColumnPick = prev }()
+
+	ApplyKeybindings(map[string]string{"column_pick": "K"})
+	h := shared.Keys.ColumnPick.Help()
+	if h.Key != "K" || h.Desc != "columns" {
+		t.Errorf("ColumnPick help = %q/%q, want K/columns", h.Key, h.Desc)
+	}
+}
+
+func TestKeybindingMapsInSync(t *testing.T) {
+	defaults := DefaultKeybindings()
+	for name := range defaults {
+		if _, ok := keybindingFieldMap[name]; !ok {
+			t.Errorf("default %q has no setter", name)
+		}
+		if _, ok := defaultHelpText[name]; !ok {
+			t.Errorf("default %q has no help text", name)
+		}
+	}
+	for name := range keybindingFieldMap {
+		if _, ok := defaults[name]; !ok {
+			t.Errorf("setter %q has no default", name)
+		}
+	}
+	for name := range defaultHelpText {
+		if _, ok := defaults[name]; !ok {
+			t.Errorf("help text %q has no default", name)
+		}
+	}
+}
+
+func TestDefaultKeybindingsMatchSharedKeys(t *testing.T) {
+	cases := map[string]string{
+		"copy":            "Y",
+		"hypervisors":     "H",
+		"user_management": "U",
+		"column_pick":     "O",
+	}
+	d := DefaultKeybindings()
+	for name, want := range cases {
+		if d[name] != want {
+			t.Errorf("default %q = %q, want %q", name, d[name], want)
+		}
+	}
+}
+
+func TestApplyKeybindings_CopyHypervisorsUserManagementEditable(t *testing.T) {
+	// Applying the full map touches every binding, so restore the whole KeyMap.
+	prev := shared.Keys
+	defer func() { shared.Keys = prev }()
+
+	kb := Defaults().Keybindings
+	kb["copy"] = "ctrl+y"
+	kb["hypervisors"] = "ctrl+h"
+	kb["user_management"] = "ctrl+j"
+	ApplyKeybindings(kb)
+	if shared.Keys.Copy.Help().Key != "ctrl+y" {
+		t.Errorf("Copy = %q", shared.Keys.Copy.Help().Key)
+	}
+	if shared.Keys.Hypervisors.Help().Key != "ctrl+h" {
+		t.Errorf("Hypervisors = %q", shared.Keys.Hypervisors.Help().Key)
+	}
+	if shared.Keys.UserManagement.Help().Key != "ctrl+j" {
+		t.Errorf("UserManagement = %q", shared.Keys.UserManagement.Help().Key)
 	}
 }

@@ -48,6 +48,7 @@ type Model struct {
 	focusField     int
 	submitting     bool
 	loadingSGs     bool
+	sgsLoaded      bool
 	spinner        spinner.Model
 	err            string
 	width          int
@@ -135,6 +136,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sgLoadedMsg:
 		m.loadingSGs = false
+		m.sgsLoaded = true
 		m.secGroups = msg.sgs
 		// Pre-select the port's current security groups
 		for _, portSGID := range m.port.SecurityGroups {
@@ -402,14 +404,18 @@ func (m Model) submit() (Model, tea.Cmd) {
 		opts.AllowedAddressPairs = &pairs
 	}
 
-	// Collect selected security group IDs
-	indices := m.sortedSGIndices()
-	var sgIDs []string
-	for _, idx := range indices {
-		sgIDs = append(sgIDs, m.secGroups[idx].ID)
-	}
-	if !stringSetEqual(sgIDs, m.port.SecurityGroups) {
-		opts.SecurityGroups = &sgIDs
+	// Collect selected security group IDs. Only a successfully loaded list
+	// reflects the port's groups; while loading or after a load failure the
+	// selection is empty and must not be mistaken for "clear all groups".
+	if m.sgsLoaded {
+		indices := m.sortedSGIndices()
+		sgIDs := make([]string, 0, len(indices))
+		for _, idx := range indices {
+			sgIDs = append(sgIDs, m.secGroups[idx].ID)
+		}
+		if !stringSetEqual(sgIDs, m.port.SecurityGroups) {
+			opts.SecurityGroups = &sgIDs
+		}
 	}
 
 	m.submitting = true
@@ -418,7 +424,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	portID := m.port.ID
 	displayName := name
 	if displayName == "" {
-		displayName = portID[:8]
+		displayName = shared.ShortID(portID)
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {

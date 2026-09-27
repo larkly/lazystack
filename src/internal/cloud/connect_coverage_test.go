@@ -89,7 +89,7 @@ func TestConnectWithProjectCatalogRequirements(t *testing.T) {
 			if client == nil || client.Compute == nil || client.Image == nil || client.Network == nil || client.ProviderClient == nil {
 				t.Fatalf("missing required clients: %+v", client)
 			}
-			if client.CloudName != "coverage" || client.Region != "default" || client.ProviderClient.TokenID != "coverage-token" {
+			if client.CloudName != "coverage" || client.Region != "RegionOne" || client.ProviderClient.TokenID != "coverage-token" {
 				t.Errorf("wrong identity: %+v", client)
 			}
 			// The SDK discovers the versionless catalog endpoint first;

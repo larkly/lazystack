@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/network"
@@ -281,6 +282,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.server = msg.server
 		m.err = ""
+		m.clampScrolls()
 		// Fetch volume names if we have attachments and haven't yet
 		if msg.server != nil && len(msg.server.VolAttach) > 0 && m.blockClient != nil {
 			needFetch := false
@@ -314,6 +316,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.consoleScroll == 0 {
 			m.consoleScroll = m.consoleMaxScroll()
 		}
+		m.clampScrolls()
 		return m, nil
 
 	case consoleErrMsg:
@@ -333,6 +336,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.actionsLoading = false
 		m.actionsErr = ""
 		m.actions = msg.actions
+		m.clampScrolls()
 		return m, nil
 
 	case actionsErrMsg:
@@ -352,6 +356,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.interfacesLoading = false
 		m.interfacesErr = ""
 		m.interfaces = msg.ports
+		m.clampScrolls()
 		return m, nil
 
 	case interfacesErrMsg:
@@ -401,8 +406,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -424,6 +428,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, shared.Keys.ShiftTab):
 		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
+		return m, nil
+
+	// Console-specific: g/G for top/bottom when console focused. These must
+	// precede the resource jumps so g is not taken by JumpSecGroups.
+	case m.focus == focusConsole && msg.String() == "g":
+		m.consoleScroll = 0
+		return m, nil
+	case m.focus == focusConsole && msg.String() == "G":
+		m.consoleScroll = m.consoleMaxScroll()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Enter):
@@ -448,11 +461,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.PageUp):
-		m.scrollUp(m.panelHeight() - 2)
+		m.scrollUp(m.pageSize())
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.PageDown):
-		m.scrollDown(m.panelHeight() - 2)
+		m.scrollDown(m.pageSize())
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.JumpVolumes):
@@ -487,14 +500,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				return shared.NavigateToResourceMsg{Tab: "networks", Highlight: names}
 			}
 		}
-
-	// Console-specific: g/G for top/bottom when console focused
-	case m.focus == focusConsole && msg.String() == "g":
-		m.consoleScroll = 0
-		return m, nil
-	case m.focus == focusConsole && msg.String() == "G":
-		m.consoleScroll = m.consoleMaxScroll()
-		return m, nil
 	}
 
 	return m, nil
@@ -520,9 +525,7 @@ func (m *Model) scrollUp(n int) {
 	case focusVolumes:
 		if m.server != nil {
 			m.volumeCursor -= n
-			if m.volumeCursor < 0 {
-				m.volumeCursor = 0
-			}
+			m.clampVolumes()
 		}
 	case focusActions:
 		m.actionsScroll -= n
@@ -541,16 +544,13 @@ func (m *Model) scrollDown(n int) {
 		}
 	case focusInterfaces:
 		m.interfacesScroll += n
+		if max := m.interfacesMaxScroll(); m.interfacesScroll > max {
+			m.interfacesScroll = max
+		}
 	case focusVolumes:
 		if m.server != nil {
 			m.volumeCursor += n
-			maxIdx := len(m.server.VolAttach) - 1
-			if maxIdx < 0 {
-				maxIdx = 0
-			}
-			if m.volumeCursor > maxIdx {
-				m.volumeCursor = maxIdx
-			}
+			m.clampVolumes()
 		}
 	case focusConsole:
 		m.consoleScroll += n
@@ -565,64 +565,182 @@ func (m *Model) scrollDown(n int) {
 	}
 }
 
+// paneRect is the outer size of a dashboard pane, including its border.
+type paneRect struct{ w, h int }
+
+// contentWidth is the body width: border (2) + padContent indent (1) + margin (1).
+func (r paneRect) contentWidth() int { return max(0, r.w-4) }
+
+// contentHeight is the number of body rows: border (2) + title + blank line.
+func (r paneRect) contentHeight() int { return max(0, r.h-4) }
+
+// detailLayout holds the pane rectangles. Rendering, scroll limits and
+// cursor visibility all derive from it so they can never disagree.
+type detailLayout struct {
+	narrow                                      bool
+	info, console, interfaces, volumes, actions paneRect
+}
+
+// bannerLines is the number of rows used by the pending-action/resize banner.
+func (m Model) bannerLines() int {
+	if m.server != nil && (m.pendingAction != "" || m.server.Status == "VERIFY_RESIZE") {
+		return 1
+	}
+	return 0
+}
+
+// panelHeight is the height available to the pane grid.
 func (m Model) panelHeight() int {
-	h := m.height - 4 // title + action bar + padding
+	h := m.height - 4 - m.bannerLines() // title + blank + action bar + status bar
 	if h < 4 {
 		h = 4
 	}
 	return h
 }
 
-func (m Model) consoleMaxScroll() int {
-	_, consoleH, _ := m.rightPanelHeights()
-	max := len(m.consoleLines) - consoleH + 2 // border padding
-	if max < 0 {
-		return 0
+func (m Model) layout() detailLayout {
+	totalH := m.panelHeight()
+
+	if m.width < narrowThreshold {
+		w := m.width - 2
+		hs := []int{totalH * 25 / 100, totalH * 15 / 100, totalH * 15 / 100, totalH * 25 / 100, 0}
+		hs[4] = totalH - hs[0] - hs[1] - hs[2] - hs[3]
+		// Each pane needs border (2) + title + blank + at least one row.
+		fitHeights(hs, []int{5, 5, 5, 5, 5}, totalH)
+		return detailLayout{
+			narrow:     true,
+			info:       paneRect{w, hs[0]},
+			interfaces: paneRect{w, hs[1]},
+			volumes:    paneRect{w, hs[2]},
+			console:    paneRect{w, hs[3]},
+			actions:    paneRect{w, hs[4]},
+		}
 	}
-	return max
+
+	// Shared row heights
+	topH := totalH * 65 / 100
+	if topH < 6 {
+		topH = 6
+	}
+	bottomH := totalH - topH
+	if bottomH < 4 {
+		bottomH = 4
+	}
+
+	// Top row: 50/50 split, 1 gap
+	leftW := m.width / 2
+	rightW := m.width - leftW - 1
+
+	// Bottom row: equal thirds, 2 gaps
+	bottomContentW := m.width - 2
+	col1W := bottomContentW / 3
+	col2W := bottomContentW / 3
+	col3W := bottomContentW - col1W - col2W
+
+	return detailLayout{
+		info:       paneRect{leftW, topH},
+		console:    paneRect{rightW, topH},
+		interfaces: paneRect{col1W, bottomH},
+		volumes:    paneRect{col2W, bottomH},
+		actions:    paneRect{col3W, bottomH},
+	}
+}
+
+// fitHeights raises each height to its minimum, then takes rows back from
+// the panes with the most slack until the total fits (when it can).
+func fitHeights(hs, mins []int, total int) {
+	sum := 0
+	for i := range hs {
+		hs[i] = max(hs[i], mins[i])
+		sum += hs[i]
+	}
+	for sum > total {
+		best := -1
+		for i := range hs {
+			if hs[i] > mins[i] && (best < 0 || hs[i]-mins[i] > hs[best]-mins[best]) {
+				best = i
+			}
+		}
+		if best < 0 {
+			return
+		}
+		hs[best]--
+		sum--
+	}
+}
+
+// pageSize is the PgUp/PgDn step for the focused pane.
+func (m Model) pageSize() int {
+	l := m.layout()
+	var r paneRect
+	switch m.focus {
+	case focusInfo:
+		r = l.info
+	case focusConsole:
+		r = l.console
+	case focusInterfaces:
+		r = l.interfaces
+	case focusVolumes:
+		r = l.volumes
+	case focusActions:
+		r = l.actions
+	}
+	return max(1, r.contentHeight())
+}
+
+func (m Model) consoleMaxScroll() int {
+	return max(0, len(m.consoleLines)-m.layout().console.contentHeight())
 }
 
 func (m Model) actionsMaxScroll() int {
-	_, _, actionsH := m.rightPanelHeights()
-	max := len(m.actions) - actionsH + 2
-	if max < 0 {
-		return 0
-	}
-	return max
+	return max(0, len(m.actions)-m.layout().actions.contentHeight())
+}
+
+func (m Model) interfacesMaxScroll() int {
+	r := m.layout().interfaces
+	return max(0, len(m.interfaceLines(r.contentWidth()))-r.contentHeight())
 }
 
 // infoMaxScroll returns the highest valid scroll offset for the info pane,
 // computed the same way renderInfoContent slices its lines.
 func (m Model) infoMaxScroll() int {
-	lines := m.infoLines(m.infoContentWidth())
-	viewH := m.panelHeight() - 2
-	max := len(lines) - viewH
-	if max < 0 {
+	r := m.layout().info
+	return max(0, len(m.infoLines(r.contentWidth()))-r.contentHeight())
+}
+
+func (m Model) volumeCount() int {
+	if m.server == nil {
 		return 0
 	}
-	return max
+	return len(m.server.VolAttach)
 }
 
-// infoContentWidth returns the maxWidth the info pane is rendered with,
-// matching the layout math in renderWide/renderNarrow.
-func (m Model) infoContentWidth() int {
-	if m.width < narrowThreshold {
-		return m.width - 6 // renderNarrow: w-4 where w = m.width-2
-	}
-	return m.width/2 - 4 // renderWide: leftW-4 where leftW = m.width/2
+func (m Model) volumeMaxScroll() int {
+	return max(0, m.volumeCount()-m.layout().volumes.contentHeight())
 }
 
-func (m Model) rightPanelHeights() (totalH, consoleH, actionsH int) {
-	totalH = m.panelHeight()
-	consoleH = totalH * 60 / 100
-	if consoleH < 4 {
-		consoleH = 4
+// clampVolumes keeps the volume cursor on an attachment and scrolls the
+// volumes pane so the cursor row is visible.
+func (m *Model) clampVolumes() {
+	m.volumeCursor = max(0, min(m.volumeCursor, m.volumeCount()-1))
+	visible := max(1, m.layout().volumes.contentHeight())
+	if m.volumeCursor < m.volumeScroll {
+		m.volumeScroll = m.volumeCursor
 	}
-	actionsH = totalH - consoleH
-	if actionsH < 3 {
-		actionsH = 3
+	if m.volumeCursor >= m.volumeScroll+visible {
+		m.volumeScroll = m.volumeCursor - visible + 1
 	}
-	return
+	m.volumeScroll = max(0, min(m.volumeScroll, m.volumeMaxScroll()))
+}
+
+// clampScrolls brings every pane's offset back into range after the data
+// or the terminal size changed.
+func (m *Model) clampScrolls() {
+	m.scroll = max(0, min(m.scroll, m.infoMaxScroll()))
+	m.consoleScroll = max(0, min(m.consoleScroll, m.consoleMaxScroll()))
+	m.actionsScroll = max(0, min(m.actionsScroll, m.actionsMaxScroll()))
+	m.interfacesScroll = max(0, min(m.interfacesScroll, m.interfacesMaxScroll()))
+	m.clampVolumes()
 }
 
 // View renders the server detail dashboard.
@@ -679,62 +797,13 @@ func (m Model) View() string {
 }
 
 func (m Model) renderWide() string {
-	totalH := m.panelHeight()
+	l := m.layout()
 
-	// Shared row heights
-	topH := totalH * 65 / 100
-	if topH < 6 {
-		topH = 6
-	}
-	bottomH := totalH - topH
-	if bottomH < 4 {
-		bottomH = 4
-	}
-
-	// Top row: 50/50 split, 1 gap
-	leftW := m.width / 2
-	rightW := m.width - leftW - 1
-
-	// Bottom row: equal thirds, 2 gaps
-	bottomContentW := m.width - 2
-	col1W := bottomContentW / 3
-	col2W := bottomContentW / 3
-	col3W := bottomContentW - col1W - col2W
-
-	// Width in lipgloss v2 is total width INCLUDING borders.
-	// Content area = Width - 2 (borders). padContent adds 1 char indent, so content maxWidth = Width - 4.
-
-	// Top row panels
-	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
-	infoPanel := m.panelBorder(focusInfo).
-		Width(leftW).
-		Height(topH).
-		Render(infoContent)
-
-	consoleContent := padContent(m.panelTitle(focusConsole), m.renderConsoleContent(rightW-4, topH-4))
-	consolePanel := m.panelBorder(focusConsole).
-		Width(rightW).
-		Height(topH).
-		Render(consoleContent)
-
-	// Bottom row panels — equal thirds
-	ifaceContent := padContent(m.panelTitle(focusInterfaces), m.renderInterfacesContent(col1W-4, bottomH-4))
-	ifacePanel := m.panelBorder(focusInterfaces).
-		Width(col1W).
-		Height(bottomH).
-		Render(ifaceContent)
-
-	volContent := padContent(m.panelTitle(focusVolumes), m.renderVolumesContent(col2W-4, bottomH-4))
-	volPanel := m.panelBorder(focusVolumes).
-		Width(col2W).
-		Height(bottomH).
-		Render(volContent)
-
-	actionsContent := padContent(m.panelTitle(focusActions), m.renderActionsContent(col3W-4, bottomH-4))
-	actionsPanel := m.panelBorder(focusActions).
-		Width(col3W).
-		Height(bottomH).
-		Render(actionsContent)
+	infoPanel := m.renderPane(focusInfo, l.info, m.renderInfoContent(l.info.contentWidth(), l.info.contentHeight()))
+	consolePanel := m.renderPane(focusConsole, l.console, m.renderConsoleContent(l.console.contentWidth(), l.console.contentHeight()))
+	ifacePanel := m.renderPane(focusInterfaces, l.interfaces, m.renderInterfacesContent(l.interfaces.contentWidth(), l.interfaces.contentHeight()))
+	volPanel := m.renderPane(focusVolumes, l.volumes, m.renderVolumesContent(l.volumes.contentWidth(), l.volumes.contentHeight()))
+	actionsPanel := m.renderPane(focusActions, l.actions, m.renderActionsContent(l.actions.contentWidth(), l.actions.contentHeight()))
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", consolePanel)
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, ifacePanel, " ", volPanel, " ", actionsPanel)
@@ -743,46 +812,32 @@ func (m Model) renderWide() string {
 }
 
 func (m Model) renderNarrow() string {
-	totalH := m.panelHeight()
-	w := m.width - 2
-	infoH := totalH * 25 / 100
-	ifaceH := totalH * 15 / 100
-	volH := totalH * 15 / 100
-	consoleH := totalH * 25 / 100
-	actionsH := totalH - infoH - ifaceH - volH - consoleH
+	l := m.layout()
 
-	if infoH < 4 {
-		infoH = 4
-	}
-	if ifaceH < 3 {
-		ifaceH = 3
-	}
-	if volH < 3 {
-		volH = 3
-	}
-	if consoleH < 3 {
-		consoleH = 3
-	}
-	if actionsH < 3 {
-		actionsH = 3
-	}
-
-	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4))
-	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(infoContent)
-
-	ifaceContent := padContent(m.panelTitle(focusInterfaces), m.renderInterfacesContent(w-4, ifaceH-4))
-	ifacePanel := m.panelBorder(focusInterfaces).Width(w).Height(ifaceH).Render(ifaceContent)
-
-	volContent := padContent(m.panelTitle(focusVolumes), m.renderVolumesContent(w-4, volH-4))
-	volPanel := m.panelBorder(focusVolumes).Width(w).Height(volH).Render(volContent)
-
-	consoleContent := padContent(m.panelTitle(focusConsole), m.renderConsoleContent(w-4, consoleH-4))
-	consolePanel := m.panelBorder(focusConsole).Width(w).Height(consoleH).Render(consoleContent)
-
-	actionsContent := padContent(m.panelTitle(focusActions), m.renderActionsContent(w-4, actionsH-4))
-	actionsPanel := m.panelBorder(focusActions).Width(w).Height(actionsH).Render(actionsContent)
+	infoPanel := m.renderPane(focusInfo, l.info, m.renderInfoContent(l.info.contentWidth(), l.info.contentHeight()))
+	ifacePanel := m.renderPane(focusInterfaces, l.interfaces, m.renderInterfacesContent(l.interfaces.contentWidth(), l.interfaces.contentHeight()))
+	volPanel := m.renderPane(focusVolumes, l.volumes, m.renderVolumesContent(l.volumes.contentWidth(), l.volumes.contentHeight()))
+	consolePanel := m.renderPane(focusConsole, l.console, m.renderConsoleContent(l.console.contentWidth(), l.console.contentHeight()))
+	actionsPanel := m.renderPane(focusActions, l.actions, m.renderActionsContent(l.actions.contentWidth(), l.actions.contentHeight()))
 
 	return lipgloss.JoinVertical(lipgloss.Left, infoPanel, ifacePanel, volPanel, consolePanel, actionsPanel) + "\n"
+}
+
+// renderPane renders a bordered pane of exactly r.w x r.h cells (Width and
+// Height include the border in lipgloss v2). Lines are truncated rather than
+// wrapped and surplus rows are dropped, because lipgloss treats Height as a
+// minimum and an overflowing pane would push the rest of the dashboard out
+// of the viewport.
+func (m Model) renderPane(pane focusPane, r paneRect, content string) string {
+	innerW, innerH := max(0, r.w-2), max(0, r.h-2)
+	lines := strings.Split(padContent(m.panelTitle(pane), content), "\n")
+	if len(lines) > innerH {
+		lines = lines[:innerH]
+	}
+	for i, l := range lines {
+		lines[i] = ansi.Truncate(l, innerW, "")
+	}
+	return m.panelBorder(pane).Width(r.w).Height(r.h).Render(strings.Join(lines, "\n"))
 }
 
 // padContent adds the title, a blank line, and 1-char indent to each line of content.
@@ -993,14 +1048,13 @@ func (m Model) infoLines(maxWidth int) []string {
 	return lines
 }
 
-func (m Model) renderInfoContent(maxWidth int) string {
+func (m Model) renderInfoContent(maxWidth, viewH int) string {
 	lines := m.infoLines(maxWidth)
-	if len(lines) == 0 {
+	if len(lines) == 0 || viewH <= 0 {
 		return ""
 	}
 
 	// Apply scroll
-	viewH := m.panelHeight() - 2
 	start := m.scroll
 	if start > len(lines) {
 		start = len(lines)
@@ -1146,6 +1200,28 @@ func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
 		return lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("No interfaces found.")
 	}
 
+	lines := m.interfaceLines(maxWidth)
+	start := m.interfacesScroll
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+	if start >= end {
+		start = max(0, end-maxHeight)
+	}
+
+	return strings.Join(lines[start:end], "\n")
+}
+
+// interfaceLines builds the full (unscrolled) interfaces-pane content lines.
+func (m Model) interfaceLines(maxWidth int) []string {
+	if m.interfacesErr != "" || len(m.interfaces) == 0 {
+		return nil
+	}
+
 	labelStyle := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Bold(true)
 	valueStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
 	mutedStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted)
@@ -1180,19 +1256,7 @@ func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
 		}
 	}
 
-	start := m.interfacesScroll
-	if start < 0 {
-		start = 0
-	}
-	end := start + maxHeight
-	if end > len(lines) {
-		end = len(lines)
-	}
-	if start >= end {
-		start = max(0, end-maxHeight)
-	}
-
-	return strings.Join(lines[start:end], "\n")
+	return lines
 }
 
 func (m Model) renderActionsContent(maxWidth, maxHeight int) string {
@@ -1312,15 +1376,26 @@ func (m Model) renderActionBar() string {
 		Padding(0, 0)
 	labelStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)
 
+	const more = "[?]More"
+	maxWidth := m.width - 4
+	fullLen := 0
+	for _, b := range buttons {
+		fullLen += len("["+b.key+"]") + len(b.label) + 1 // +1 for space
+	}
+	// When not everything fits, reserve room for the "[?]More" marker so the
+	// bar never exceeds the terminal width.
+	limit := maxWidth
+	if fullLen > maxWidth {
+		limit = maxWidth - len(more) - 1
+	}
+
 	var parts []string
 	totalLen := 0
-	maxWidth := m.width - 4
-
 	for _, b := range buttons {
 		part := keyStyle.Render("["+b.key+"]") + labelStyle.Render(b.label)
 		partLen := len("["+b.key+"]") + len(b.label) + 1 // +1 for space
-		if totalLen+partLen > maxWidth && len(parts) > 0 {
-			parts = append(parts, lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("[?]More"))
+		if totalLen+partLen > limit && len(parts) > 0 {
+			parts = append(parts, lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(more))
 			break
 		}
 		parts = append(parts, part)
@@ -1464,10 +1539,11 @@ func (m *Model) ForceRefresh() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// SetSize updates the dimensions.
+// SetSize updates the dimensions and reclamps every pane's scroll offset.
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.clampScrolls()
 }
 
 // ServerFlavor returns the current server flavor name.
@@ -1581,9 +1657,10 @@ func (m Model) Hints() string {
 		return "\u2191\u2193 scroll interfaces \u2022 " + base
 	case focusVolumes:
 		if m.blockClient == nil {
-			return "\u2191\u2193 select \u2022 enter detail \u2022 ^b assign FIP \u2022 " + base
+			return "\u2191\u2193 select \u2022 enter detail \u2022 " + shared.Keys.AssignFIP.Help().Key + " assign FIP \u2022 " + base
 		}
-		return "\u2191\u2193 select \u2022 enter detail \u2022 ^a attach volume \u2022 ^t detach \u2022 ^b assign FIP \u2022 " + base
+		return "\u2191\u2193 select \u2022 enter detail \u2022 " + shared.Keys.Attach.Help().Key + " attach volume \u2022 ^t detach \u2022 " +
+			shared.Keys.AssignFIP.Help().Key + " assign FIP \u2022 " + base
 	case focusConsole:
 		return "\u2191\u2193 scroll log \u2022 g top \u2022 G bottom \u2022 " + base
 	case focusActions:

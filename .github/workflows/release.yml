@@ -10,21 +10,57 @@ on:
         description: "Tag to build and release (e.g. v0.0.5)"
         required: true
 
+# Read-only by default; only the release job can write (to create the
+# GitHub release). The dispatch job gets no GITHUB_TOKEN permissions at all.
 permissions:
-  contents: write
-
-env:
-  VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+  contents: read
 
 jobs:
+  # Every other job depends on validate, so nothing is tested, built or
+  # published until the tag is known to be a well-formed release tag that
+  # exists as refs/tags/<tag>. It runs for tag pushes as well as manual runs.
+  # The raw tag only ever reaches shell scripts through env, never through
+  # ${{ }} interpolation into script source.
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Validate tag format
+        id: tag
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$TAG" =~ $re ]]; then
+            echo "::error::Refusing to release: tag is not of the form vMAJOR.MINOR.PATCH[-PRERELEASE]"
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag exists
+        env:
+          TAG: ${{ steps.tag.outputs.version }}
+        run: |
+          if ! git show-ref --verify --quiet "refs/tags/$TAG"; then
+            echo "::error::Tag refs/tags/$TAG does not exist"
+            exit 1
+          fi
+
   test:
+    needs: [validate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.VERSION }}
+          ref: refs/tags/${{ needs.validate.outputs.version }}
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
@@ -32,26 +68,11 @@ jobs:
       - name: Run tests
         run: make test
 
-  validate:
-    if: github.event_name == 'workflow_dispatch'
-    needs: [test]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Verify tag exists
-        run: |
-          if ! git tag -l "${{ github.event.inputs.tag }}" | grep -q .; then
-            echo "::error::Tag '${{ github.event.inputs.tag }}' does not exist"
-            exit 1
-          fi
-
   build:
-    needs: [test]
-    if: ${{ !failure() && !cancelled() }}
+    needs: [validate, test]
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
     strategy:
       matrix:
         include:
@@ -64,11 +85,11 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.VERSION }}
+          ref: refs/tags/${{ needs.validate.outputs.version }}
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
@@ -79,18 +100,19 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          bin="lazystack-${{ matrix.goos }}-${{ matrix.goarch }}"
-          go build -ldflags "-s -w -X main.version=${{ env.VERSION }}" -o "../${bin}" ./cmd/lazystack
+          bin="lazystack-${GOOS}-${GOARCH}"
+          go build -ldflags "-s -w -X main.version=${VERSION}" -o "../${bin}" ./cmd/lazystack
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: lazystack-${{ matrix.goos }}-${{ matrix.goarch }}
           path: lazystack-${{ matrix.goos }}-${{ matrix.goarch }}
 
   package:
-    needs: build
-    if: ${{ !failure() && !cancelled() }}
+    needs: [validate, build]
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
     strategy:
       matrix:
         include:
@@ -101,45 +123,62 @@ jobs:
             deb_arch: arm64
             rpm_arch: aarch64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.VERSION }}
+          ref: refs/tags/${{ needs.validate.outputs.version }}
 
       - name: Download linux binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: lazystack-linux-${{ matrix.goarch }}
 
       - name: Prepare binary
+        env:
+          GOARCH: ${{ matrix.goarch }}
         run: |
-          chmod +x lazystack-linux-${{ matrix.goarch }}
-          cp lazystack-linux-${{ matrix.goarch }} lazystack
+          chmod +x "lazystack-linux-${GOARCH}"
+          cp "lazystack-linux-${GOARCH}" lazystack
 
+      # Pinned version and archive checksum (from the release's checksums.txt).
+      # The archive is verified before it is extracted, and nFPM is installed
+      # into a runner-owned directory without sudo. Bump both values together.
       - name: Install nFPM
+        env:
+          NFPM_VERSION: "2.47.0"
+          NFPM_SHA256: "0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783"
         run: |
-          NFPM_VERSION=$(curl -sI https://github.com/goreleaser/nfpm/releases/latest | grep -i location | sed 's|.*/v||;s/\r//')
-          curl -sL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" | sudo tar -xz -C /usr/local/bin nfpm
+          archive="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSL --proto '=https' -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/${archive}"
+          echo "${NFPM_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c --strict -
+          mkdir -p "$RUNNER_TEMP/nfpm"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/nfpm" nfpm
+          echo "$RUNNER_TEMP/nfpm" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/nfpm/nfpm" --version
 
       - name: Build deb
+        env:
+          NFPM_ARCH: ${{ matrix.deb_arch }}
         run: |
           export VERSION="${VERSION#v}"
-          export NFPM_ARCH="${{ matrix.deb_arch }}"
-          nfpm package --packager deb --target "lazystack_${VERSION}_${{ matrix.deb_arch }}.deb"
+          nfpm package --packager deb --target "lazystack_${VERSION}_${NFPM_ARCH}.deb"
 
       - name: Build rpm
+        env:
+          NFPM_ARCH: ${{ matrix.rpm_arch }}
         run: |
           export VERSION="${VERSION#v}"
-          export NFPM_ARCH="${{ matrix.rpm_arch }}"
-          nfpm package --packager rpm --target "lazystack-${VERSION}-1.${{ matrix.rpm_arch }}.rpm"
+          nfpm package --packager rpm --target "lazystack-${VERSION}-1.${NFPM_ARCH}.rpm"
 
       - name: Build Arch package
+        env:
+          NFPM_ARCH: ${{ matrix.rpm_arch }}
         run: |
           export VERSION="${VERSION#v}"
-          export NFPM_ARCH="${{ matrix.rpm_arch }}"
-          nfpm package --packager archlinux --target "lazystack-${VERSION}-1-${{ matrix.rpm_arch }}.pkg.tar.zst"
+          nfpm package --packager archlinux --target "lazystack-${VERSION}-1-${NFPM_ARCH}.pkg.tar.zst"
 
       - name: Upload packages
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: packages-${{ matrix.goarch }}
           path: |
@@ -148,66 +187,141 @@ jobs:
             *.pkg.tar.zst
 
   release:
-    needs: [build, package]
-    if: ${{ !failure() && !cancelled() }}
+    needs: [validate, build, package]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+    outputs:
+      darwin_arm64: ${{ steps.shas.outputs.darwin_arm64 }}
+      darwin_amd64: ${{ steps.shas.outputs.darwin_amd64 }}
+      linux_arm64: ${{ steps.shas.outputs.linux_arm64 }}
+      linux_amd64: ${{ steps.shas.outputs.linux_amd64 }}
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ needs.validate.outputs.version }}
+          path: source
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: source/src/go.mod
+          cache-dependency-path: source/src/go.sum
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
           merge-multiple: true
 
+      # One line per released file, each listed exactly once; the manifest
+      # never lists itself.
       - name: Generate checksums
-        run: sha256sum lazystack-* *.deb *.rpm *.pkg.tar.zst > SHA256SUMS
+        working-directory: dist
+        run: |
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS*' -printf '%P\n' \
+            | LC_ALL=C sort \
+            | xargs -r -d '\n' sha256sum -- > SHA256SUMS
+          if [ ! -s SHA256SUMS ]; then
+            echo "::error::No release assets to checksum"
+            exit 1
+          fi
+          dupes=$(awk '{print $2}' SHA256SUMS | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "::error::Duplicate SHA256SUMS entries: $dupes"
+            exit 1
+          fi
+          sha256sum -c --strict --quiet SHA256SUMS
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ env.VERSION }}
-          generate_release_notes: true
-          files: |
-            lazystack-*
-            *.deb
-            *.rpm
-            *.pkg.tar.zst
-            SHA256SUMS
+      # The self-updater only trusts SHA256SUMS with a valid Ed25519
+      # signature from the key embedded in the client, so a release is never
+      # published without SHA256SUMS.sig. releasesign also refuses a key that
+      # does not match selfupdate.ReleaseSigningPublicKey at this tag.
+      - name: Sign checksums
+        working-directory: source/src
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::RELEASE_SIGNING_KEY secret is not set; refusing to publish an unsigned release"
+            exit 1
+          fi
+          go run ./internal/selfupdate/cmd/releasesign sign "$GITHUB_WORKSPACE/dist/SHA256SUMS"
+          test -s "$GITHUB_WORKSPACE/dist/SHA256SUMS.sig"
 
       - name: Parse checksums
         id: shas
+        working-directory: dist
         run: |
-          echo "darwin_arm64=$(grep darwin-arm64 SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-          echo "darwin_amd64=$(grep darwin-amd64 SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-          echo "linux_arm64=$(grep linux-arm64 SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-          echo "linux_amd64=$(grep linux-amd64 SHA256SUMS | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          for platform in darwin_arm64 darwin_amd64 linux_arm64 linux_amd64; do
+            asset="lazystack-${platform/_/-}"
+            hash=$(awk -v f="$asset" '$2 == f { print $1 }' SHA256SUMS)
+            if [ -z "$hash" ]; then
+              echo "::error::No checksum for $asset"
+              exit 1
+            fi
+            echo "${platform}=${hash}" >> "$GITHUB_OUTPUT"
+          done
 
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ needs.validate.outputs.version }}
+          generate_release_notes: true
+          files: dist/*
+
+  # Notifies the Homebrew tap and AUR repositories. Each token is exposed
+  # only to the one step that uses it, and only to first-party tooling (gh).
+  # Use fine-grained tokens limited to the single target repository with
+  # Contents: read and write, which is what repository_dispatch requires.
+  dispatch:
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
       - name: Compute source tarball checksum
         id: src_sha
         run: |
-          curl -sL "https://github.com/larkly/lazystack/archive/refs/tags/${{ env.VERSION }}.tar.gz" -o source.tar.gz
+          curl -fsSL --proto '=https' -o source.tar.gz \
+            "https://github.com/larkly/lazystack/archive/refs/tags/${VERSION}.tar.gz"
           echo "source=$(sha256sum source.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
+      # Dispatch payloads are serialized with jq so tag and checksum values
+      # are always JSON strings, never spliced into JSON text.
       - name: Update Homebrew tap
-        uses: peter-evans/repository-dispatch@v4
-        with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          repository: larkly/homebrew-tap
-          event-type: update-formula
-          client-payload: |
-            {
-              "version": "${{ env.VERSION }}",
-              "sha256_darwin_arm64": "${{ steps.shas.outputs.darwin_arm64 }}",
-              "sha256_darwin_amd64": "${{ steps.shas.outputs.darwin_amd64 }}",
-              "sha256_linux_arm64": "${{ steps.shas.outputs.linux_arm64 }}",
-              "sha256_linux_amd64": "${{ steps.shas.outputs.linux_amd64 }}"
-            }
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          SHA_DARWIN_ARM64: ${{ needs.release.outputs.darwin_arm64 }}
+          SHA_DARWIN_AMD64: ${{ needs.release.outputs.darwin_amd64 }}
+          SHA_LINUX_ARM64: ${{ needs.release.outputs.linux_arm64 }}
+          SHA_LINUX_AMD64: ${{ needs.release.outputs.linux_amd64 }}
+        run: |
+          jq -n \
+            --arg version "$VERSION" \
+            --arg darwin_arm64 "$SHA_DARWIN_ARM64" \
+            --arg darwin_amd64 "$SHA_DARWIN_AMD64" \
+            --arg linux_arm64 "$SHA_LINUX_ARM64" \
+            --arg linux_amd64 "$SHA_LINUX_AMD64" \
+            '{event_type: "update-formula", client_payload: {
+                version: $version,
+                sha256_darwin_arm64: $darwin_arm64,
+                sha256_darwin_amd64: $darwin_amd64,
+                sha256_linux_arm64: $linux_arm64,
+                sha256_linux_amd64: $linux_amd64}}' \
+            | gh api --method POST repos/larkly/homebrew-tap/dispatches --input -
 
       - name: Update AUR package
-        uses: peter-evans/repository-dispatch@v4
-        with:
-          token: ${{ secrets.AUR_REPO_TOKEN }}
-          repository: larkly/aur-lazystack
-          event-type: update-pkgbuild
-          client-payload: |
-            {
-              "version": "${{ env.VERSION }}",
-              "sha256_source": "${{ steps.src_sha.outputs.source }}"
-            }
+        env:
+          GH_TOKEN: ${{ secrets.AUR_REPO_TOKEN }}
+          SHA_SOURCE: ${{ steps.src_sha.outputs.source }}
+        run: |
+          jq -n \
+            --arg version "$VERSION" \
+            --arg source "$SHA_SOURCE" \
+            '{event_type: "update-pkgbuild", client_payload: {
+                version: $version,
+                sha256_source: $source}}' \
+            | gh api --method POST repos/larkly/aur-lazystack/dispatches --input -

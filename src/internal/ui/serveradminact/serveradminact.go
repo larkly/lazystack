@@ -1,17 +1,13 @@
 package serveradminact
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/gophercloud/gophercloud/v2"
-	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 )
 
@@ -31,21 +27,20 @@ var adminActions = []adminAction{
 
 var serverStates = []string{"active", "error"}
 
-type actionDoneMsg struct {
-	action string
-	name   string
-}
-
-type actionErrMsg struct {
-	action string
-	name   string
-	err    error
+// ActionRequestMsg asks the root model to run an admin action. The modal
+// only collects input; execution (deadline, in-flight lock, audit and
+// result reporting) happens in the application so the outcome stays
+// visible after the modal has closed.
+type ActionRequestMsg struct {
+	Action     string // "Migrate", "Live Migrate", "Evacuate", "Force Delete", "Reset State"
+	ServerID   string
+	ServerName string
+	Arg        string // target host (Live Migrate, Evacuate) or state (Reset State)
 }
 
 // Model is the admin server actions modal.
 type Model struct {
 	Active      bool
-	client      *gophercloud.ServiceClient
 	serverID    string
 	serverName  string
 	width       int
@@ -54,16 +49,11 @@ type Model struct {
 	promptStage string // "" = picking, "host" = entering host, "state" = picking state, "confirm" = confirming
 	stateCursor int
 	hostInput   textinput.Model
-	submitting  bool
 	err         string
-	spinner     spinner.Model
 }
 
 // New creates an admin actions modal.
-func New(client *gophercloud.ServiceClient, serverID, serverName string) Model {
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-
+func New(serverID, serverName string) Model {
 	hi := textinput.New()
 	hi.Prompt = "Host: "
 	hi.Placeholder = "compute-host-01"
@@ -71,42 +61,20 @@ func New(client *gophercloud.ServiceClient, serverID, serverName string) Model {
 
 	return Model{
 		Active:     true,
-		client:     client,
 		serverID:   serverID,
 		serverName: serverName,
 		hostInput:  hi,
-		spinner:    s,
 	}
 }
 
 // Init initializes the model.
 func (m Model) Init() tea.Cmd {
-	return m.spinner.Tick
+	return nil
 }
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case actionDoneMsg:
-		m.submitting = false
-		m.Active = false
-		return m, func() tea.Msg {
-			return shared.ServerActionMsg{Action: msg.action, Name: msg.name}
-		}
-
-	case actionErrMsg:
-		m.submitting = false
-		m.err = fmt.Sprintf("%s %s: %v", msg.action, msg.name, msg.err)
-		return m, nil
-
-	case spinner.TickMsg:
-		if m.submitting {
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			return m, cmd
-		}
-		return m, nil
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -119,10 +87,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	if m.submitting {
-		return m, nil
-	}
-
 	if key.Matches(msg, shared.Keys.Back) {
 		if m.promptStage != "" {
 			m.promptStage = ""
@@ -147,7 +111,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.cursor = 0
 			}
 		case key.Matches(msg, shared.Keys.Enter):
-			return m, m.enterAction()
+			return m.enterAction()
 		}
 
 	case "host":
@@ -158,9 +122,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.err = "Host name is required"
 				return m, nil
 			}
-			m.submitting = true
-			m.err = ""
-			return m, m.executeWithHost(host)
+			return m.submit(host)
 		default:
 			var cmd tea.Cmd
 			m.hostInput, cmd = m.hostInput.Update(msg)
@@ -180,20 +142,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.stateCursor = 0
 			}
 		case key.Matches(msg, shared.Keys.Enter):
-			state := serverStates[m.stateCursor]
-			m.submitting = true
-			m.err = ""
-			a := adminActions[m.cursor]
-			return m, m.executeAction(a, state)
+			return m.submit(serverStates[m.stateCursor])
 		}
 
 	case "confirm":
 		switch {
 		case key.Matches(msg, shared.Keys.Confirm), msg.String() == "y":
-			m.submitting = true
-			m.err = ""
-			a := adminActions[m.cursor]
-			return m, m.executeAction(a, "")
+			return m.submit("")
 		case key.Matches(msg, shared.Keys.Deny), msg.String() == "n":
 			m.promptStage = ""
 			return m, nil
@@ -202,67 +157,42 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) enterAction() tea.Cmd {
+// enterAction opens the prompt the selected action needs, or submits it.
+// It returns the updated model: the prompt state must survive the call.
+func (m Model) enterAction() (Model, tea.Cmd) {
 	a := adminActions[m.cursor]
+	m.err = ""
 	switch {
 	case a.needsHost:
 		m.promptStage = "host"
 		m.hostInput.SetValue("")
-		m.hostInput.Focus()
-		m.err = ""
-		return textinput.Blink
+		return m, m.hostInput.Focus()
 	case a.apiAction == "Force Delete":
 		m.promptStage = "confirm"
-		m.err = ""
-		return nil
+		return m, nil
 	case a.apiAction == "Reset State":
 		m.promptStage = "state"
 		m.stateCursor = 0
-		m.err = ""
-		return nil
+		return m, nil
 	default:
-		// Cold Migrate: execute directly
-		m.submitting = true
-		m.err = ""
-		return m.executeAction(a, "")
+		// Cold Migrate: no further input needed
+		return m.submit("")
 	}
 }
 
-func (m Model) executeWithHost(host string) tea.Cmd {
-	a := adminActions[m.cursor]
-	return m.executeAction(a, host)
-}
-
-func (m Model) executeAction(a adminAction, arg string) tea.Cmd {
-	client := m.client
-	id := m.serverID
-	name := m.serverName
-	action := a.apiAction
-
-	return func() tea.Msg {
-		shared.Debugf("[serveradminact] executing %s on server %s", action, id)
-		var err error
-
-		switch action {
-		case "Migrate":
-			err = compute.MigrateServer(context.Background(), client, id)
-		case "Live Migrate":
-			err = compute.LiveMigrateServer(context.Background(), client, id, arg)
-		case "Evacuate":
-			_, err = compute.EvacuateServer(context.Background(), client, id, arg, false)
-		case "Force Delete":
-			err = compute.ForceDeleteServer(context.Background(), client, id)
-		case "Reset State":
-			err = compute.ResetServerState(context.Background(), client, id, arg)
-		}
-
-		if err != nil {
-			shared.Debugf("[serveradminact] %s failed: %v", action, err)
-			return actionErrMsg{action: action, name: name, err: err}
-		}
-		shared.Debugf("[serveradminact] %s succeeded for %s", action, name)
-		return actionDoneMsg{action: action, name: name}
+// submit closes the modal and hands the request to the application. The
+// modal is inactive afterwards, so a repeated key cannot submit twice.
+func (m Model) submit(arg string) (Model, tea.Cmd) {
+	req := ActionRequestMsg{
+		Action:     adminActions[m.cursor].apiAction,
+		ServerID:   m.serverID,
+		ServerName: m.serverName,
+		Arg:        arg,
 	}
+	shared.Debugf("[serveradminact] requesting %s on server %s", req.Action, req.ServerID)
+	m.Active = false
+	m.promptStage = ""
+	return m, func() tea.Msg { return req }
 }
 
 // View renders the admin actions modal.
@@ -293,10 +223,6 @@ func (m Model) View() string {
 		body += "\n\n" + lipgloss.NewStyle().
 			Foreground(shared.ColorError).
 			Render("  Error: "+m.err)
-	}
-
-	if m.submitting {
-		body += "\n\n  " + m.spinner.View() + " Executing..."
 	}
 
 	width := 60

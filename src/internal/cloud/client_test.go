@@ -232,8 +232,8 @@ func TestNegotiateNovaMicroversion_JunkBody(t *testing.T) {
 	defer closeFn()
 
 	max, used, warn := negotiateNovaMicroversion(context.Background(), compute)
-	if max != "unknown" || used != "2.100" || warn != "" {
-		t.Errorf("got (%q, %q, %q), want (unknown, 2.100, \"\")", max, used, warn)
+	if max != "unknown" || used != "2.1" || warn == "" {
+		t.Errorf("got (%q, %q, %q), want (unknown, 2.1, warning)", max, used, warn)
 	}
 }
 
@@ -244,8 +244,8 @@ func TestNegotiateNovaMicroversion_ServerError(t *testing.T) {
 	defer closeFn()
 
 	max, used, warn := negotiateNovaMicroversion(context.Background(), compute)
-	if max != "unknown" || used != "2.100" || warn != "" {
-		t.Errorf("got (%q, %q, %q), want (unknown, 2.100, \"\")", max, used, warn)
+	if max != "unknown" || used != "2.1" || warn == "" {
+		t.Errorf("got (%q, %q, %q), want (unknown, 2.1, warning)", max, used, warn)
 	}
 }
 
@@ -335,7 +335,6 @@ func TestParseMicroversion(t *testing.T) {
 	valid := map[string][2]int{
 		"2.1":   {2, 1},
 		"2.100": {2, 100},
-		"2.1.5": {2, 1},
 	}
 	for v, want := range valid {
 		major, minor, err := parseMicroversion(v)
@@ -343,7 +342,7 @@ func TestParseMicroversion(t *testing.T) {
 			t.Errorf("parseMicroversion(%q) = (%d, %d, %v), want (%d, %d, nil)", v, major, minor, err, want[0], want[1])
 		}
 	}
-	invalid := []string{"", "2", "a.b", "2.x", ".5", "v2.1"}
+	invalid := []string{"", "2", "a.b", "2.x", ".5", "v2.1", "2.1.5"}
 	for _, v := range invalid {
 		if _, _, err := parseMicroversion(v); err == nil {
 			t.Errorf("parseMicroversion(%q) = nil error, want error", v)

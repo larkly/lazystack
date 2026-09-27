@@ -73,6 +73,24 @@ func TestClassifyIPs_NoType(t *testing.T) {
 	}
 }
 
+func TestClassifyIPs_SkipsEmptyAddresses(t *testing.T) {
+	addresses := map[string]interface{}{
+		"net": []interface{}{
+			map[string]interface{}{"addr": "", "version": float64(4), "OS-EXT-IPS:type": "floating"},
+			map[string]interface{}{"addr": " ", "version": float64(6), "OS-EXT-IPS:type": "fixed"},
+			map[string]interface{}{"addr": "10.0.0.5", "version": float64(4), "OS-EXT-IPS:type": "fixed"},
+		},
+	}
+
+	ipv4, ipv6, floating := classifyIPs(addresses)
+	if len(floating) != 0 || len(ipv6) != 0 {
+		t.Errorf("empty addresses kept: floating=%q ipv6=%q", floating, ipv6)
+	}
+	if len(ipv4) != 1 || ipv4[0] != "10.0.0.5" {
+		t.Errorf("ipv4 = %q, want [10.0.0.5]", ipv4)
+	}
+}
+
 func TestExtractAllIPs(t *testing.T) {
 	addresses := map[string]interface{}{
 		"net1": []interface{}{

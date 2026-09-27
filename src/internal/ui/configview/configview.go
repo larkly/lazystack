@@ -191,11 +191,6 @@ func (m *Model) buildColorItems() []configItem {
 	return items
 }
 
-var reservedKeys = map[string]bool{
-	"ctrl+a": true,
-	"ctrl+u": true,
-}
-
 func (m *Model) buildKeybindingItems() []configItem {
 	cfg := m.cfg
 	// Use a stable order matching DefaultKeybindings
@@ -210,7 +205,7 @@ func (m *Model) buildKeybindingItems() []configItem {
 			label: keybindingLabel(name), key: name, kind: kindKeybinding,
 			get: func() string { return cfg.Keybindings[name] },
 			set: func(v string) error {
-				if reservedKeys[v] {
+				if shared.ContainsReservedKey(v) {
 					return fmt.Errorf("reserved key (%s)", v)
 				}
 				cfg.Keybindings[name] = v
@@ -338,7 +333,7 @@ func (m Model) handleKeyCapture(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if reservedKeys[keyStr] {
+	if shared.IsReservedKey(keyStr) {
 		m.errMsg = fmt.Sprintf("reserved key (%s)", keyStr)
 		return m, nil
 	}
@@ -550,10 +545,11 @@ func keybindingOrder() []string {
 		"stop_start", "lock", "rescue",
 		"resize", "confirm_resize", "revert_resize", "rebuild", "snapshot",
 		"refresh", "actions", "console", "select", "confirm", "deny", "restart",
-		"attach", "detach", "allocate",
+		"attach", "detach", "allocate", "assign_fip",
 		"sort", "reverse_sort", "deactivate", "quota",
-		"ssh", "copy_ssh", "console_url",
+		"ssh", "copy_ssh", "copy", "console_url",
 		"jump_volumes", "jump_sec_groups", "jump_networks",
+		"hypervisors", "user_management", "column_pick",
 	}
 }
 

@@ -157,7 +157,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
-		case msg.String() == "Q", key.Matches(msg, shared.Keys.Back):
+		case key.Matches(msg, shared.Keys.Quota, shared.Keys.Back):
 			m.Visible = false
 			m.scroll = 0
 			return m, nil
@@ -307,6 +307,11 @@ func renderBar(used, limit int) string {
 		emptyStyle.Render(strings.Repeat("\u2591", barWidth-filled))
 }
 
+// closeHint names the configured quota toggle key, which also closes.
+func closeHint() string {
+	return " " + shared.Keys.Quota.Help().Key + " or esc to close"
+}
+
 func (m Model) viewHeight() int {
 	h := m.Height - 8
 	if h < 3 {
@@ -321,7 +326,7 @@ func (m Model) Render() string {
 
 	if m.loading {
 		content := title + "\n\n" + m.spinner.View() + " Loading quotas..."
-		hint := shared.StyleHelp.Render(" Q or esc to close")
+		hint := shared.StyleHelp.Render(closeHint())
 		content += "\n\n" + hint
 		box := shared.StyleModal.Width(56).Render(content)
 		return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, box)
@@ -344,7 +349,7 @@ func (m Model) Render() string {
 		scrollHint = shared.StyleHelp.Render(" \u2191\u2193 scroll \u2022")
 	}
 
-	hint := scrollHint + shared.StyleHelp.Render(" Q or esc to close")
+	hint := scrollHint + shared.StyleHelp.Render(closeHint())
 
 	content := title + "\n\n" + visible + "\n\n" + hint
 	box := shared.StyleModal.Width(56).Render(content)
