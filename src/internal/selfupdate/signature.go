@@ -110,11 +110,16 @@ func verifyChecksumsSignature(ctx context.Context, checksumsURL string, sums []b
 // verified by a release signature. It is required when either version is
 // SignatureRequiredFrom or later, so clients from that version on never
 // accept an unsigned release and every release from it on must be signed.
-// An unparseable target fails closed; an unparseable current version (a
+// Only MAJOR.MINOR.PATCH is compared, so pre-releases of
+// SignatureRequiredFrom or later (e.g. v0.20.0-rc1) require it too. An
+// unparseable target fails closed; an unparseable current version (a
 // custom build) does not by itself require a signature.
 func signatureRequired(current, target string) bool {
-	if parseVersion(target) == nil || !isNewer(SignatureRequiredFrom, target) {
+	from := parseVersion(SignatureRequiredFrom)
+	t := parseVersion(target)
+	if t == nil || t.compareCore(from) >= 0 {
 		return true
 	}
-	return parseVersion(current) != nil && !isNewer(SignatureRequiredFrom, current)
+	c := parseVersion(current)
+	return c != nil && c.compareCore(from) >= 0
 }

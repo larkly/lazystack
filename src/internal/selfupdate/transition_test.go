@@ -23,6 +23,9 @@ func TestSignatureRequired(t *testing.T) {
 		{"v0.19.9", "v0.20.0", true}, // updating to the first mandatory release
 		{"v0.20.0", "v0.20.1", true}, // clients from v0.20.0 always require it
 		{"v0.20.0-3-gabc1234", "v0.19.9", true},
+		{"v0.19.9", "v0.20.0-rc1", true}, // pre-releases of v0.20.0 are covered
+		{"v0.20.0-rc1", "v0.19.9", true},
+		{"v0.19.0", "v0.19.1-rc1", false},
 		{"v1.0.0", "v1.0.1", true},
 		{"v0.12.0", "not-a-version", true}, // unknown target fails closed
 		{"custom-build", "v0.13.0", false}, // unparseable current version doesn't force it
