@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
@@ -636,6 +635,9 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		return m, m.executeDetachVolumesBulk(action.Servers)
 	case "delete_images_bulk":
 		return m, m.executeDeleteImagesBulk(action.Servers)
+	case "delete_lb_members_bulk":
+		m.lbView.ClearMemberSelection()
+		return m, m.executeDeleteLBMembersBulk(action)
 	}
 
 	// Bulk actions (server-only)
@@ -1160,43 +1162,6 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			m.logAudit(audit.ActionDeleteLB, "lb_member", memberID, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted member", Name: name}
 		}
-	case "delete_lb_members_bulk":
-		lbClient := m.client.LoadBalancer
-		poolID := action.ServerID
-		lbID := ""
-		if lb := m.lbView.LB(); lb != nil {
-			lbID = lb.ID
-		}
-		ids := m.lbView.SelectedMemberIDs()
-		count := len(ids)
-		m.lbView.ClearMemberSelection()
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtxLong()
-			defer cancel()
-			var failed int
-			for i, memberID := range ids {
-				if i > 0 && lbID != "" {
-					if err := loadbalancer.WaitForActive(ctx, lbClient, lbID, 60*time.Second); err != nil {
-						shared.Debugf("[action] bulk delete wait failed: %s", err)
-						failed += len(ids) - i
-						break
-					}
-				}
-				shared.Debugf("[action] bulk deleting member %s from pool %s (%d/%d)", memberID, poolID, i+1, count)
-				if err := loadbalancer.DeleteMember(ctx, lbClient, poolID, memberID); err != nil {
-					shared.Debugf("[action] bulk delete member %s failed: %s", memberID, err)
-					failed++
-				}
-			}
-			if failed > 0 {
-				return shared.ResourceActionErrMsg{
-					Action: "Bulk delete",
-					Name:   fmt.Sprintf("%d of %d members", failed, count),
-					Err:    fmt.Errorf("%d members failed to delete", failed),
-				}
-			}
-			return shared.ResourceActionMsg{Action: fmt.Sprintf("Deleted %d members from", count), Name: "pool"}
-		}
 	case "delete_keypair":
 		computeC := m.client.Compute
 		name := action.ServerID // keypair name is stored in ServerID
@@ -1238,107 +1203,6 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		return m, m.doReactivateImage(action.ServerID, action.Name)
 	}
 	return m, nil
-}
-
-func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal.ConfirmAction) tea.Cmd {
-	targets := action.Servers
-	act := action.Action
-	counts := countBulkActions(targets, act)
-	return func() tea.Msg {
-		var errs []string
-		var passwords []vmpassword.Credential
-		for _, s := range targets {
-			serverAction := s.Action
-			if serverAction == "" {
-				serverAction = act
-			}
-			var err error
-			var auditAction audit.ActionType
-			ctx, cancel := actionCtx()
-			switch serverAction {
-			case "delete":
-				auditAction = audit.ActionDelete
-				err = compute.DeleteServer(ctx, client, s.ID)
-			case "soft reboot":
-				auditAction = audit.ActionReboot
-				err = compute.RebootServer(ctx, client, s.ID, servers.SoftReboot)
-			case "hard reboot":
-				auditAction = audit.ActionReboot
-				err = compute.RebootServer(ctx, client, s.ID, servers.HardReboot)
-			case "pause":
-				auditAction = audit.ActionPause
-				err = compute.PauseServer(ctx, client, s.ID)
-			case "unpause":
-				auditAction = audit.ActionUnpause
-				err = compute.UnpauseServer(ctx, client, s.ID)
-			case "suspend":
-				auditAction = audit.ActionSuspend
-				err = compute.SuspendServer(ctx, client, s.ID)
-			case "resume":
-				auditAction = audit.ActionResume
-				err = compute.ResumeServer(ctx, client, s.ID)
-			case "shelve":
-				auditAction = audit.ActionShelve
-				err = compute.ShelveServer(ctx, client, s.ID)
-			case "unshelve":
-				auditAction = audit.ActionUnshelve
-				err = compute.UnshelveServer(ctx, client, s.ID)
-			case "stop":
-				auditAction = audit.ActionStop
-				err = compute.StopServer(ctx, client, s.ID)
-			case "start":
-				auditAction = audit.ActionStart
-				err = compute.StartServer(ctx, client, s.ID)
-			case "lock":
-				auditAction = audit.ActionLock
-				err = compute.LockServer(ctx, client, s.ID)
-			case "unlock":
-				auditAction = audit.ActionUnlock
-				err = compute.UnlockServer(ctx, client, s.ID)
-			case "rescue":
-				auditAction = audit.ActionRescue
-				var adminPass string
-				adminPass, err = compute.RescueServer(ctx, client, s.ID)
-				if err == nil && adminPass != "" {
-					passwords = append(passwords, vmpassword.Credential{Server: s.Name, Secret: adminPass})
-				}
-			case "unrescue":
-				auditAction = audit.ActionUnrescue
-				err = compute.UnrescueServer(ctx, client, s.ID)
-			}
-			cancel()
-			if err != nil {
-				m.logAudit(auditAction, "server", s.ID, s.Name, "error", err.Error())
-				errs = append(errs, fmt.Sprintf("%s (%s): %v", s.Name, serverAction, err))
-			} else {
-				m.logAudit(auditAction, "server", s.ID, s.Name, "success", "")
-			}
-		}
-		label := act
-		if len(counts) > 1 {
-			label = fmt.Sprintf("mixed action (%s)", formatActionCounts(counts))
-		}
-		if len(errs) > 0 {
-			return shared.ServerActionErrMsg{
-				Action: label,
-				Name:   fmt.Sprintf("%d servers", len(targets)),
-				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-			}
-		}
-		msg := shared.ServerActionMsg{
-			Action: label,
-			Name:   fmt.Sprintf("%d servers", len(targets)),
-		}
-		if len(passwords) > 0 {
-			return credentialsMsg{
-				result: msg,
-				title:  "Rescue Passwords",
-				note:   "Temporary rescue-mode passwords; they are not stored anywhere.",
-				creds:  passwords,
-			}
-		}
-		return msg
-	}
 }
 
 func (m Model) getServerSSHInfo() (name, keyName string, floatingIPs, ipv6, ipv4 []string) {
@@ -1500,110 +1364,4 @@ func (m Model) openServerMetadata() (Model, tea.Cmd) {
 	m.serverMetadata = servermetadata.New(m.client.Compute, id, name, meta)
 	m.serverMetadata.SetSize(m.width, m.height)
 	return m, m.serverMetadata.Init()
-}
-
-func (m Model) executeDeleteVolumesBulk(refs []modal.ServerRef) tea.Cmd {
-	bsClient := m.client.BlockStorage
-	if bsClient == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		var errs []string
-		for _, ref := range refs {
-			shared.Debugf("[action] deleting volume %s", ref.Name)
-			ctx, cancel := actionCtx()
-			err := volume.DeleteVolume(ctx, bsClient, ref.ID)
-			cancel()
-			if err != nil {
-				shared.Debugf("[action] delete volume %s failed: %s", ref.Name, err)
-				errs = append(errs, fmt.Sprintf("%s: %v", ref.Name, err))
-			}
-		}
-		if len(errs) > 0 {
-			return shared.ResourceActionErrMsg{
-				Action: "Delete volumes",
-				Name:   fmt.Sprintf("%d volumes", len(refs)),
-				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-			}
-		}
-		return shared.ResourceActionMsg{
-			Action: "Deleted volumes",
-			Name:   fmt.Sprintf("%d volumes", len(refs)),
-		}
-	}
-}
-
-func (m Model) executeDetachVolumesBulk(refs []modal.ServerRef) tea.Cmd {
-	computeC := m.client.Compute
-	bsClient := m.client.BlockStorage
-	if bsClient == nil || computeC == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		var errs []string
-		for _, ref := range refs {
-			shared.Debugf("[action] detaching volume %s", ref.Name)
-			ctx, cancel := actionCtx()
-			vol, err := volume.GetVolume(ctx, bsClient, ref.ID)
-			if err != nil {
-				cancel()
-				shared.Debugf("[action] detach volume %s failed: %s", ref.Name, err)
-				errs = append(errs, fmt.Sprintf("%s: %v", ref.Name, err))
-				continue
-			}
-			if !vol.IsAttached() {
-				cancel()
-				continue
-			}
-			for _, att := range vol.Attachments {
-				if err := volume.DetachVolume(ctx, computeC, att.ServerID, ref.ID); err != nil {
-					shared.Debugf("[action] detach volume %s from server %s failed: %s", ref.Name, att.ServerID, err)
-					errs = append(errs, fmt.Sprintf("%s from %s: %v", ref.Name, att.ServerID, err))
-				}
-			}
-			cancel()
-		}
-		if len(errs) > 0 {
-			return shared.ResourceActionErrMsg{
-				Action: "Detach volumes",
-				Name:   fmt.Sprintf("%d volumes", len(refs)),
-				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-			}
-		}
-		return shared.ResourceActionMsg{
-			Action: "Detached volumes",
-			Name:   fmt.Sprintf("%d volumes", len(refs)),
-		}
-	}
-}
-
-func (m Model) executeDeleteImagesBulk(refs []modal.ServerRef) tea.Cmd {
-	imgClient := m.client.Image
-	if imgClient == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		var errs []string
-		for _, ref := range refs {
-			shared.Debugf("[action] deleting image %s", ref.Name)
-			ctx, cancel := actionCtx()
-			err := image.DeleteImage(ctx, imgClient, ref.ID)
-			cancel()
-			if err != nil {
-				shared.Debugf("[action] delete image %s failed: %s", ref.Name, err)
-				errs = append(errs, fmt.Sprintf("%s: %v", ref.Name, err))
-			}
-		}
-		if len(errs) > 0 {
-			return shared.ResourceActionErrMsg{
-				Action: "Delete images",
-				Name:   fmt.Sprintf("%d images", len(refs)),
-				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-			}
-		}
-		return shared.ResourceActionMsg{
-			Action: "Deleted images",
-			Name:   fmt.Sprintf("%d images", len(refs)),
-		}
-	}
 }

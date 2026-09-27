@@ -708,13 +708,24 @@ func (m Model) openLBMemberDeleteConfirm() (Model, tea.Cmd) {
 
 func (m Model) openLBBulkMemberDeleteConfirm() (Model, tea.Cmd) {
 	poolID := m.lbView.SelectedPoolID()
-	ids := m.lbView.SelectedMemberIDs()
-	if poolID == "" || len(ids) == 0 {
+	members := m.lbView.SelectedMembers()
+	if poolID == "" || len(members) == 0 {
 		return m, nil
 	}
-	count := len(ids)
-	// Encode poolID in ServerID for executeAction
-	c := modal.NewConfirm("delete_lb_members_bulk", poolID, fmt.Sprintf("%d members", count))
+	count := len(members)
+	// Capture every target now (pool, load balancer and members) so a
+	// refresh or cleared selection cannot change what gets deleted.
+	refs := make([]modal.ServerRef, len(members))
+	for i, mem := range members {
+		name := mem.Name
+		if name == "" {
+			name = mem.ID
+		}
+		refs[i] = modal.ServerRef{ID: mem.ID, Name: name}
+	}
+	c := modal.NewBulkConfirm("delete_lb_members_bulk", refs)
+	c.ServerID = encodeLBMembersTarget(poolID, m.lbView.LBID())
+	c.Name = fmt.Sprintf("%d members", count)
 	c.Title = "Bulk Delete Members"
 	c.Body = fmt.Sprintf("Delete %d selected members from this pool?", count)
 	c.SetSize(m.width, m.height)

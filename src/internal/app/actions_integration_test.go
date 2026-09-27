@@ -143,12 +143,30 @@ func TestConfirmedServerActionsHTTPAndAudit(t *testing.T) {
 					if calls != 1 {
 						t.Fatalf("HTTP calls=%d", calls)
 					}
-					if failed {
+					if bulk {
+						if c, ok := msg.(credentialsMsg); ok && tc.action == "rescue" && !failed {
+							if len(c.creds) != 1 || c.creds[0].Server != "name" || c.creds[0].Secret != "fixture-password" {
+								t.Fatalf("credentials=%#v", c)
+							}
+							msg = c.result
+						}
+						r, ok := msg.(bulkResultMsg)
+						if !ok || r.label != tc.action || r.noun != "servers" {
+							t.Fatalf("result=%#v", msg)
+						}
+						if failed {
+							if len(r.failed) != 1 || r.failed[0].ref.ID != "id" || !strings.Contains(r.failed[0].err.Error(), "fixture failure") {
+								t.Fatalf("failed=%+v", r.failed)
+							}
+						} else if len(r.succeeded) != 1 || r.succeeded[0].ID != "id" || len(r.failed) != 0 {
+							t.Fatalf("result=%+v", r)
+						}
+					} else if failed {
 						e, ok := msg.(shared.ServerActionErrMsg)
 						if !ok || e.Err == nil || !strings.Contains(e.Err.Error(), "fixture failure") {
 							t.Fatalf("result=%#v", msg)
 						}
-					} else if tc.action == "delete" && !bulk {
+					} else if tc.action == "delete" {
 						if d, ok := msg.(serverDeletedMsg); !ok || d.id != "id" || d.name != "name" {
 							t.Fatalf("result=%#v", msg)
 						}
@@ -165,12 +183,8 @@ func TestConfirmedServerActionsHTTPAndAudit(t *testing.T) {
 						if !ok {
 							t.Fatalf("result=%#v", msg)
 						}
-						label, name := tc.label, "name"
-						if bulk {
-							label, name = tc.action, "1 servers"
-						}
-						if s.Action != label || s.Name != name {
-							t.Errorf("result=%+v want %s/%s", s, label, name)
+						if s.Action != tc.label || s.Name != "name" {
+							t.Errorf("result=%+v want %s/name", s, tc.label)
 						}
 					}
 					checkAudit(t, path, tc.audit, "server", "id", "name", failed)
@@ -215,12 +229,16 @@ func TestBulkMixedActionsAggregateErrorsAndContinue(t *testing.T) {
 		http.Error(w, "cannot stop "+r.URL.Path, 409)
 	})
 	_, cmd := m.executeAction(modal.ConfirmAction{Action: "stop", Servers: []modal.ServerRef{{ID: "bad1", Name: "first"}, {ID: "good", Name: "middle", Action: "start"}, {ID: "bad2", Name: "last"}}})
-	msg, ok := cmd().(shared.ServerActionErrMsg)
-	if !ok || msg.Action != "mixed action (start:1, stop:2)" || msg.Name != "3 servers" {
+	msg, ok := cmd().(bulkResultMsg)
+	if !ok || msg.label != "mixed action (start:1, stop:2)" || msg.summary() != "mixed action (start:1, stop:2): 1 of 3 servers succeeded, 2 failed" {
 		t.Fatalf("result=%+v", msg)
 	}
-	if !strings.Contains(msg.Err.Error(), "first (stop):") || !strings.Contains(msg.Err.Error(), "; last (stop):") || strings.Contains(msg.Err.Error(), "middle") {
-		t.Fatalf("aggregation=%v", msg.Err)
+	if len(msg.failed) != 2 || msg.failed[0].ref.Name != "first" || msg.failed[0].ref.Action != "stop" || msg.failed[1].ref.Name != "last" ||
+		len(msg.succeeded) != 1 || msg.succeeded[0].Name != "middle" || msg.succeeded[0].Action != "start" {
+		t.Fatalf("aggregation=%+v", msg)
+	}
+	if !strings.Contains(describeBulkItem(msg.failed[0]), "first (bad1) [stop]: ") {
+		t.Fatalf("failure line=%q", describeBulkItem(msg.failed[0]))
 	}
 	if !reflect.DeepEqual(requested, []string{"/servers/bad1/action", "/servers/good/action", "/servers/bad2/action"}) {
 		t.Fatalf("requests=%v", requested)

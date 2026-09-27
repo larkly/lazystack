@@ -202,17 +202,16 @@ func TestResourceBulkDispatchPrecedesServerGuard(t *testing.T) {
 				if cmd == nil {
 					t.Fatal("no bulk command")
 				}
-				msg := cmd()
+				r, ok := cmd().(bulkResultMsg)
+				if !ok {
+					t.Fatal("no structured bulk result")
+				}
 				if failed {
-					e, ok := msg.(shared.ResourceActionErrMsg)
-					if !ok || !strings.Contains(e.Err.Error(), "first:") || !strings.Contains(e.Err.Error(), "last") || strings.Contains(e.Err.Error(), "middle") {
-						t.Fatalf("aggregation=%#v", msg)
+					if len(r.failed) != 2 || r.failed[0].ref.Name != "first" || r.failed[1].ref.Name != "last" || len(r.succeeded) != 1 || r.succeeded[0].Name != "middle" {
+						t.Fatalf("aggregation=%+v", r)
 					}
-				} else {
-					s, ok := msg.(shared.ResourceActionMsg)
-					if !ok || !strings.HasPrefix(s.Name, "3 ") {
-						t.Fatalf("result=%#v", msg)
-					}
+				} else if len(r.succeeded) != 3 || len(r.failed) != 0 {
+					t.Fatalf("result=%+v", r)
 				}
 				if len(requests) < 3 {
 					t.Fatalf("bulk stopped early: %v", requests)
@@ -265,8 +264,8 @@ func TestBulkDetachSkipsUnattachedVolume(t *testing.T) {
 		fmt.Fprint(w, `{"volume":{"id":"id","status":"available","attachments":[]}}`)
 	})
 	_, cmd := m.executeAction(modal.ConfirmAction{Action: "detach_volumes_bulk", Servers: []modal.ServerRef{{ID: "id", Name: "name"}}})
-	msg, ok := cmd().(shared.ResourceActionMsg)
-	if !ok || msg.Action != "Detached volumes" || msg.Name != "1 volumes" || requests != 1 {
+	msg, ok := cmd().(bulkResultMsg)
+	if !ok || msg.label != "Detach volumes" || len(msg.skipped) != 1 || len(msg.succeeded) != 0 || len(msg.failed) != 0 || requests != 1 {
 		t.Fatalf("result=%+v requests=%d", msg, requests)
 	}
 }
@@ -279,15 +278,17 @@ func TestRescueWithoutReturnedPassword(t *testing.T) {
 				fmt.Fprint(w, `{}`)
 			})
 			action := modal.ConfirmAction{Action: "rescue", ServerID: "id", Name: "name"}
-			label := "Rescue"
 			if bulk {
 				action.Servers = []modal.ServerRef{{ID: "id", Name: "name"}}
-				label = "rescue"
 			}
 			_, cmd := m.executeAction(action)
-			msg, ok := cmd().(shared.ServerActionMsg)
-			if !ok || msg.Action != label {
-				t.Fatalf("result=%+v", msg)
+			msg := cmd()
+			if bulk {
+				if r, ok := msg.(bulkResultMsg); !ok || r.label != "rescue" || len(r.succeeded) != 1 {
+					t.Fatalf("result=%#v", msg)
+				}
+			} else if s, ok := msg.(shared.ServerActionMsg); !ok || s.Action != "Rescue" {
+				t.Fatalf("result=%#v", msg)
 			}
 			checkAudit(t, path, audit.ActionRescue, "server", "id", "name", false)
 		})

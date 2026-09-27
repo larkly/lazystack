@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/modal"
 	"github.com/larkly/lazystack/internal/ui/routerview"
@@ -135,6 +137,7 @@ func TestRemoveRouterInterfaceUsesTargetCapturedAtConfirmation(t *testing.T) {
 		"p-sub2": `[{"subnet_id":"sub2","ip_address":"10.0.1.1"}]`,
 	}}
 	m := routerFixture(t, st, "sub1", "sub2")
+	auditPath := withAuditLog(t, &m)
 	m = focusRouterInterfaces(t, m)
 	if iface := m.routerView.SelectedInterface(); iface == nil || iface.SubnetID != "sub1" {
 		t.Fatalf("fixture selected %+v", iface)
@@ -160,6 +163,31 @@ func TestRemoveRouterInterfaceUsesTargetCapturedAtConfirmation(t *testing.T) {
 	if len(st.mutations) != 1 || st.mutations[0] != `PUT /routers/router/remove_router_interface {"subnet_id":"sub1"}` {
 		t.Fatalf("mutations=%v, want only the confirmed sub1 interface removed", st.mutations)
 	}
+	checkInterfaceAudit(t, auditPath, "success")
+}
+
+// withAuditLog points the model at a fresh, enabled audit log.
+func withAuditLog(t *testing.T, m *Model) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "audit.log")
+	m.auditLogger = audit.NewLogger(p, true)
+	return p
+}
+
+func checkInterfaceAudit(t *testing.T, path, result string) {
+	t.Helper()
+	entries, err := audit.ReadEntries(path, 10)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("audit=%+v err=%v", entries, err)
+	}
+	e := entries[0]
+	if e.Action != audit.ActionRemoveInterface || e.ResourceType != "router" || e.ResourceID != "router" || e.Result != result ||
+		e.Cloud != "test-cloud" || e.Project != "test-project" || !strings.Contains(string(e.Details), "sub1") {
+		t.Errorf("audit=%+v details=%s", e, e.Details)
+	}
+	if (result == "error") != (e.Error != "") {
+		t.Errorf("audit error=%q", e.Error)
+	}
 }
 
 func TestRemoveRouterInterfaceRevalidatesPortAtExecution(t *testing.T) {
@@ -178,6 +206,7 @@ func TestRemoveRouterInterfaceRevalidatesPortAtExecution(t *testing.T) {
 				portDevice: map[string]string{},
 			}
 			m := routerFixture(t, st, "sub1")
+			auditPath := withAuditLog(t, &m)
 			m = focusRouterInterfaces(t, m)
 			m, _ = m.openRemoveRouterInterfaceConfirm()
 			st.portIPs["p-sub1"], st.portDevice["p-sub1"] = tc.ips, tc.device
@@ -188,11 +217,13 @@ func TestRemoveRouterInterfaceRevalidatesPortAtExecution(t *testing.T) {
 				if _, ok := msg.(shared.ResourceActionErrMsg); !ok || len(st.mutations) != 0 {
 					t.Fatalf("stale target must fail without mutating: msg=%#v mutations=%v", msg, st.mutations)
 				}
+				checkInterfaceAudit(t, auditPath, "error")
 				return
 			}
 			if _, ok := msg.(shared.ResourceActionMsg); !ok || len(st.mutations) != 1 || st.mutations[0] != tc.wantMutation {
 				t.Fatalf("msg=%#v mutations=%v", msg, st.mutations)
 			}
+			checkInterfaceAudit(t, auditPath, "success")
 		})
 	}
 }

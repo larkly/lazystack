@@ -1186,6 +1186,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case credentialsMsg:
 		return m.handleCredentials(msg)
 
+	case bulkResultMsg:
+		return m.handleBulkResult(msg)
+
 	case shared.ResourceActionMsg:
 		return m.handleResourceActionMsg(msg)
 

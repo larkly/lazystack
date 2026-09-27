@@ -374,6 +374,17 @@ func (m Model) SelectedMemberIDs() []string {
 	return ids
 }
 
+// SelectedMembers returns the selected members of the current pool.
+func (m Model) SelectedMembers() []loadbalancer.Member {
+	var out []loadbalancer.Member
+	for _, mem := range m.selectedPoolMembers() {
+		if m.selectedMembers[mem.ID] {
+			out = append(out, mem)
+		}
+	}
+	return out
+}
+
 // SelectedMemberCount returns the number of selected members in the current pool.
 func (m Model) SelectedMemberCount() int {
 	return len(m.SelectedMemberIDs())
