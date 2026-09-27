@@ -1,7 +1,6 @@
 package dnslist
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -292,7 +291,9 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) fetchZones() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		allPages, err := zones.List(client, nil).AllPages(context.Background())
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		allPages, err := zones.List(client, nil).AllPages(ctx)
 		if err != nil {
 			return zonesErrMsg{err: err}
 		}
@@ -307,7 +308,9 @@ func (m Model) fetchZones() tea.Cmd {
 func (m Model) fetchRecordsets(zoneID string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		allPages, err := recordsets.ListByZone(client, zoneID, nil).AllPages(context.Background())
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		allPages, err := recordsets.ListByZone(client, zoneID, nil).AllPages(ctx)
 		if err != nil {
 			return recordsetsErrMsg{zoneID: zoneID, err: err}
 		}

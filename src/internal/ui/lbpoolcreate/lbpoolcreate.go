@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -40,8 +41,12 @@ var (
 	monTypeOpts  = []string{"NONE", "HTTP", "HTTPS", "TCP", "PING"}
 )
 
-type poolCreatedMsg struct{ listener string } // listener the pool was bound to, if any
+type poolCreatedMsg struct {
+	shared.Audit
+	listener string // listener the pool was bound to, if any
+}
 type poolCreateErrMsg struct {
+	shared.Audit
 	err     error
 	partial string // what was already created when a later step failed
 }
@@ -458,11 +463,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 		client := m.client
 		id := m.poolID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdatePool(context.Background(), client, id, &name, lbMethod, nil)
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
+			err := loadbalancer.UpdatePool(ctx, client, id, &name, lbMethod, nil)
+			rec := shared.NewAudit(audit.ActionUpdate, "lb_pool", id, name, err)
 			if err != nil {
-				return poolCreateErrMsg{err: err}
+				return poolCreateErrMsg{Audit: rec, err: err}
 			}
-			return poolCreatedMsg{}
+			return poolCreatedMsg{Audit: rec}
 		})
 	}
 
@@ -526,11 +534,17 @@ func (m Model) submit() (Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
 		pool, err := loadbalancer.CreatePool(ctx, client, lbID, name, protocol, lbMethod, monOpts)
+		poolDetails := map[string]string{"load_balancer_id": lbID, "protocol": protocol, "lb_method": lbMethod}
+		if monOpts != nil {
+			poolDetails["monitor_type"] = string(monOpts.Type)
+		}
+		recs := []shared.AuditRecord{{Action: audit.ActionCreateLB, ResourceType: "lb_pool",
+			ResourceID: poolID(pool), ResourceName: name, Err: err, Details: poolDetails}}
 		if err != nil {
-			return poolCreateErrMsg{err: err}
+			return poolCreateErrMsg{Audit: shared.Audits(recs...), err: err}
 		}
 		if listenerID == "" {
-			return poolCreatedMsg{}
+			return poolCreatedMsg{Audit: shared.Audits(recs...)}
 		}
 		// Octavia rejects changes while the load balancer is PENDING_*, so
 		// wait for it before binding; success is only reported once the
@@ -539,15 +553,27 @@ func (m Model) submit() (Model, tea.Cmd) {
 		if err == nil {
 			err = loadbalancer.SetListenerDefaultPool(ctx, client, listenerID, pool.ID)
 		}
+		recs = append(recs, shared.AuditRecord{Action: audit.ActionUpdate, ResourceType: "lb_listener",
+			ResourceID: listenerID, ResourceName: listenerName, Err: err,
+			Details: map[string]string{"default_pool_id": pool.ID}})
 		if err != nil {
 			shared.Debugf("[lbpoolcreate] binding pool %s to listener %s failed: %v", pool.ID, listenerID, err)
 			return poolCreateErrMsg{
+				Audit:   shared.Audits(recs...),
 				err:     err,
 				partial: fmt.Sprintf("Pool %s was created but is not attached to listener %s", pool.ID, listenerName),
 			}
 		}
-		return poolCreatedMsg{listener: listenerName}
+		return poolCreatedMsg{Audit: shared.Audits(recs...), listener: listenerName}
 	})
+}
+
+// poolID returns the ID of a resource returned by a request, if any.
+func poolID(r *loadbalancer.Pool) string {
+	if r == nil {
+		return ""
+	}
+	return r.ID
 }
 
 // SetSize updates the dimensions.

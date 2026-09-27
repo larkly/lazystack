@@ -1,7 +1,6 @@
 package serversnapshot
 
 import (
-	"context"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -10,12 +9,19 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 )
 
-type snapshotSuccessMsg struct{ name string }
-type snapshotErrMsg struct{ err error }
+type snapshotSuccessMsg struct {
+	shared.Audit
+	name string
+}
+type snapshotErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the server snapshot overlay modal.
 type Model struct {
@@ -123,14 +129,18 @@ func (m Model) submit() (Model, tea.Cmd) {
 	id := m.serverID
 	serverName := m.serverName
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serversnapshot] creating snapshot %q for server %s", name, id)
-		err := compute.CreateSnapshot(context.Background(), client, id, name)
+		err := compute.CreateSnapshot(ctx, client, id, name)
+		rec := shared.NewAudit(audit.ActionSnapshot, "server", id, serverName, err).
+			WithDetails(map[string]string{"snapshot": name})
 		if err != nil {
 			shared.Debugf("[serversnapshot] error creating snapshot %q: %v", name, err)
-			return snapshotErrMsg{err: err}
+			return snapshotErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[serversnapshot] created snapshot %q for server %s", name, serverName)
-		return snapshotSuccessMsg{name: serverName}
+		return snapshotSuccessMsg{Audit: rec, name: serverName}
 	})
 }
 

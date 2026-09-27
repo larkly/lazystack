@@ -19,7 +19,7 @@ func TestResourceConfirmActionsHTTPAndAudit(t *testing.T) {
 		code                   int
 	}{
 		{"delete_volume", "/volumes/id", "volume", audit.ActionDelete, 202},
-		{"release_fip", "/floatingips/id", "floating_ip", audit.ActionDetachFIP, 204},
+		{"release_fip", "/floatingips/id", "floating_ip", audit.ActionReleaseFIP, 204},
 		{"disassociate_fip", "/floatingips/id", "floating_ip", audit.ActionDetachFIP, 200},
 		{"delete_router", "/routers/id", "router", audit.ActionDeleteRouter, 204},
 		{"delete_port", "/ports/id", "port", audit.ActionDeletePort, 204},

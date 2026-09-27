@@ -2,10 +2,14 @@ package volumedetail
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/testutil"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
@@ -81,5 +85,61 @@ func TestReloadWithLessContentReclampsScroll(t *testing.T) {
 	m, _ = m.Update(volumeDetailLoadedMsg{vol: &volume.Volume{ID: "vol-1", Name: "data"}})
 	if m.scroll != 0 {
 		t.Fatalf("scroll=%d after reload with short content, want 0", m.scroll)
+	}
+}
+
+// Background ticks must not stack volume fetches, and a slow older response
+// must never overwrite the result of a newer fetch.
+func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
+	m := loadedModel(t, 0, 40)
+
+	m, first := m.Update(shared.TickMsg{})
+	if first == nil {
+		t.Fatal("tick did not fetch")
+	}
+	staleSeq := m.refresh.Seq()
+	if _, again := m.Update(shared.TickMsg{}); again != nil {
+		t.Fatal("tick started a second fetch while one was in flight")
+	}
+
+	m.ForceRefresh()
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: m.refresh.Seq(), vol: &volume.Volume{ID: "vol-1", Status: "in-use"}})
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: staleSeq, vol: &volume.Volume{ID: "vol-1", Status: "available"}})
+	m, _ = m.Update(volumeDetailErrMsg{seq: staleSeq, err: fmt.Errorf("stale")})
+	if m.volume.Status != "in-use" || m.err != "" {
+		t.Fatalf("stale response applied: status=%q err=%q", m.volume.Status, m.err)
+	}
+	if _, next := m.Update(shared.TickMsg{}); next == nil {
+		t.Fatal("tick blocked after the newest fetch completed")
+	}
+}
+
+// A server that sends headers and then stops mid-body must not hang the
+// fetch: the command's deadline cuts it off and reports an error.
+func TestStalledFetchIsCutOffByDeadline(t *testing.T) {
+	orig := shared.RequestTimeout
+	shared.RequestTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { shared.RequestTimeout = orig })
+
+	client, cleanup := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "4096")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"volume":{"id":"vol-1",`))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done() // stall until the client gives up
+	}))
+	defer cleanup()
+
+	m := New(client, nil, "vol-1")
+	done := make(chan tea.Msg, 1)
+	go func() { done <- m.fetchVolume(0)() }()
+	select {
+	case msg := <-done:
+		if _, ok := msg.(volumeDetailErrMsg); !ok {
+			t.Fatalf("got %T, want volumeDetailErrMsg", msg)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("stalled fetch was never cut off")
 	}
 }

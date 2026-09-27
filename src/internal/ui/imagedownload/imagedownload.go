@@ -2,6 +2,7 @@ package imagedownload
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -493,7 +494,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.downloadID = downloadSeq.Add(1)
 	downloadID := m.downloadID
 	return m, tea.Batch(m.spinner.Tick, scheduleProgressTick(), func() tea.Msg {
-		ctx := context.Background()
+		// The transfer may legitimately take hours, so it has no overall
+		// deadline; it is abandoned only if no bytes arrive for a while.
+		// (The wait for response headers is bounded by the transport.)
+		ctx, cancel := shared.StallCtx(sharedBytes.Load)
+		defer cancel()
 
 		body, contentLength, err := image.DownloadImageData(ctx, client, imageID)
 		if err != nil {
@@ -514,6 +519,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 		_, err = io.Copy(f, reader)
 		if err != nil {
+			if errors.Is(context.Cause(ctx), shared.ErrTransferStalled) {
+				err = fmt.Errorf("download made no progress for %s: %w", shared.TransferStallTimeout, err)
+			}
 			os.Remove(path)
 			return downloadErrMsg{downloadID: downloadID, imageID: imageID, err: fmt.Errorf("writing file: %w", err)}
 		}

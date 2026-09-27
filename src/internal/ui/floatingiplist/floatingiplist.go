@@ -1,7 +1,6 @@
 package floatingiplist
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,8 +16,14 @@ import (
 	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
-type fipsLoadedMsg struct{ fips []network.FloatingIP }
-type fipsErrMsg struct{ err error }
+type fipsLoadedMsg struct {
+	seq  uint64
+	fips []network.FloatingIP
+}
+type fipsErrMsg struct {
+	seq uint64
+	err error
+}
 type sortClearMsg struct{}
 
 var fipSortColumns = []string{"floatingip", "status", "fixedip", "portid"}
@@ -31,6 +36,7 @@ type Model struct {
 	width           int
 	height          int
 	loading         bool
+	refresh         shared.RefreshGate
 	spinner         spinner.Model
 	err             string
 	scrollOff       int
@@ -57,7 +63,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
 	shared.Debugf("[floatingiplist] Init()")
-	return tea.Batch(m.spinner.Tick, m.fetchFIPs())
+	return tea.Batch(m.spinner.Tick, m.fetchFIPs(m.refresh.Seq()))
 }
 
 // SelectedFIP returns the floating IP under the cursor.
@@ -87,6 +93,9 @@ func (m Model) CopyEntries() (string, []copypicker.Entry) {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case fipsLoadedMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[floatingiplist] loaded %d floating IPs", len(msg.fips))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.fips) {
@@ -110,18 +119,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case fipsErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[floatingiplist] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
-		if m.loading {
-			shared.Debugf("[floatingiplist] tick skipped (loading)")
+		if m.loading || m.refresh.Busy() {
+			shared.Debugf("[floatingiplist] tick skipped (fetch in flight)")
 			return m, nil
 		}
 		shared.Debugf("[floatingiplist] tick fetching")
-		return m, m.fetchFIPs()
+		seq := m.refresh.Start()
+		return m, m.fetchFIPs(seq)
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -364,17 +377,19 @@ func fipStatusStyle(status string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(fg)
 }
 
-func (m Model) fetchFIPs() tea.Cmd {
+func (m Model) fetchFIPs(seq uint64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[floatingiplist] fetch start")
-		fips, err := network.ListFloatingIPs(context.Background(), client)
+		fips, err := network.ListFloatingIPs(ctx, client)
 		if err != nil {
 			shared.Debugf("[floatingiplist] fetch error: %v", err)
-			return fipsErrMsg{err: err}
+			return fipsErrMsg{seq: seq, err: err}
 		}
 		shared.Debugf("[floatingiplist] fetch done, count=%d", len(fips))
-		return fipsLoadedMsg{fips: fips}
+		return fipsLoadedMsg{seq: seq, fips: fips}
 	}
 }
 
@@ -382,7 +397,8 @@ func (m Model) fetchFIPs() tea.Cmd {
 func (m *Model) ForceRefresh() tea.Cmd {
 	shared.Debugf("[floatingiplist] ForceRefresh()")
 	m.loading = true
-	return tea.Batch(m.spinner.Tick, m.fetchFIPs())
+	seq := m.refresh.Start()
+	return tea.Batch(m.spinner.Tick, m.fetchFIPs(seq))
 }
 
 // SetSize updates dimensions.

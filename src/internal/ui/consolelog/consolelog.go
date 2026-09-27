@@ -1,7 +1,6 @@
 package consolelog
 
 import (
-	"context"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -183,7 +182,9 @@ func (m Model) fetchConsole() tea.Cmd {
 	client := m.client
 	id := m.serverID
 	return func() tea.Msg {
-		output, err := compute.GetConsoleOutput(context.Background(), client, id, maxLines)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		output, err := compute.GetConsoleOutput(ctx, client, id, maxLines)
 		if err != nil {
 			return consoleErrMsg{err: err}
 		}

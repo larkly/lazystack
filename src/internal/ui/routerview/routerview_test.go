@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 func TestShiftTabMovesFocusBackward(t *testing.T) {
@@ -901,5 +902,41 @@ func TestCopyEntriesRouterWithInterface(t *testing.T) {
 	}
 	if len(entries) < 5 {
 		t.Errorf("CopyEntries should return at least 5 entries (router fields + interface fields), got %d", len(entries))
+	}
+}
+
+// Background ticks must not stack router or interface fetches, and slow
+// older responses must never overwrite the results of newer fetches.
+func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m, _ = m.Update(routersLoadedMsg{routers: []network.Router{{ID: "r1", Name: "r1"}}})
+	m, _ = m.Update(detailLoadedMsg{seq: m.detailRefresh.Seq(), routerID: "r1"})
+
+	m, first := m.Update(shared.TickMsg{})
+	if first == nil {
+		t.Fatal("tick did not fetch")
+	}
+	staleList, staleDetail := m.refresh.Seq(), m.detailRefresh.Seq()
+	if _, again := m.Update(shared.TickMsg{}); again != nil {
+		t.Fatal("tick started a second fetch while one was in flight")
+	}
+
+	m.ForceRefresh()
+	newIface := []network.RouterInterface{{SubnetID: "new", PortID: "p-new"}}
+	oldIface := []network.RouterInterface{{SubnetID: "old", PortID: "p-old"}}
+	m, _ = m.Update(routersLoadedMsg{seq: m.refresh.Seq(), routers: []network.Router{{ID: "r1", Name: "new"}}})
+	m, _ = m.Update(detailLoadedMsg{seq: m.detailRefresh.Seq(), routerID: "r1", interfaces: newIface})
+	m, _ = m.Update(routersLoadedMsg{seq: staleList, routers: []network.Router{{ID: "r1", Name: "old"}}})
+	m, _ = m.Update(routersErrMsg{seq: staleList, err: fmt.Errorf("stale")})
+	m, _ = m.Update(detailLoadedMsg{seq: staleDetail, routerID: "r1", interfaces: oldIface})
+	m, _ = m.Update(detailErrMsg{seq: staleDetail, routerID: "r1", err: fmt.Errorf("stale")})
+	if m.routers[0].Name != "new" || m.err != "" {
+		t.Fatalf("stale router list applied: %v err=%q", m.routers, m.err)
+	}
+	if len(m.interfaces) != 1 || m.interfaces[0].SubnetID != "new" || m.detailErr != "" {
+		t.Fatalf("stale interfaces applied: %v err=%q", m.interfaces, m.detailErr)
+	}
+	if _, next := m.Update(shared.TickMsg{}); next == nil {
+		t.Fatal("tick blocked after the newest fetches completed")
 	}
 }

@@ -1,7 +1,6 @@
 package subnetedit
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -29,8 +29,14 @@ const (
 
 var dhcpOpts = []string{"Enabled", "Disabled"}
 
-type subnetUpdatedMsg struct{ name string }
-type subnetUpdateErrMsg struct{ err error }
+type subnetUpdatedMsg struct {
+	shared.Audit
+	name string
+}
+type subnetUpdateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the subnet edit modal.
 type Model struct {
@@ -337,14 +343,17 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[subnetedit] updating subnet %s", id)
-		err := network.UpdateSubnet(context.Background(), client, id, opts)
+		err := network.UpdateSubnet(ctx, client, id, opts)
+		rec := shared.NewAudit(audit.ActionUpdate, "subnet", id, displayName, err)
 		if err != nil {
 			shared.Debugf("[subnetedit] error updating subnet %s: %v", id, err)
-			return subnetUpdateErrMsg{err: err}
+			return subnetUpdateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[subnetedit] updated subnet %s", id)
-		return subnetUpdatedMsg{name: displayName}
+		return subnetUpdatedMsg{Audit: rec, name: displayName}
 	})
 }
 

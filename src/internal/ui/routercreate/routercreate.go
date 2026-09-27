@@ -1,7 +1,6 @@
 package routercreate
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -28,8 +28,11 @@ var adminStates = []string{"Up", "Down"}
 
 type extNetsLoadedMsg struct{ nets []network.Network }
 type fetchErrMsg struct{ err error }
-type routerCreatedMsg struct{}
-type routerCreateErrMsg struct{ err error }
+type routerCreatedMsg struct{ shared.Audit }
+type routerCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the router create modal.
 type Model struct {
@@ -330,15 +333,27 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[routercreate] creating router %q", name)
-		_, err := network.CreateRouter(context.Background(), client, name, extNetworkID, adminUp)
+		r, err := network.CreateRouter(ctx, client, name, extNetworkID, adminUp)
+		rec := shared.NewAudit(audit.ActionCreateRouter, "router", routerID(r), name, err).
+			WithDetails(map[string]string{"external_network_id": extNetworkID})
 		if err != nil {
 			shared.Debugf("[routercreate] error creating router %q: %v", name, err)
-			return routerCreateErrMsg{err: err}
+			return routerCreateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[routercreate] created router %q", name)
-		return routerCreatedMsg{}
+		return routerCreatedMsg{Audit: rec}
 	})
+}
+
+// routerID returns the ID of a router returned by a request, if any.
+func routerID(r *network.Router) string {
+	if r == nil {
+		return ""
+	}
+	return r.ID
 }
 
 // View renders the modal.
@@ -487,7 +502,9 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) fetchExtNetworks() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		nets, err := network.ListExternalNetworks(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		nets, err := network.ListExternalNetworks(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}

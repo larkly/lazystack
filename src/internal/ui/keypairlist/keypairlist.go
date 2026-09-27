@@ -1,7 +1,6 @@
 package keypairlist
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,8 +16,14 @@ import (
 	"github.com/larkly/lazystack/internal/ui/copypicker"
 )
 
-type keypairsLoadedMsg struct{ keypairs []compute.KeyPair }
-type keypairsErrMsg struct{ err error }
+type keypairsLoadedMsg struct {
+	seq      uint64
+	keypairs []compute.KeyPair
+}
+type keypairsErrMsg struct {
+	seq uint64
+	err error
+}
 type sortClearMsg struct{}
 
 var kpSortColumns = []string{"name", "type"}
@@ -32,6 +37,7 @@ type Model struct {
 	width           int
 	height          int
 	loading         bool
+	refresh         shared.RefreshGate
 	spinner         spinner.Model
 	err             string
 	sortCol         int
@@ -57,13 +63,16 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
 	shared.Debugf("[keypairlist] Init()")
-	return tea.Batch(m.spinner.Tick, m.fetchKeypairs())
+	return tea.Batch(m.spinner.Tick, m.fetchKeypairs(m.refresh.Seq()))
 }
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case keypairsLoadedMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[keypairlist] loaded %d keypairs", len(msg.keypairs))
 		var cursorName string
 		if m.cursor >= 0 && m.cursor < len(m.pairs) {
@@ -85,18 +94,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case keypairsErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[keypairlist] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
-		if m.loading {
-			shared.Debugf("[keypairlist] tick skipped (loading)")
+		if m.loading || m.refresh.Busy() {
+			shared.Debugf("[keypairlist] tick skipped (fetch in flight)")
 			return m, nil
 		}
 		shared.Debugf("[keypairlist] tick fetching")
-		return m, m.fetchKeypairs()
+		seq := m.refresh.Start()
+		return m, m.fetchKeypairs(seq)
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -309,17 +322,19 @@ func (m Model) CopyEntries() (string, []copypicker.Entry) {
 	return "Copy — keypair " + kp.Name, b.Entries()
 }
 
-func (m Model) fetchKeypairs() tea.Cmd {
+func (m Model) fetchKeypairs(seq uint64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[keypairlist] fetch start")
-		kps, err := compute.ListKeyPairs(context.Background(), client)
+		kps, err := compute.ListKeyPairs(ctx, client)
 		if err != nil {
 			shared.Debugf("[keypairlist] fetch error: %v", err)
-			return keypairsErrMsg{err: err}
+			return keypairsErrMsg{seq: seq, err: err}
 		}
 		shared.Debugf("[keypairlist] fetch done, count=%d", len(kps))
-		return keypairsLoadedMsg{keypairs: kps}
+		return keypairsLoadedMsg{seq: seq, keypairs: kps}
 	}
 }
 
@@ -327,7 +342,8 @@ func (m Model) fetchKeypairs() tea.Cmd {
 func (m *Model) ForceRefresh() tea.Cmd {
 	shared.Debugf("[keypairlist] ForceRefresh()")
 	m.loading = true
-	return tea.Batch(m.spinner.Tick, m.fetchKeypairs())
+	seq := m.refresh.Start()
+	return tea.Batch(m.spinner.Tick, m.fetchKeypairs(seq))
 }
 
 // SetSize updates dimensions and keeps the cursor row visible.

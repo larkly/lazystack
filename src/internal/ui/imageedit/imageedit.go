@@ -1,7 +1,6 @@
 package imageedit
 
 import (
-	"context"
 	"strconv"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -32,8 +32,11 @@ var (
 	protectedOpts  = []string{"no", "yes"}
 )
 
-type imageEditedMsg struct{}
-type imageEditErrMsg struct{ err error }
+type imageEditedMsg struct{ shared.Audit }
+type imageEditErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the image edit modal.
 type Model struct {
@@ -346,11 +349,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 	imageID := m.imageID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		err := image.UpdateImage(context.Background(), client, imageID, opts)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		err := image.UpdateImage(ctx, client, imageID, opts)
+		rec := shared.NewAudit(audit.ActionUpdate, "image", imageID, name, err)
 		if err != nil {
-			return imageEditErrMsg{err: err}
+			return imageEditErrMsg{Audit: rec, err: err}
 		}
-		return imageEditedMsg{}
+		return imageEditedMsg{Audit: rec}
 	})
 }
 

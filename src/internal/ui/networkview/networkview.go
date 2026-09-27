@@ -1,7 +1,6 @@
 package networkview
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -1331,13 +1330,15 @@ func (m Model) Hints() string {
 func (m Model) fetchNetworks() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[networkview] fetchNetworks start")
-		nets, err := network.ListNetworks(context.Background(), client)
+		nets, err := network.ListNetworks(ctx, client)
 		if err != nil {
 			shared.Debugf("[networkview] fetchNetworks error: %v", err)
 			return networksErrMsg{err: err}
 		}
-		subs, err := network.ListSubnets(context.Background(), client)
+		subs, err := network.ListSubnets(ctx, client)
 		if err != nil {
 			return networksErrMsg{err: err}
 		}
@@ -1346,7 +1347,7 @@ func (m Model) fetchNetworks() tea.Cmd {
 			subMap[s.ID] = s
 		}
 		// Fetch external network IDs
-		extNets, err := network.ListExternalNetworks(context.Background(), client)
+		extNets, err := network.ListExternalNetworks(ctx, client)
 		extIDs := make(map[string]bool)
 		if err == nil {
 			for _, en := range extNets {
@@ -1362,8 +1363,10 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 	networkClient := m.networkClient
 	computeClient := m.computeClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[networkview] fetchDetail start")
-		fetchedPorts, err := network.ListPorts(context.Background(), networkClient, netID)
+		fetchedPorts, err := network.ListPorts(ctx, networkClient, netID)
 		if err != nil {
 			shared.Debugf("[networkview] fetchDetail error: %v", err)
 			return detailErrMsg{netID: netID, err: err}
@@ -1386,7 +1389,7 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 		}
 		sgNameMap := make(map[string]string)
 		if len(sgIDs) > 0 {
-			sgs, err := network.ListSecurityGroups(context.Background(), networkClient)
+			sgs, err := network.ListSecurityGroups(ctx, networkClient)
 			if err == nil {
 				for _, sg := range sgs {
 					if sgIDs[sg.ID] {
@@ -1411,7 +1414,7 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 
 		srvNames := make(map[string]string)
 		if len(deviceIDs) > 0 {
-			allServers, err := compute.ListServers(context.Background(), computeClient)
+			allServers, err := compute.ListServers(ctx, computeClient)
 			if err == nil {
 				for _, s := range allServers {
 					if deviceIDs[s.ID] {
@@ -1424,7 +1427,7 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 		// Also resolve router device IDs
 		for _, p := range fetchedPorts {
 			if network.IsRouterInterfaceOwner(p.DeviceOwner) && p.DeviceID != "" {
-				router, err := network.GetRouter(context.Background(), networkClient, p.DeviceID)
+				router, err := network.GetRouter(ctx, networkClient, p.DeviceID)
 				if err == nil && router != nil {
 					srvNames[p.DeviceID] = router.Name
 				}

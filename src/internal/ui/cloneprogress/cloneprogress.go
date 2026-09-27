@@ -182,11 +182,13 @@ func (m Model) Init() tea.Cmd {
 	ops := m.volumes
 	op := m.op
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		// Fetch existing volume names for display and dedup
 		existingNames := make(map[string]bool)
 		nameMap := make(map[string]string)
 		if client != nil {
-			vols, err := volume.ListVolumes(context.Background(), client)
+			vols, err := volume.ListVolumes(ctx, client)
 			if err == nil {
 				for _, v := range vols {
 					existingNames[v.Name] = true
@@ -477,8 +479,10 @@ func (m Model) createVolume(idx int, op VolumeOp) tea.Cmd {
 	client := m.volumeClient
 	opID := m.op
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		// Get source volume to determine size
-		src, err := volume.GetVolume(context.Background(), client, op.SourceVolID)
+		src, err := volume.GetVolume(ctx, client, op.SourceVolID)
 		if err != nil {
 			return volumeCreatedMsg{op: opID, idx: idx, err: fmt.Errorf("fetching source volume: %w", err)}
 		}
@@ -488,7 +492,7 @@ func (m Model) createVolume(idx int, op VolumeOp) tea.Cmd {
 			SourceVolID: op.SourceVolID,
 			VolumeType:  src.VolumeType,
 		}
-		vol, err := volume.CreateVolume(context.Background(), client, opts)
+		vol, err := volume.CreateVolume(ctx, client, opts)
 		if err != nil {
 			return volumeCreatedMsg{op: opID, idx: idx, err: err}
 		}
@@ -529,7 +533,9 @@ func (m Model) pollVolumes() []tea.Cmd {
 			client := m.volumeClient
 			op := m.op
 			cmds = append(cmds, func() tea.Msg {
-				vol, err := volume.GetVolume(context.Background(), client, volID)
+				ctx, cancel := shared.RequestCtx()
+				defer cancel()
+				vol, err := volume.GetVolume(ctx, client, volID)
 				if err != nil {
 					return volumeStatusMsg{op: op, idx: idx, err: err}
 				}
@@ -569,7 +575,9 @@ func (m Model) checkServerReady() tea.Cmd {
 	id := m.serverID
 	op := m.op
 	return func() tea.Msg {
-		srv, err := compute.GetServer(context.Background(), client, id)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		srv, err := compute.GetServer(ctx, client, id)
 		if err != nil {
 			return serverReadyMsg{op: op, err: err}
 		}
@@ -583,7 +591,9 @@ func (m Model) attachVolume(idx int) tea.Cmd {
 	computeClient := m.computeClient
 	op := m.op
 	return func() tea.Msg {
-		_, err := volume.AttachVolume(context.Background(), computeClient, serverID, volID)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		_, err := volume.AttachVolume(ctx, computeClient, serverID, volID)
 		return volumeAttachedMsg{op: op, idx: idx, err: err}
 	}
 }

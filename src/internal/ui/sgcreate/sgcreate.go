@@ -1,7 +1,6 @@
 package sgcreate
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -32,8 +32,11 @@ const (
 	numFields   = 4
 )
 
-type sgCreatedMsg struct{}
-type sgCreateErrMsg struct{ err error }
+type sgCreatedMsg struct{ shared.Audit }
+type sgCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the security group create/rename/clone modal.
 type Model struct {
@@ -275,39 +278,57 @@ func (m Model) submit() (Model, tea.Cmd) {
 	case ModeRename:
 		sgID := m.sgID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			shared.Debugf("[sgcreate] renaming security group %s to %q", sgID, name)
-			_, err := network.UpdateSecurityGroup(context.Background(), client, sgID, name, &desc)
+			_, err := network.UpdateSecurityGroup(ctx, client, sgID, name, &desc)
+			rec := shared.NewAudit(audit.ActionUpdate, "security_group", sgID, name, err)
 			if err != nil {
 				shared.Debugf("[sgcreate] error renaming security group %s: %v", sgID, err)
-				return sgCreateErrMsg{err: err}
+				return sgCreateErrMsg{Audit: rec, err: err}
 			}
 			shared.Debugf("[sgcreate] renamed security group %s to %q", sgID, name)
-			return sgCreatedMsg{}
+			return sgCreatedMsg{Audit: rec}
 		})
 	case ModeClone:
 		srcID := m.srcSGID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			shared.Debugf("[sgcreate] cloning security group %s as %q", srcID, name)
-			_, err := network.CloneSecurityGroup(context.Background(), client, srcID, name, desc)
+			sg, err := network.CloneSecurityGroup(ctx, client, srcID, name, desc)
+			rec := shared.NewAudit(audit.ActionClone, "security_group", groupID(sg), name, err).
+				WithDetails(map[string]string{"source_id": srcID})
 			if err != nil {
 				shared.Debugf("[sgcreate] error cloning security group %s: %v", srcID, err)
-				return sgCreateErrMsg{err: err}
+				return sgCreateErrMsg{Audit: rec, err: err}
 			}
 			shared.Debugf("[sgcreate] cloned security group %s as %q", srcID, name)
-			return sgCreatedMsg{}
+			return sgCreatedMsg{Audit: rec}
 		})
 	default:
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			shared.Debugf("[sgcreate] creating security group %q", name)
-			_, err := network.CreateSecurityGroup(context.Background(), client, name, desc)
+			sg, err := network.CreateSecurityGroup(ctx, client, name, desc)
+			rec := shared.NewAudit(audit.ActionCreate, "security_group", groupID(sg), name, err)
 			if err != nil {
 				shared.Debugf("[sgcreate] error creating security group %q: %v", name, err)
-				return sgCreateErrMsg{err: err}
+				return sgCreateErrMsg{Audit: rec, err: err}
 			}
 			shared.Debugf("[sgcreate] created security group %q", name)
-			return sgCreatedMsg{}
+			return sgCreatedMsg{Audit: rec}
 		})
 	}
+}
+
+// groupID returns the ID of a security group returned by a request, if any.
+func groupID(sg *network.SecurityGroup) string {
+	if sg == nil {
+		return ""
+	}
+	return sg.ID
 }
 
 // View renders the modal.

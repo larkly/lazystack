@@ -1,7 +1,6 @@
 package volumecreate
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/volume"
 )
@@ -34,8 +34,14 @@ type azsLoadedMsg struct {
 	azs []string
 	err error
 }
-type volumeCreatedMsg struct{ vol *volume.Volume }
-type volumeCreateErrMsg struct{ err error }
+type volumeCreatedMsg struct {
+	shared.Audit
+	vol *volume.Volume
+}
+type volumeCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the volume create form.
 type Model struct {
@@ -441,14 +447,22 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.err = ""
 	client := m.bsClient
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[volumecreate] creating volume %q (size=%dGB)", name, size)
-		vol, err := volume.CreateVolume(context.Background(), client, opts)
+		vol, err := volume.CreateVolume(ctx, client, opts)
+		volID := ""
+		if vol != nil {
+			volID = vol.ID
+		}
+		rec := shared.NewAudit(audit.ActionCreate, "volume", volID, name, err).
+			WithDetails(map[string]string{"size_gb": strconv.Itoa(size), "volume_type": opts.VolumeType})
 		if err != nil {
 			shared.Debugf("[volumecreate] error creating volume %q: %v", name, err)
-			return volumeCreateErrMsg{err: err}
+			return volumeCreateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[volumecreate] created volume %q (id=%s)", name, vol.ID)
-		return volumeCreatedMsg{vol: vol}
+		return volumeCreatedMsg{Audit: rec, vol: vol}
 	})
 }
 
@@ -592,7 +606,9 @@ func (m Model) renderPicker() string {
 func (m Model) fetchVolumeTypes() tea.Cmd {
 	client := m.bsClient
 	return func() tea.Msg {
-		types, err := volume.ListVolumeTypes(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		types, err := volume.ListVolumeTypes(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -603,7 +619,9 @@ func (m Model) fetchVolumeTypes() tea.Cmd {
 func (m Model) fetchAZs() tea.Cmd {
 	client := m.bsClient
 	return func() tea.Msg {
-		azs, err := volume.ListAvailabilityZones(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		azs, err := volume.ListAvailabilityZones(ctx, client)
 		return azsLoadedMsg{azs: azs, err: err}
 	}
 }

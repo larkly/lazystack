@@ -1,7 +1,6 @@
 package sgrulecreate
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -15,6 +14,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -45,8 +45,11 @@ var (
 	icmpProtocols = []string{"icmp", "ipv6-icmp", "icmpv6", "1", "58"}
 )
 
-type ruleCreatedMsg struct{}
-type ruleCreateErrMsg struct{ err error }
+type ruleCreatedMsg struct{ shared.Audit }
+type ruleCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 type ruleLoadedMsg struct{ spec *network.SecurityRuleSpec }
 type ruleLoadErrMsg struct{ err error }
 
@@ -54,6 +57,7 @@ type ruleLoadErrMsg struct{ err error }
 // original could not be deleted. rollbackErr is nil when the replacement
 // was removed again, leaving the security group unchanged.
 type ruleReplaceErrMsg struct {
+	shared.Audit
 	oldID, newID string
 	deleteErr    error
 	rollbackErr  error
@@ -254,7 +258,9 @@ func (m Model) Init() tea.Cmd {
 	client := m.client
 	id := m.oldRuleID
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
-		spec, err := network.GetSecurityRuleSpec(context.Background(), client, id)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		spec, err := network.GetSecurityRuleSpec(ctx, client, id)
 		if err != nil {
 			return ruleLoadErrMsg{err: err}
 		}
@@ -618,8 +624,24 @@ func (m Model) submit() (Model, tea.Cmd) {
 	editMode := m.editMode
 	oldRuleID := m.oldRuleID
 	sgName := m.sgName
+	sgID := m.sgID
+	// record describes the create (or, in edit mode, the replacement of
+	// oldRuleID) for the audit log.
+	record := func(newID string, err error, extra map[string]string) shared.Audit {
+		details := map[string]string{"security_group_id": sgID, "direction": spec.Direction,
+			"ethertype": spec.EtherType, "protocol": spec.Protocol}
+		for k, v := range extra {
+			details[k] = v
+		}
+		if editMode {
+			details["new_rule_id"] = newID
+			return shared.NewAudit(audit.ActionUpdate, "security_group_rule", oldRuleID, sgName, err).WithDetails(details)
+		}
+		return shared.NewAudit(audit.ActionCreate, "security_group_rule", newID, sgName, err).WithDetails(details)
+	}
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		if editMode {
 			shared.Debugf("[sgrulecreate] editing rule in %q (replacing %s)", sgName, oldRuleID)
 		} else {
@@ -628,21 +650,29 @@ func (m Model) submit() (Model, tea.Cmd) {
 		newID, err := network.CreateSecurityRuleSpec(ctx, client, spec)
 		if err != nil {
 			shared.Debugf("[sgrulecreate] error creating rule in %q: %v", sgName, err)
-			return ruleCreateErrMsg{err: err}
+			return ruleCreateErrMsg{Audit: record("", err, nil), err: err}
 		}
 		// In edit mode, delete the old rule only after the new one exists.
 		if editMode && oldRuleID != "" {
 			delErr := network.DeleteSecurityGroupRule(ctx, client, oldRuleID)
 			if delErr != nil && !gophercloud.ResponseCodeIs(delErr, http.StatusNotFound) {
 				shared.Debugf("[sgrulecreate] could not delete original rule %s: %v; rolling back %s", oldRuleID, delErr, newID)
-				rbErr := network.DeleteSecurityGroupRule(ctx, client, newID)
-				return ruleReplaceErrMsg{oldID: oldRuleID, newID: newID, deleteErr: delErr, rollbackErr: rbErr}
+				// Fresh deadline: the delete may have failed by timing out.
+				rbCtx, rbCancel := shared.RequestCtx()
+				rbErr := network.DeleteSecurityGroupRule(rbCtx, client, newID)
+				rbCancel()
+				rollback := map[string]string{"rolled_back": "true"}
+				if rbErr != nil {
+					rollback = map[string]string{"rolled_back": "false", "rollback_error": rbErr.Error()}
+				}
+				return ruleReplaceErrMsg{Audit: record(newID, delErr, rollback),
+					oldID: oldRuleID, newID: newID, deleteErr: delErr, rollbackErr: rbErr}
 			}
 			shared.Debugf("[sgrulecreate] edited rule in %q (%s -> %s)", sgName, oldRuleID, newID)
 		} else {
 			shared.Debugf("[sgrulecreate] created rule %s in %q", newID, sgName)
 		}
-		return ruleCreatedMsg{}
+		return ruleCreatedMsg{Audit: record(newID, nil, nil)}
 	})
 }
 

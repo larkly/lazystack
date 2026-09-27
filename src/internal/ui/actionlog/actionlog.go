@@ -1,7 +1,6 @@
 package actionlog
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -199,7 +198,9 @@ func (m Model) fetchActions() tea.Cmd {
 	client := m.client
 	id := m.serverID
 	return func() tea.Msg {
-		actions, err := compute.ListActions(context.Background(), client, id)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		actions, err := compute.ListActions(ctx, client, id)
 		if err != nil {
 			return actionsErrMsg{err: err}
 		}

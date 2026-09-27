@@ -1,7 +1,6 @@
 package serverpicker
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -10,6 +9,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/volume"
@@ -17,8 +17,14 @@ import (
 
 type serversLoadedMsg struct{ servers []compute.Server }
 type fetchErrMsg struct{ err error }
-type attachDoneMsg struct{ serverName, volumeName string }
-type attachErrMsg struct{ err error }
+type attachDoneMsg struct {
+	shared.Audit
+	serverName, volumeName string
+}
+type attachErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the server picker modal for volume attach.
 type Model struct {
@@ -247,7 +253,9 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) fetchServers() tea.Cmd {
 	client := m.computeClient
 	return func() tea.Msg {
-		servers, err := compute.ListServers(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		servers, err := compute.ListServers(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -270,13 +278,17 @@ func (m Model) attachVolume(srv compute.Server) tea.Cmd {
 	serverName := srv.Name
 	_ = volumeName // used in the msg struct
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serverpicker] attaching volume %s to server %s (%s)", volumeID, serverID, serverName)
-		_, err := volume.AttachVolume(context.Background(), client, serverID, volumeID)
+		_, err := volume.AttachVolume(ctx, client, serverID, volumeID)
+		rec := shared.NewAudit(audit.ActionAttachVolume, "volume", volumeID, volumeName, err).
+			WithDetails(map[string]string{"server_id": serverID, "server": serverName})
 		if err != nil {
 			shared.Debugf("[serverpicker] error attaching volume %s to server %s: %v", volumeID, serverID, err)
-			return attachErrMsg{err: err}
+			return attachErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[serverpicker] attached volume %s to server %s (%s)", volumeName, serverID, serverName)
-		return attachDoneMsg{serverName: serverName, volumeName: volumeName}
+		return attachDoneMsg{Audit: rec, serverName: serverName, volumeName: volumeName}
 	}
 }

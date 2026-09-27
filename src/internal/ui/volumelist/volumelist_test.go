@@ -1,10 +1,12 @@
 package volumelist
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
@@ -87,5 +89,33 @@ func TestVolumeSelectionCountMatchesTargets(t *testing.T) {
 
 	if got := len(m.SelectedVolumes()); got != m.SelectionCount() || got != 1 {
 		t.Fatalf("SelectedVolumes = %d, SelectionCount = %d; want 1 and equal", got, m.SelectionCount())
+	}
+}
+
+// Background ticks must not stack list fetches, and a slow older response
+// must never overwrite the result of a newer fetch.
+func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
+	m := loadedModel()
+
+	m, first := m.Update(shared.TickMsg{})
+	if first == nil {
+		t.Fatal("tick did not fetch")
+	}
+	staleSeq := m.refresh.Seq()
+	if _, again := m.Update(shared.TickMsg{}); again != nil {
+		t.Fatal("tick started a second fetch while one was in flight")
+	}
+
+	// A manual refresh supersedes the slow tick fetch.
+	m.ForceRefresh()
+	newSeq := m.refresh.Seq()
+	m, _ = m.Update(volumesLoadedMsg{seq: newSeq, volumes: []volume.Volume{{ID: "new", Name: "new"}}})
+	m, _ = m.Update(volumesLoadedMsg{seq: staleSeq, volumes: []volume.Volume{{ID: "old", Name: "old"}}})
+	m, _ = m.Update(volumesErrMsg{seq: staleSeq, err: errors.New("stale failure")})
+	if len(m.volumes) != 1 || m.volumes[0].ID != "new" || m.err != "" {
+		t.Fatalf("stale response applied: volumes=%v err=%q", m.volumes, m.err)
+	}
+	if _, next := m.Update(shared.TickMsg{}); next == nil {
+		t.Fatal("tick blocked after the newest fetch completed")
 	}
 }

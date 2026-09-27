@@ -1,7 +1,6 @@
 package keypaircreate
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,6 +14,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -41,8 +41,14 @@ var keyTypes = []keyTypeOption{
 	{label: "ED25519", algorithm: "ed25519"},
 }
 
-type keypairCreatedMsg struct{ kp *compute.KeyPairFull }
-type keypairCreateErrMsg struct{ err error }
+type keypairCreatedMsg struct {
+	shared.Audit
+	kp *compute.KeyPairFull
+}
+type keypairCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // pubKeyFile is a discovered public key file.
 type pubKeyFile struct {
@@ -521,28 +527,36 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	if publicKey != "" {
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			shared.Debugf("[keypaircreate] importing keypair %q", name)
-			kp, err := compute.ImportKeyPair(context.Background(), client, name, publicKey)
+			kp, err := compute.ImportKeyPair(ctx, client, name, publicKey)
+			rec := shared.NewAudit(audit.ActionCreateKey, "keypair", name, name, err).
+				WithDetails(map[string]string{"source": "imported"})
 			if err != nil {
 				shared.Debugf("[keypaircreate] error importing keypair %q: %v", name, err)
-				return keypairCreateErrMsg{err: err}
+				return keypairCreateErrMsg{Audit: rec, err: err}
 			}
 			shared.Debugf("[keypaircreate] imported keypair %q", name)
-			return keypairCreatedMsg{kp: kp}
+			return keypairCreatedMsg{Audit: rec, kp: kp}
 		})
 	}
 
 	algo := kt.algorithm
 	keySize := kt.keySize
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[keypaircreate] generating keypair %q (algo=%s)", name, algo)
-		kp, err := compute.GenerateAndImportKeyPair(context.Background(), client, name, algo, keySize)
+		kp, err := compute.GenerateAndImportKeyPair(ctx, client, name, algo, keySize)
+		rec := shared.NewAudit(audit.ActionCreateKey, "keypair", name, name, err).
+			WithDetails(map[string]string{"source": "generated", "algorithm": algo})
 		if err != nil {
 			shared.Debugf("[keypaircreate] error generating keypair %q: %v", name, err)
-			return keypairCreateErrMsg{err: err}
+			return keypairCreateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[keypaircreate] generated keypair %q", name)
-		return keypairCreatedMsg{kp: kp}
+		return keypairCreatedMsg{Audit: rec, kp: kp}
 	})
 }
 

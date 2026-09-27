@@ -52,8 +52,11 @@ func (m Model) handleCredentials(msg credentialsMsg) (Model, tea.Cmd) {
 func (m Model) handleServerActionMsg(msg shared.ServerActionMsg) (Model, tea.Cmd) {
 	m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
 	m.statusBar.Error = ""
-	// Ensure resize modal is dismissed
-	m.serverResize.Active = false
+	// Ensure the resize modal is dismissed once its resize is done; an
+	// unrelated action finishing must not close a modal still in use.
+	if msg.Action == "Resize" {
+		m.serverResize.Active = false
+	}
 	refreshServers := func() tea.Msg { return shared.RefreshServersMsg{} }
 	// Navigate back to the server list from the console log sub-view.
 	if m.view == viewConsoleLog {

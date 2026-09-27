@@ -452,7 +452,12 @@ func (m Model) openResize() (Model, tea.Cmd) {
 		if len(servers) > 0 {
 			currentFlavor = servers[0].FlavorName
 		}
+		names := make(map[string]string, len(servers))
+		for _, s := range servers {
+			names[s.ID] = s.Name
+		}
 		m.serverResize = serverresize.NewBulk(m.client.Compute, ids, currentFlavor)
+		m.serverResize.Track = m.resizeTracker(names)
 		m.serverResize.SetSize(m.width, m.height)
 		m.serverList.ClearSelection()
 		return m, m.serverResize.Init()
@@ -473,8 +478,29 @@ func (m Model) openResize() (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.serverResize = serverresize.New(m.client.Compute, id, name, flavor)
+	m.serverResize.Track = m.resizeTracker(map[string]string{id: name})
 	m.serverResize.SetSize(m.width, m.height)
 	return m, m.serverResize.Init()
+}
+
+// resizeTracker makes the resize modal's submission honor the per-server
+// in-flight locks: a resize of a busy server is refused, and an accepted
+// one holds its servers' locks until the request finishes. The modal calls
+// it synchronously from Update, so the shared action state is only ever
+// touched from the Update goroutine.
+func (m Model) resizeTracker(names map[string]string) func([]string, tea.Cmd) (tea.Cmd, string) {
+	m.ensureActions()
+	return func(ids []string, cmd tea.Cmd) (tea.Cmd, string) {
+		locks := make([]actionLock, 0, len(ids))
+		for _, id := range ids {
+			locks = append(locks, m.lock("server", id, names[id]))
+		}
+		if busy := m.busy(locks); busy != "" {
+			return nil, fmt.Sprintf("%s already has an operation in progress; wait for it to finish", busy)
+		}
+		_, tracked, _ := m.trackAction(locks, cmd)
+		return tracked, ""
+	}
 }
 
 func (m Model) doAllocateAndAssociateFIP() (Model, tea.Cmd) {
@@ -804,11 +830,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.ReleaseFloatingIP(ctx, netClient, id)
 			if err != nil {
 				shared.Debugf("[action] release floating IP %s failed: %s", name, err)
-				m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "error", err.Error())
+				m.logAudit(audit.ActionReleaseFIP, "floating_ip", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Release FIP", Name: name, Err: err}
 			}
 			shared.Debugf("[action] released floating IP %s", name)
-			m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "success", "")
+			m.logAudit(audit.ActionReleaseFIP, "floating_ip", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Released", Name: name}
 		}
 	case "disassociate_fip":

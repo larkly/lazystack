@@ -79,6 +79,12 @@ const (
 	ActionRevertResize    ActionType = "revert_resize"
 	ActionLiveMigrate     ActionType = "live_migrate"
 	ActionRemoveInterface ActionType = "remove_router_interface"
+	ActionAddInterface    ActionType = "add_router_interface"
+	ActionUpdate          ActionType = "update" // edit of an existing resource
+	ActionAllocateFIP     ActionType = "allocate_fip"
+	ActionReleaseFIP      ActionType = "release_fip"
+	ActionEnableUser      ActionType = "enable_user"
+	ActionDisableUser     ActionType = "disable_user"
 )
 
 // Entry is a single audit log record.

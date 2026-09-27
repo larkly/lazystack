@@ -1,7 +1,6 @@
 package servercreate
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/keypairs"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	img "github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/network"
@@ -59,8 +59,14 @@ type keypairsLoadedMsg struct{ keypairs []compute.KeyPair }
 type secGroupsLoadedMsg struct{ secGroups []network.SecurityGroup }
 type fetchErrMsg struct{ err error }
 
-type serverCreatedMsg struct{ server *compute.Server }
-type serverCreateErrMsg struct{ err error }
+type serverCreatedMsg struct {
+	shared.Audit
+	server *compute.Server
+}
+type serverCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // ServerCloneCreatedMsg is sent when a server is created in clone mode with volume cloning enabled.
 type ServerCloneCreatedMsg struct {
@@ -907,6 +913,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.submitting = true
 	m.err = ""
 	client := m.computeClient
+	action := audit.ActionCreate
+	if m.cloneMode {
+		action = audit.ActionClone
+	}
 
 	if tmpl != "" {
 		names := make([]string, count)
@@ -914,37 +924,53 @@ func (m Model) submit() (Model, tea.Cmd) {
 			names[i] = expandNameTemplate(tmpl, i)
 		}
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			return createNamed(client, names, build)
+			return createNamed(client, names, build, action)
 		})
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[servercreate] creating server %q (count %d)", name, count)
-		srv, err := compute.CreateServerWithOpts(context.Background(), client, build(name, count))
+		srv, err := compute.CreateServerWithOpts(ctx, client, build(name, count))
+		id := ""
+		if srv != nil {
+			id = srv.ID
+		}
+		rec := shared.NewAudit(action, "server", id, name, err).
+			WithDetails(map[string]string{"count": strconv.Itoa(count)})
 		if err != nil {
 			shared.Debugf("[servercreate] error creating server %q: %v", name, err)
-			return serverCreateErrMsg{err: err}
+			return serverCreateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[servercreate] created server %q (id=%s)", name, srv.ID)
-		return serverCreatedMsg{server: srv}
+		return serverCreatedMsg{Audit: rec, server: srv}
 	})
 }
 
 // createNamed creates one server per name, stopping at the first failure.
 // A failure after some servers were created reports the created names and
 // IDs so the user can see (and clean up) what already exists.
-func createNamed(client *gophercloud.ServiceClient, names []string, build func(string, int) servers.CreateOptsBuilder) tea.Msg {
+func createNamed(client *gophercloud.ServiceClient, names []string, build func(string, int) servers.CreateOptsBuilder, action audit.ActionType) tea.Msg {
 	var first *compute.Server
 	var created []string
+	var recs []shared.AuditRecord
 	for _, n := range names {
 		shared.Debugf("[servercreate] creating server %q", n)
-		srv, err := compute.CreateServerWithOpts(context.Background(), client, build(n, 1))
+		ctx, cancel := shared.RequestCtx()
+		srv, err := compute.CreateServerWithOpts(ctx, client, build(n, 1))
+		cancel()
+		rec := shared.AuditRecord{Action: action, ResourceType: "server", ResourceName: n, Err: err}
+		if srv != nil {
+			rec.ResourceID = srv.ID
+		}
+		recs = append(recs, rec)
 		if err != nil {
 			shared.Debugf("[servercreate] error creating server %q: %v", n, err)
 			if len(created) == 0 {
-				return serverCreateErrMsg{err: err}
+				return serverCreateErrMsg{Audit: shared.Audits(recs...), err: err}
 			}
-			return serverCreateErrMsg{err: fmt.Errorf("created %d of %d servers (%s); %s failed: %w",
+			return serverCreateErrMsg{Audit: shared.Audits(recs...), err: fmt.Errorf("created %d of %d servers (%s); %s failed: %w",
 				len(created), len(names), strings.Join(created, ", "), n, err)}
 		}
 		shared.Debugf("[servercreate] created server %q (id=%s)", n, srv.ID)
@@ -953,7 +979,7 @@ func createNamed(client *gophercloud.ServiceClient, names []string, build func(s
 		}
 		created = append(created, fmt.Sprintf("%s (%s)", n, srv.ID))
 	}
-	return serverCreatedMsg{server: first}
+	return serverCreatedMsg{Audit: shared.Audits(recs...), server: first}
 }
 
 // View renders the create form.
@@ -1179,15 +1205,22 @@ func (m *Model) applyClonePreFill() {
 		}
 	}
 
-	// Match network by name (first key from Networks map)
-	for netName := range cfg.NetworkNames {
+	// The form takes one network. Server.Networks is a map with no
+	// meaningful order, so pick the first of the source server's networks,
+	// in name order, that still exists; the choice is stable across runs.
+	netNames := make([]string, 0, len(cfg.NetworkNames))
+	for name := range cfg.NetworkNames {
+		netNames = append(netNames, name)
+	}
+	sort.Strings(netNames)
+matchNetwork:
+	for _, netName := range netNames {
 		for i, n := range m.networks {
 			if n.Name == netName {
 				m.selectedNetwork = i
-				break
+				break matchNetwork
 			}
 		}
-		break // use first network
 	}
 
 	// Match keypair by name
@@ -1211,7 +1244,9 @@ func (m *Model) applyClonePreFill() {
 func (m Model) fetchImages() tea.Cmd {
 	client := m.imageClient
 	return func() tea.Msg {
-		images, err := img.ListImages(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		images, err := img.ListImages(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -1222,7 +1257,9 @@ func (m Model) fetchImages() tea.Cmd {
 func (m Model) fetchFlavors() tea.Cmd {
 	client := m.computeClient
 	return func() tea.Msg {
-		flavors, err := compute.ListFlavors(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		flavors, err := compute.ListFlavors(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -1233,7 +1270,9 @@ func (m Model) fetchFlavors() tea.Cmd {
 func (m Model) fetchNetworks() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
-		nets, err := network.ListNetworks(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		nets, err := network.ListNetworks(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -1244,7 +1283,9 @@ func (m Model) fetchNetworks() tea.Cmd {
 func (m Model) fetchKeypairs() tea.Cmd {
 	client := m.computeClient
 	return func() tea.Msg {
-		kps, err := compute.ListKeyPairs(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		kps, err := compute.ListKeyPairs(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -1255,7 +1296,9 @@ func (m Model) fetchKeypairs() tea.Cmd {
 func (m Model) fetchSecGroups() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
-		sgs, err := network.ListSecurityGroups(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		sgs, err := network.ListSecurityGroups(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}

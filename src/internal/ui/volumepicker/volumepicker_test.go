@@ -54,7 +54,7 @@ func TestNavigationFilterSelection(t *testing.T) {
 	if !m.Active {
 		t.Fatal("busy modal closed")
 	}
-	m, _ = m.Update(attachErrMsg{errors.New("attach denied")})
+	m, _ = m.Update(attachErrMsg{err: errors.New("attach denied")})
 	if m.submitting || !strings.Contains(m.View(), "attach denied") {
 		t.Fatal("attach error not shown")
 	}

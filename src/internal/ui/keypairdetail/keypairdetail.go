@@ -1,7 +1,6 @@
 package keypairdetail
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -197,7 +196,9 @@ func (m Model) fetchKeypair() tea.Cmd {
 	client := m.client
 	name := m.name
 	return func() tea.Msg {
-		kp, err := compute.GetKeyPair(context.Background(), client, name)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		kp, err := compute.GetKeyPair(ctx, client, name)
 		if err != nil {
 			return keypairErrMsg{err: err}
 		}

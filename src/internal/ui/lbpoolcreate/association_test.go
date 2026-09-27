@@ -105,6 +105,11 @@ func TestCreatePoolBindsChosenListener(t *testing.T) {
 	}
 }
 
+func isUnboundPool(msg tea.Msg) bool {
+	created, ok := msg.(poolCreatedMsg)
+	return ok && created.listener == ""
+}
+
 func TestCreatePoolWithoutListenerDoesNotTouchListeners(t *testing.T) {
 	f := &fakeOctavia{}
 	client, cleanup := testutil.FakeServiceClient(f)
@@ -112,7 +117,7 @@ func TestCreatePoolWithoutListenerDoesNotTouchListeners(t *testing.T) {
 
 	m := httpPoolForm(lbListeners)
 	m.client = client
-	if _, msg := submitPool(t, m); msg != (poolCreatedMsg{}) {
+	if _, msg := submitPool(t, m); !isUnboundPool(msg) {
 		t.Fatalf("result = %#v", msg)
 	}
 	if len(f.listenerPut) != 0 {

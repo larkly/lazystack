@@ -1,7 +1,6 @@
 package routerview
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -29,17 +28,25 @@ const (
 const focusPaneCount = 4
 const narrowThreshold = 80
 
-type routersLoadedMsg struct{ routers []network.Router }
-type routersErrMsg struct{ err error }
+type routersLoadedMsg struct {
+	seq     uint64
+	routers []network.Router
+}
+type routersErrMsg struct {
+	seq uint64
+	err error
+}
 type namesLoadedMsg struct {
 	networkNames map[string]string
 	subnetToNet  map[string]string
 }
 type detailLoadedMsg struct {
+	seq        uint64
 	routerID   string
 	interfaces []network.RouterInterface
 }
 type detailErrMsg struct {
+	seq      uint64
 	routerID string
 	err      error
 }
@@ -72,6 +79,8 @@ type Model struct {
 	height          int
 	loading         bool
 	detailLoading   bool
+	refresh         shared.RefreshGate // router list fetches
+	detailRefresh   shared.RefreshGate // interface (detail) fetches
 	spinner         spinner.Model
 	err             string
 	refreshInterval time.Duration
@@ -94,7 +103,7 @@ func New(networkClient *gophercloud.ServiceClient, refreshInterval time.Duration
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
 	shared.Debugf("[routerview] Init()")
-	return tea.Batch(m.spinner.Tick, m.fetchRouters(), m.fetchNames())
+	return tea.Batch(m.spinner.Tick, m.fetchRouters(m.refresh.Seq()), m.fetchNames())
 }
 
 func (m Model) selectedRouter() *network.Router {
@@ -223,7 +232,7 @@ func (m *Model) onSelectorChange() tea.Cmd {
 	}
 	m.lastDetailID = r.ID
 	m.resetDetailState()
-	return m.fetchDetail(r.ID)
+	return m.fetchDetail(r.ID, m.detailRefresh.Start())
 }
 
 func (m *Model) clampDetailCursors() {
@@ -240,6 +249,9 @@ func (m *Model) clampDetailCursors() {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case routersLoadedMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[routerview] routersLoadedMsg: %d routers", len(msg.routers))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.routers) {
@@ -263,11 +275,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			shared.Debugf("[routerview] routersLoaded: new selection %.8s, fetching detail", r.ID)
 			m.lastDetailID = r.ID
 			m.resetDetailState()
-			return m, m.fetchDetail(r.ID)
+			seq := m.detailRefresh.Start()
+			return m, m.fetchDetail(r.ID, seq)
 		}
 		return m, nil
 
 	case routersErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[routerview] routersErrMsg: %s", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
@@ -280,6 +296,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case detailLoadedMsg:
+		if !m.detailRefresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[routerview] detailLoadedMsg: router=%.8s ifaces=%d", msg.routerID, len(msg.interfaces))
 		if r := m.selectedRouter(); r != nil && r.ID == msg.routerID {
 			m.detailLoading = false
@@ -290,6 +309,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case detailErrMsg:
+		if !m.detailRefresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[routerview] detailErrMsg: router=%.8s err=%s", msg.routerID, msg.err)
 		if r := m.selectedRouter(); r != nil && r.ID == msg.routerID {
 			m.detailLoading = false
@@ -298,13 +320,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case shared.TickMsg:
-		if m.loading {
+		if m.loading || m.refresh.Busy() {
 			return m, nil
 		}
 		shared.Debugf("[routerview] tickMsg: fetching routers")
-		cmds := []tea.Cmd{m.fetchRouters()}
-		if r := m.selectedRouter(); r != nil {
-			cmds = append(cmds, m.fetchDetail(r.ID))
+		cmds := []tea.Cmd{m.fetchRouters(m.refresh.Start())}
+		if r := m.selectedRouter(); r != nil && !m.detailRefresh.Busy() {
+			cmds = append(cmds, m.fetchDetail(r.ID, m.detailRefresh.Start()))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -1092,10 +1114,10 @@ func (m Model) renderActionBar() string {
 func (m *Model) ForceRefresh() tea.Cmd {
 	shared.Debugf("[routerview] ForceRefresh()")
 	m.loading = true
-	cmds := []tea.Cmd{m.spinner.Tick, m.fetchRouters(), m.fetchNames()}
+	cmds := []tea.Cmd{m.spinner.Tick, m.fetchRouters(m.refresh.Start()), m.fetchNames()}
 	if r := m.selectedRouter(); r != nil {
 		m.detailLoading = true
-		cmds = append(cmds, m.fetchDetail(r.ID))
+		cmds = append(cmds, m.fetchDetail(r.ID, m.detailRefresh.Start()))
 	}
 	return tea.Batch(cmds...)
 }
@@ -1122,27 +1144,30 @@ func (m Model) Hints() string {
 
 // --- Data fetching ---
 
-func (m Model) fetchRouters() tea.Cmd {
+func (m Model) fetchRouters(seq uint64) tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[routerview] fetchRouters: start ListRouters")
-		routers, err := network.ListRouters(context.Background(), client)
+		routers, err := network.ListRouters(ctx, client)
 		if err != nil {
 			shared.Debugf("[routerview] fetchRouters: error: %s", err)
-			return routersErrMsg{err: err}
+			return routersErrMsg{seq: seq, err: err}
 		}
 		sort.Slice(routers, func(i, j int) bool {
 			return strings.ToLower(routers[i].Name) < strings.ToLower(routers[j].Name)
 		})
 		shared.Debugf("[routerview] fetchRouters: done, %d routers", len(routers))
-		return routersLoadedMsg{routers: routers}
+		return routersLoadedMsg{seq: seq, routers: routers}
 	}
 }
 
 func (m Model) fetchNames() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[routerview] fetchNames: start ListNetworks")
 		nets, err := network.ListNetworks(ctx, client)
 		if err != nil {
@@ -1168,20 +1193,22 @@ func (m Model) fetchNames() tea.Cmd {
 	}
 }
 
-func (m Model) fetchDetail(routerID string) tea.Cmd {
+func (m Model) fetchDetail(routerID string, seq uint64) tea.Cmd {
 	client := m.networkClient
 	short := routerID
 	if len(short) > 8 {
 		short = short[:8]
 	}
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[routerview] fetchDetail: start ListRouterInterfaces router=%s", short)
-		ifaces, err := network.ListRouterInterfaces(context.Background(), client, routerID)
+		ifaces, err := network.ListRouterInterfaces(ctx, client, routerID)
 		if err != nil {
 			shared.Debugf("[routerview] fetchDetail: error: %s", err)
-			return detailErrMsg{routerID: routerID, err: err}
+			return detailErrMsg{seq: seq, routerID: routerID, err: err}
 		}
 		shared.Debugf("[routerview] fetchDetail: done, %d interfaces", len(ifaces))
-		return detailLoadedMsg{routerID: routerID, interfaces: ifaces}
+		return detailLoadedMsg{seq: seq, routerID: routerID, interfaces: ifaces}
 	}
 }

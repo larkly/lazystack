@@ -1,7 +1,6 @@
 package volumelist
 
 import (
-	"context"
 	"fmt"
 	"image/color"
 	"sort"
@@ -19,8 +18,14 @@ import (
 	"github.com/larkly/lazystack/internal/volume"
 )
 
-type volumesLoadedMsg struct{ volumes []volume.Volume }
-type volumesErrMsg struct{ err error }
+type volumesLoadedMsg struct {
+	seq     uint64
+	volumes []volume.Volume
+}
+type volumesErrMsg struct {
+	seq uint64
+	err error
+}
 type serverNamesMsg map[string]string
 type sortClearMsg struct{}
 
@@ -132,6 +137,7 @@ type Model struct {
 	width           int
 	height          int
 	loading         bool
+	refresh         shared.RefreshGate
 	spinner         spinner.Model
 	err             string
 	scrollOff       int
@@ -165,7 +171,7 @@ func New(client, computeClient *gophercloud.ServiceClient, refreshInterval time.
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
 	shared.Debugf("[volumelist] Init()")
-	return tea.Batch(m.spinner.Tick, m.fetchVolumes())
+	return tea.Batch(m.spinner.Tick, m.fetchVolumes(m.refresh.Seq()))
 }
 
 // SelectedVolume returns the volume under the cursor.
@@ -273,6 +279,9 @@ func (m Model) CopyEntries() (string, []copypicker.Entry) {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case volumesLoadedMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[volumelist] loaded %d volumes", len(msg.volumes))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.volumes) {
@@ -298,6 +307,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.fetchMissingServerNames()
 
 	case volumesErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[volumelist] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
@@ -310,12 +322,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case shared.TickMsg:
-		if m.loading {
-			shared.Debugf("[volumelist] tick skipped (loading)")
+		if m.loading || m.refresh.Busy() {
+			shared.Debugf("[volumelist] tick skipped (fetch in flight)")
 			return m, nil
 		}
 		shared.Debugf("[volumelist] tick fetching")
-		return m, m.fetchVolumes()
+		seq := m.refresh.Start()
+		return m, m.fetchVolumes(seq)
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -699,22 +712,24 @@ func volumeStatusStyle(status string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(fg)
 }
 
-func (m Model) fetchVolumes() tea.Cmd {
+func (m Model) fetchVolumes(seq uint64) tea.Cmd {
 	client := m.client
 	if client == nil {
 		return func() tea.Msg {
-			return volumesErrMsg{err: fmt.Errorf("block storage service not available")}
+			return volumesErrMsg{seq: seq, err: fmt.Errorf("block storage service not available")}
 		}
 	}
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[volumelist] fetch start")
-		vols, err := volume.ListVolumes(context.Background(), client)
+		vols, err := volume.ListVolumes(ctx, client)
 		if err != nil {
 			shared.Debugf("[volumelist] fetch error: %v", err)
-			return volumesErrMsg{err: err}
+			return volumesErrMsg{seq: seq, err: err}
 		}
 		shared.Debugf("[volumelist] fetch done, count=%d", len(vols))
-		return volumesLoadedMsg{volumes: vols}
+		return volumesLoadedMsg{seq: seq, volumes: vols}
 	}
 }
 
@@ -735,9 +750,11 @@ func (m Model) fetchMissingServerNames() tea.Cmd {
 	}
 	client := m.computeClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		result := make(serverNamesMsg)
 		for id := range missing {
-			srv, err := compute.GetServer(context.Background(), client, id)
+			srv, err := compute.GetServer(ctx, client, id)
 			if err == nil && srv != nil {
 				result[id] = srv.Name
 			}
@@ -750,7 +767,8 @@ func (m Model) fetchMissingServerNames() tea.Cmd {
 func (m *Model) ForceRefresh() tea.Cmd {
 	shared.Debugf("[volumelist] ForceRefresh()")
 	m.loading = true
-	return tea.Batch(m.spinner.Tick, m.fetchVolumes())
+	seq := m.refresh.Start()
+	return tea.Batch(m.spinner.Tick, m.fetchVolumes(seq))
 }
 
 // SetSize updates dimensions.

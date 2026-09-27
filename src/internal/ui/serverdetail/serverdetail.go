@@ -1,7 +1,6 @@
 package serverdetail
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -1441,8 +1440,10 @@ func (m Model) fetchServer() tea.Cmd {
 	id := m.serverID
 	inst := m.inst
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serverdetail] fetchServer start")
-		srv, err := compute.GetServer(context.Background(), client, id)
+		srv, err := compute.GetServer(ctx, client, id)
 		if err != nil {
 			shared.Debugf("[serverdetail] fetchServer error: %v", err)
 			return serverDetailErrMsg{inst: inst, err: err}
@@ -1457,8 +1458,10 @@ func (m Model) fetchConsole() tea.Cmd {
 	id := m.serverID
 	inst := m.inst
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serverdetail] fetchConsole start")
-		output, err := compute.GetConsoleOutput(context.Background(), client, id, maxConsoleLines)
+		output, err := compute.GetConsoleOutput(ctx, client, id, maxConsoleLines)
 		if err != nil {
 			shared.Debugf("[serverdetail] fetchConsole error: %v", err)
 			return consoleErrMsg{inst: inst, err: err}
@@ -1473,8 +1476,10 @@ func (m Model) fetchActions() tea.Cmd {
 	id := m.serverID
 	inst := m.inst
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serverdetail] fetchActions start")
-		actions, err := compute.ListActions(context.Background(), client, id)
+		actions, err := compute.ListActions(ctx, client, id)
 		if err != nil {
 			shared.Debugf("[serverdetail] fetchActions error: %v", err)
 			return actionsErrMsg{inst: inst, err: err}
@@ -1489,8 +1494,10 @@ func (m Model) fetchInterfaces() tea.Cmd {
 	id := m.serverID
 	inst := m.inst
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serverdetail] fetchInterfaces start")
-		ports, err := network.ListPortsByDevice(context.Background(), client, id)
+		ports, err := network.ListPortsByDevice(ctx, client, id)
 		if err != nil {
 			shared.Debugf("[serverdetail] fetchInterfaces error: %v", err)
 			return interfacesErrMsg{inst: inst, err: err}
@@ -1504,9 +1511,11 @@ func (m Model) fetchVolumeInfo(attachments []compute.VolumeAttachment) tea.Cmd {
 	client := m.blockClient
 	inst := m.inst
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		vols := make(map[string]*volume.Volume)
 		for _, va := range attachments {
-			v, err := volume.GetVolume(context.Background(), client, va.ID)
+			v, err := volume.GetVolume(ctx, client, va.ID)
 			if err == nil {
 				vols[va.ID] = v
 			}

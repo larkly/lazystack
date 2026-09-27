@@ -1,7 +1,6 @@
 package volumedetail
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,11 +17,13 @@ import (
 )
 
 type volumeDetailLoadedMsg struct {
+	seq        uint64
 	vol        *volume.Volume
 	serverName string
 }
 
 type volumeDetailErrMsg struct {
+	seq uint64
 	err error
 }
 
@@ -34,6 +35,7 @@ type Model struct {
 	volume        *volume.Volume
 	serverName    string
 	loading       bool
+	refresh       shared.RefreshGate
 	spinner       spinner.Model
 	width         int
 	height        int
@@ -57,7 +59,7 @@ func New(client, computeClient *gophercloud.ServiceClient, volumeID string) Mode
 // Init fetches the volume details.
 func (m Model) Init() tea.Cmd {
 	shared.Debugf("[volumedetail] Init()")
-	return tea.Batch(m.spinner.Tick, m.fetchVolume())
+	return tea.Batch(m.spinner.Tick, m.fetchVolume(m.refresh.Seq()))
 }
 
 // SelectedVolumeID returns the current volume ID.
@@ -95,6 +97,9 @@ func (m Model) CopyEntries() (string, []copypicker.Entry) {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case volumeDetailLoadedMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[volumedetail] loaded volume %s", m.volumeID)
 		m.loading = false
 		m.volume = msg.vol
@@ -104,18 +109,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case volumeDetailErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[volumedetail] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
-		if m.loading {
-			shared.Debugf("[volumedetail] tick skipped (loading)")
+		if m.loading || m.refresh.Busy() {
+			shared.Debugf("[volumedetail] tick skipped (fetch in flight)")
 			return m, nil
 		}
 		shared.Debugf("[volumedetail] tick fetching")
-		return m, m.fetchVolume()
+		seq := m.refresh.Start()
+		return m, m.fetchVolume(seq)
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -304,26 +313,28 @@ func volumeStatusStyle(status string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(fg)
 }
 
-func (m Model) fetchVolume() tea.Cmd {
+func (m Model) fetchVolume(seq uint64) tea.Cmd {
 	client := m.client
 	computeClient := m.computeClient
 	id := m.volumeID
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[volumedetail] fetch start id=%s", id)
-		vol, err := volume.GetVolume(context.Background(), client, id)
+		vol, err := volume.GetVolume(ctx, client, id)
 		if err != nil {
 			shared.Debugf("[volumedetail] fetch error: %v", err)
-			return volumeDetailErrMsg{err: err}
+			return volumeDetailErrMsg{seq: seq, err: err}
 		}
 		serverName := ""
 		if vol.AttachedServerID != "" && computeClient != nil {
-			srv, err := compute.GetServer(context.Background(), computeClient, vol.AttachedServerID)
+			srv, err := compute.GetServer(ctx, computeClient, vol.AttachedServerID)
 			if err == nil && srv != nil {
 				serverName = srv.Name
 			}
 		}
 		shared.Debugf("[volumedetail] fetch done id=%s", id)
-		return volumeDetailLoadedMsg{vol: vol, serverName: serverName}
+		return volumeDetailLoadedMsg{seq: seq, vol: vol, serverName: serverName}
 	}
 }
 
@@ -331,7 +342,8 @@ func (m Model) fetchVolume() tea.Cmd {
 func (m *Model) ForceRefresh() tea.Cmd {
 	shared.Debugf("[volumedetail] ForceRefresh()")
 	m.loading = true
-	return tea.Batch(m.spinner.Tick, m.fetchVolume())
+	seq := m.refresh.Start()
+	return tea.Batch(m.spinner.Tick, m.fetchVolume(seq))
 }
 
 // SetSize updates the dimensions.

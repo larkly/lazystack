@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/compute"
 	img "github.com/larkly/lazystack/internal/image"
+	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/testutil"
 )
 
@@ -48,7 +49,7 @@ func TestServerUsageErrorIsNotShownAsNoServers(t *testing.T) {
 	m.computeClient = client
 	m.cursor = 1
 
-	m, _ = m.Update(m.fetchServers()())
+	m, _ = m.Update(m.startServersFetch()())
 	content := m.renderServersContent(100, 10)
 	if strings.Contains(content, "No servers using this image") {
 		t.Fatalf("failed lookup rendered as empty usage: %q", content)
@@ -62,7 +63,7 @@ func TestServerUsageErrorIsNotShownAsNoServers(t *testing.T) {
 
 	// A successful retry clears the error and shows a real empty result.
 	fail.Store(false)
-	m, _ = m.Update(m.fetchServers()())
+	m, _ = m.Update(m.startServersFetch()())
 	content = m.renderServersContent(100, 10)
 	if !strings.Contains(content, "No servers using this image") {
 		t.Fatalf("after retry usage pane = %q, want empty result", content)
@@ -146,5 +147,42 @@ func TestCompactServersKeepCursorVisible(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// Background ticks must not stack image or server-usage fetches, and slow
+// older responses must never overwrite the results of newer fetches.
+func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
+	client, cleanup := testutil.FakeServiceClient(http.NotFoundHandler())
+	defer cleanup()
+	m := loadedModel(namedImages("alpha")...)
+	m.computeClient = client
+
+	m, first := m.Update(shared.TickMsg{})
+	if first == nil {
+		t.Fatal("tick did not fetch")
+	}
+	staleImages, staleServers := m.refresh.Seq(), m.serversRefresh.Seq()
+	if !m.serversRefresh.Busy() {
+		t.Fatal("tick did not fetch server usage")
+	}
+	if _, again := m.Update(shared.TickMsg{}); again != nil {
+		t.Fatal("tick started a second fetch while one was in flight")
+	}
+
+	m.ForceRefresh()
+	m, _ = m.Update(imagesLoadedMsg{seq: m.refresh.Seq(), images: namedImages("new")})
+	m, _ = m.Update(serversLoadedMsg{seq: m.serversRefresh.Seq(), servers: []compute.Server{{ID: "s-new", ImageID: "id-new"}}})
+	m, _ = m.Update(imagesLoadedMsg{seq: staleImages, images: namedImages("old")})
+	m, _ = m.Update(imagesErrMsg{seq: staleImages, err: fmt.Errorf("stale")})
+	m, _ = m.Update(serversLoadedMsg{seq: staleServers, err: fmt.Errorf("stale")})
+	if len(m.images) != 1 || m.images[0].Name != "new" || m.err != "" {
+		t.Fatalf("stale image list applied: %v err=%q", m.images, m.err)
+	}
+	if len(m.servers) != 1 || m.serversErr != "" {
+		t.Fatalf("stale server usage applied: %v err=%q", m.servers, m.serversErr)
+	}
+	if _, next := m.Update(shared.TickMsg{}); next == nil {
+		t.Fatal("tick blocked after the newest fetches completed")
 	}
 }

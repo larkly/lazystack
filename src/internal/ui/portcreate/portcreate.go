@@ -1,7 +1,6 @@
 package portcreate
 
 import (
-	"context"
 	"fmt"
 	"net/netip"
 	"sort"
@@ -13,6 +12,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -31,8 +31,14 @@ const (
 
 var toggleOpts = []string{"Enabled", "Disabled"}
 
-type portCreatedMsg struct{ name string }
-type portCreateErrMsg struct{ err error }
+type portCreatedMsg struct {
+	shared.Audit
+	name string
+}
+type portCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 type sgLoadedMsg struct{ sgs []network.SecurityGroup }
 type sgLoadErrMsg struct{ err error }
 
@@ -115,7 +121,9 @@ func New(client *gophercloud.ServiceClient, networkID, networkName string, subne
 func (m Model) Init() tea.Cmd {
 	client := m.client
 	return tea.Batch(textinput.Blink, m.spinner.Tick, func() tea.Msg {
-		sgs, err := network.ListSecurityGroups(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		sgs, err := network.ListSecurityGroups(ctx, client)
 		if err != nil {
 			return sgLoadErrMsg{err: err}
 		}
@@ -428,16 +436,20 @@ func (m Model) submit() (Model, tea.Cmd) {
 	if name == "" {
 		name = m.networkName
 	}
+	details := map[string]string{"network_id": m.networkID, "network": m.networkName}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[portcreate] creating port on network %s", m.networkID)
-		_, err := network.CreatePortFull(context.Background(), client, opts)
+		port, err := network.CreatePortFull(ctx, client, opts)
+		rec := shared.NewAudit(audit.ActionCreatePort, "port", portID(port), opts.Name, err).WithDetails(details)
 		if err != nil {
 			shared.Debugf("[portcreate] error: %v", err)
-			return portCreateErrMsg{err: err}
+			return portCreateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[portcreate] created port on network %s", m.networkID)
-		return portCreatedMsg{name: name}
+		return portCreatedMsg{Audit: rec, name: name}
 	})
 }
 
@@ -556,6 +568,14 @@ func parseAddressPairs(raw string) ([]network.AddressPair, error) {
 		}
 	}
 	return result, nil
+}
+
+// portID returns the ID of a port returned by a request, if any.
+func portID(p *network.Port) string {
+	if p == nil {
+		return ""
+	}
+	return p.ID
 }
 
 // View renders the modal.
