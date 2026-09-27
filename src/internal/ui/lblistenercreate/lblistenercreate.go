@@ -16,14 +16,15 @@ import (
 )
 
 const (
-	fieldName      = 0
-	fieldProtocol  = 1
-	fieldPort      = 2
-	fieldDesc      = 3
-	fieldConnLimit = 4
-	fieldSubmit    = 5
-	fieldCancel    = 6
-	numFields      = 7
+	fieldName        = 0
+	fieldProtocol    = 1
+	fieldPort        = 2
+	fieldDefaultPool = 3
+	fieldDesc        = 4
+	fieldConnLimit   = 5
+	fieldSubmit      = 6
+	fieldCancel      = 7
+	numFields        = 8
 )
 
 var protocolOpts = []string{"TCP", "HTTP", "HTTPS", "UDP"}
@@ -44,9 +45,17 @@ type Model struct {
 	descInput        textinput.Model
 	connLimitInput   textinput.Model
 
+	// Default pool binding: pools of this LB, and the chosen one
+	// (0 = none, i = pools[i-1]).
+	pools        []loadbalancer.Pool
+	selectedPool int
+	poolTouched  bool // the user changed the default pool choice
+
 	// Edit mode
-	editMode   bool
-	listenerID string
+	editMode      bool
+	listenerID    string
+	protocol      string // existing listener's protocol (edit mode)
+	initialPoolID string // existing default pool (edit mode)
 
 	focusField int
 	submitting bool
@@ -56,8 +65,9 @@ type Model struct {
 	height     int
 }
 
-// New creates a listener create form.
-func New(client *gophercloud.ServiceClient, lbID, lbName string) Model {
+// New creates a listener create form. pools are the load balancer's pools
+// offered as the listener's default pool.
+func New(client *gophercloud.ServiceClient, lbID, lbName string, pools []loadbalancer.Pool) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "listener name"
@@ -95,12 +105,14 @@ func New(client *gophercloud.ServiceClient, lbID, lbName string) Model {
 		portInput:      pi,
 		descInput:      di,
 		connLimitInput: ci,
+		pools:          pools,
 		spinner:        s,
 	}
 }
 
-// NewEdit creates an edit form for an existing listener.
-func NewEdit(client *gophercloud.ServiceClient, listenerID, currentName, currentDesc string, currentConnLimit int, lbName string) Model {
+// NewEdit creates an edit form for an existing listener. protocol and
+// currentPoolID describe the listener; pools are the load balancer's pools.
+func NewEdit(client *gophercloud.ServiceClient, listenerID, currentName, currentDesc string, currentConnLimit int, lbName, protocol, currentPoolID string, pools []loadbalancer.Pool) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "listener name"
@@ -133,18 +145,74 @@ func NewEdit(client *gophercloud.ServiceClient, listenerID, currentName, current
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
-	return Model{
+	m := Model{
 		Active:         true,
 		client:         client,
 		lbName:         lbName,
 		editMode:       true,
 		listenerID:     listenerID,
+		protocol:       protocol,
+		initialPoolID:  currentPoolID,
 		nameInput:      ni,
 		portInput:      pi,
 		descInput:      di,
 		connLimitInput: ci,
+		pools:          pools,
 		spinner:        s,
 	}
+	for i, p := range pools {
+		if p.ID == currentPoolID {
+			m.selectedPool = i + 1
+		}
+	}
+	return m
+}
+
+// chosenPool returns the selected default pool, or nil for none.
+func (m Model) chosenPool() *loadbalancer.Pool {
+	if m.selectedPool > 0 && m.selectedPool <= len(m.pools) {
+		return &m.pools[m.selectedPool-1]
+	}
+	return nil
+}
+
+func (m Model) listenerProtocol() string {
+	if m.editMode {
+		return m.protocol
+	}
+	return protocolOpts[m.selectedProtocol]
+}
+
+func (m Model) poolLabel(p loadbalancer.Pool) string {
+	name := p.Name
+	if name == "" {
+		name = p.ID
+	}
+	return name + " (" + p.Protocol + ")"
+}
+
+// defaultPoolView renders the default-pool choice, including a current
+// binding to a pool that is not in the list.
+func (m Model) defaultPoolView() string {
+	if p := m.chosenPool(); p != nil {
+		return m.poolLabel(*p)
+	}
+	if m.editMode && m.initialPoolID != "" && m.selectedPool == 0 && !m.hasPool(m.initialPoolID) {
+		return m.initialPoolID + " (current)"
+	}
+	if len(m.pools) == 0 {
+		return "none (no pools on this load balancer)"
+	}
+	return "none"
+}
+
+func (m Model) hasPool(id string) bool {
+	for _, p := range m.pools {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Init returns the initial command.
@@ -261,6 +329,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.focusField == fieldProtocol {
 			m.selectedProtocol = (m.selectedProtocol + 1) % len(protocolOpts)
 		}
+		if m.focusField == fieldDefaultPool {
+			m.selectedPool = (m.selectedPool + 1) % (len(m.pools) + 1)
+			m.poolTouched = true
+		}
 		if m.focusField == fieldSubmit {
 			m.focusField = fieldCancel
 		}
@@ -268,6 +340,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Left):
 		if m.focusField == fieldProtocol {
 			m.selectedProtocol = (m.selectedProtocol - 1 + len(protocolOpts)) % len(protocolOpts)
+		}
+		if m.focusField == fieldDefaultPool {
+			n := len(m.pools) + 1
+			m.selectedPool = (m.selectedPool - 1 + n) % n
+			m.poolTouched = true
 		}
 		if m.focusField == fieldCancel {
 			m.focusField = fieldSubmit
@@ -328,13 +405,28 @@ func (m Model) submit() (Model, tea.Cmd) {
 		connLimit = &v
 	}
 
+	// Reject a pool the listener protocol cannot route to before any request.
+	pool := m.chosenPool()
+	if pool != nil && (!m.editMode || m.poolTouched) && !loadbalancer.CompatiblePoolProtocol(m.listenerProtocol(), pool.Protocol) {
+		m.err = "A " + m.listenerProtocol() + " listener cannot use " + pool.Protocol + " pool " + m.poolLabel(*pool)
+		return m, nil
+	}
+	poolID := ""
+	if pool != nil {
+		poolID = pool.ID
+	}
+
 	if m.editMode {
 		m.submitting = true
 		m.err = ""
 		client := m.client
 		id := m.listenerID
+		update := loadbalancer.ListenerUpdate{Name: &name, Description: &desc, ConnLimit: connLimit}
+		if m.poolTouched && poolID != m.initialPoolID {
+			update.DefaultPoolID = &poolID // "" removes the binding
+		}
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdateListener(context.Background(), client, id, &name, &desc, connLimit, nil)
+			err := loadbalancer.UpdateListenerWithPool(context.Background(), client, id, update)
 			if err != nil {
 				return listenerCreateErrMsg{err: err}
 			}
@@ -356,7 +448,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	protocol := protocolOpts[m.selectedProtocol]
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		_, err := loadbalancer.CreateListener(context.Background(), client, lbID, name, protocol, port)
+		_, err := loadbalancer.CreateListener(context.Background(), client, lbID, name, protocol, port, poolID)
 		if err != nil {
 			return listenerCreateErrMsg{err: err}
 		}
@@ -372,7 +464,7 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints.
 func (m Model) Hints() string {
-	return "tab/↑↓ navigate • ←→ pick protocol • ctrl+s submit • esc cancel"
+	return "tab/↑↓ navigate • ←→ pick protocol/pool • ctrl+s submit • esc cancel"
 }
 
 // View renders the form.
@@ -418,6 +510,17 @@ func (m Model) View() string {
 		}
 		rows = append(rows, label+m.portInput.View())
 	}
+
+	// Default pool
+	label = labelStyle.Render("Default Pool")
+	if m.focusField == fieldDefaultPool {
+		label = focusStyle.Bold(true).Width(12).Render("Default Pool")
+	}
+	poolText := m.defaultPoolView()
+	if len(m.pools) > 0 {
+		poolText = "← " + poolText + " →"
+	}
+	rows = append(rows, label+lipgloss.NewStyle().Foreground(shared.ColorHighlight).Render(poolText))
 
 	// Description
 	label = labelStyle.Render("Description")

@@ -3,7 +3,7 @@ package lbpoolcreate
 import "testing"
 
 func poolForm(monType int, delay, timeout, codes string) Model {
-	m := New(nil, "lb-1", "edge")
+	m := New(nil, "lb-1", "edge", nil)
 	m.nameInput.SetValue("web")
 	m.selectedMonType = monType
 	m.monDelayInput.SetValue(delay)
