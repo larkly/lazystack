@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -28,8 +29,14 @@ const (
 
 var toggleOpts = []string{"Enabled", "Disabled"}
 
-type portUpdatedMsg struct{ name string }
-type portUpdateErrMsg struct{ err error }
+type portUpdatedMsg struct {
+	shared.Audit
+	name string
+}
+type portUpdateErrMsg struct {
+	shared.Audit
+	err error
+}
 type sgLoadedMsg struct{ sgs []network.SecurityGroup }
 type sgLoadErrMsg struct{ err error }
 
@@ -433,12 +440,13 @@ func (m Model) submit() (Model, tea.Cmd) {
 		defer cancel()
 		shared.Debugf("[portedit] updating port %s", portID)
 		err := network.UpdatePort(ctx, client, portID, opts)
+		rec := shared.NewAudit(audit.ActionUpdate, "port", portID, displayName, err)
 		if err != nil {
 			shared.Debugf("[portedit] error: %v", err)
-			return portUpdateErrMsg{err: err}
+			return portUpdateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[portedit] updated port %s", portID)
-		return portUpdatedMsg{name: displayName}
+		return portUpdatedMsg{Audit: rec, name: displayName}
 	})
 }
 

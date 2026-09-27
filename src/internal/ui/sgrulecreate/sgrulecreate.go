@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -44,8 +45,11 @@ var (
 	icmpProtocols = []string{"icmp", "ipv6-icmp", "icmpv6", "1", "58"}
 )
 
-type ruleCreatedMsg struct{}
-type ruleCreateErrMsg struct{ err error }
+type ruleCreatedMsg struct{ shared.Audit }
+type ruleCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 type ruleLoadedMsg struct{ spec *network.SecurityRuleSpec }
 type ruleLoadErrMsg struct{ err error }
 
@@ -53,6 +57,7 @@ type ruleLoadErrMsg struct{ err error }
 // original could not be deleted. rollbackErr is nil when the replacement
 // was removed again, leaving the security group unchanged.
 type ruleReplaceErrMsg struct {
+	shared.Audit
 	oldID, newID string
 	deleteErr    error
 	rollbackErr  error
@@ -619,6 +624,21 @@ func (m Model) submit() (Model, tea.Cmd) {
 	editMode := m.editMode
 	oldRuleID := m.oldRuleID
 	sgName := m.sgName
+	sgID := m.sgID
+	// record describes the create (or, in edit mode, the replacement of
+	// oldRuleID) for the audit log.
+	record := func(newID string, err error, extra map[string]string) shared.Audit {
+		details := map[string]string{"security_group_id": sgID, "direction": spec.Direction,
+			"ethertype": spec.EtherType, "protocol": spec.Protocol}
+		for k, v := range extra {
+			details[k] = v
+		}
+		if editMode {
+			details["new_rule_id"] = newID
+			return shared.NewAudit(audit.ActionUpdate, "security_group_rule", oldRuleID, sgName, err).WithDetails(details)
+		}
+		return shared.NewAudit(audit.ActionCreate, "security_group_rule", newID, sgName, err).WithDetails(details)
+	}
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
@@ -630,7 +650,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		newID, err := network.CreateSecurityRuleSpec(ctx, client, spec)
 		if err != nil {
 			shared.Debugf("[sgrulecreate] error creating rule in %q: %v", sgName, err)
-			return ruleCreateErrMsg{err: err}
+			return ruleCreateErrMsg{Audit: record("", err, nil), err: err}
 		}
 		// In edit mode, delete the old rule only after the new one exists.
 		if editMode && oldRuleID != "" {
@@ -641,13 +661,18 @@ func (m Model) submit() (Model, tea.Cmd) {
 				rbCtx, rbCancel := shared.RequestCtx()
 				rbErr := network.DeleteSecurityGroupRule(rbCtx, client, newID)
 				rbCancel()
-				return ruleReplaceErrMsg{oldID: oldRuleID, newID: newID, deleteErr: delErr, rollbackErr: rbErr}
+				rollback := map[string]string{"rolled_back": "true"}
+				if rbErr != nil {
+					rollback = map[string]string{"rolled_back": "false", "rollback_error": rbErr.Error()}
+				}
+				return ruleReplaceErrMsg{Audit: record(newID, delErr, rollback),
+					oldID: oldRuleID, newID: newID, deleteErr: delErr, rollbackErr: rbErr}
 			}
 			shared.Debugf("[sgrulecreate] edited rule in %q (%s -> %s)", sgName, oldRuleID, newID)
 		} else {
 			shared.Debugf("[sgrulecreate] created rule %s in %q", newID, sgName)
 		}
-		return ruleCreatedMsg{}
+		return ruleCreatedMsg{Audit: record(newID, nil, nil)}
 	})
 }
 

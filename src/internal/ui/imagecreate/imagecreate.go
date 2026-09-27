@@ -19,6 +19,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -57,9 +58,18 @@ type pickerEntry struct {
 
 // Messages
 type progressTickMsg struct{}
-type uploadDoneMsg struct{ name string }
-type uploadErrMsg struct{ err error }
-type importStartedMsg struct{ name string }
+type uploadDoneMsg struct {
+	shared.Audit
+	name string
+}
+type uploadErrMsg struct {
+	shared.Audit
+	err error
+}
+type importStartedMsg struct {
+	shared.Audit
+	name string
+}
 
 // Model is the image upload modal.
 type Model struct {
@@ -690,12 +700,18 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 		})
 		cancelCreate()
 		if err != nil {
-			return uploadErrMsg{err: err}
+			return uploadErrMsg{Audit: shared.NewAudit(audit.ActionUpload, "image", "", name, err), err: err}
+		}
+		// record describes the upload for the audit log.
+		record := func(err error) shared.Audit {
+			return shared.NewAudit(audit.ActionUpload, "image", img.ID, name, err).
+				WithDetails(map[string]string{"disk_format": diskFmt, "visibility": vis})
 		}
 
 		f, err := os.Open(path)
 		if err != nil {
-			return uploadErrMsg{err: cleanupFailedImage(client, img.ID, fmt.Errorf("opening file: %w", err))}
+			err = cleanupFailedImage(client, img.ID, fmt.Errorf("opening file: %w", err))
+			return uploadErrMsg{Audit: record(err), err: err}
 		}
 		defer f.Close()
 
@@ -713,10 +729,11 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 			if errors.Is(context.Cause(ctx), shared.ErrTransferStalled) {
 				err = fmt.Errorf("upload made no progress for %s: %w", shared.TransferStallTimeout, err)
 			}
-			return uploadErrMsg{err: cleanupFailedImage(client, img.ID, err)}
+			err = cleanupFailedImage(client, img.ID, err)
+			return uploadErrMsg{Audit: record(err), err: err}
 		}
 
-		return uploadDoneMsg{name: name}
+		return uploadDoneMsg{Audit: record(nil), name: name}
 	})
 }
 
@@ -745,15 +762,20 @@ func (m Model) doURLImport() (Model, tea.Cmd) {
 			MinRAM:     minRAM,
 		})
 		if err != nil {
-			return uploadErrMsg{err: err}
+			return uploadErrMsg{Audit: shared.NewAudit(audit.ActionCreateImage, "image", "", name, err), err: err}
 		}
 
 		err = image.ImportImageURL(ctx, client, img.ID, url)
 		if err != nil {
-			return uploadErrMsg{err: cleanupFailedImage(client, img.ID, err)}
+			err = cleanupFailedImage(client, img.ID, err)
+		}
+		rec := shared.NewAudit(audit.ActionCreateImage, "image", img.ID, name, err).
+			WithDetails(map[string]string{"import_url": url, "disk_format": diskFmt, "visibility": vis})
+		if err != nil {
+			return uploadErrMsg{Audit: rec, err: err}
 		}
 
-		return importStartedMsg{name: name}
+		return importStartedMsg{Audit: rec, name: name}
 	})
 }
 

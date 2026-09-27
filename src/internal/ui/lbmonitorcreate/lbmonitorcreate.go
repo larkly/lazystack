@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -33,8 +34,11 @@ var (
 	httpMethodOpts = []string{"GET", "HEAD", "POST"}
 )
 
-type monitorCreatedMsg struct{}
-type monitorCreateErrMsg struct{ err error }
+type monitorCreatedMsg struct{ shared.Audit }
+type monitorCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the health monitor create/edit form modal.
 type Model struct {
@@ -356,6 +360,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.submitting = true
 	m.err = ""
 	client := m.client
+	poolName := m.poolName
 
 	if m.editMode {
 		id := m.monitorID
@@ -370,10 +375,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 			ctx, cancel := shared.RequestCtx()
 			defer cancel()
 			err := loadbalancer.UpdateHealthMonitor(ctx, client, id, &delay, &timeout, &retries, urlPathPtr, codesPtr, httpMethodPtr)
+			rec := shared.NewAudit(audit.ActionUpdate, "lb_monitor", id, poolName, err)
 			if err != nil {
-				return monitorCreateErrMsg{err: err}
+				return monitorCreateErrMsg{Audit: rec, err: err}
 			}
-			return monitorCreatedMsg{}
+			return monitorCreatedMsg{Audit: rec}
 		})
 	}
 
@@ -393,12 +399,22 @@ func (m Model) submit() (Model, tea.Cmd) {
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
-		_, err := loadbalancer.CreateHealthMonitor(ctx, client, poolID, monType, delay, timeout, retries, urlPath, codes, httpMethod)
+		mon, err := loadbalancer.CreateHealthMonitor(ctx, client, poolID, monType, delay, timeout, retries, urlPath, codes, httpMethod)
+		rec := shared.NewAudit(audit.ActionCreateLB, "lb_monitor", monitorID(mon), poolName, err).
+			WithDetails(map[string]string{"pool_id": poolID, "type": monType})
 		if err != nil {
-			return monitorCreateErrMsg{err: err}
+			return monitorCreateErrMsg{Audit: rec, err: err}
 		}
-		return monitorCreatedMsg{}
+		return monitorCreatedMsg{Audit: rec}
 	})
+}
+
+// monitorID returns the ID of a resource returned by a request, if any.
+func monitorID(r *loadbalancer.HealthMonitor) string {
+	if r == nil {
+		return ""
+	}
+	return r.ID
 }
 
 // SetSize updates the dimensions.

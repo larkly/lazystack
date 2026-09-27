@@ -10,14 +10,21 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 )
 
 type flavorsLoadedMsg struct{ flavors []compute.Flavor }
 type fetchErrMsg struct{ err error }
-type resizeDoneMsg struct{ name string }
-type resizeErrMsg struct{ err error }
+type resizeDoneMsg struct {
+	shared.Audit
+	name string
+}
+type resizeErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the resize flavor picker modal.
 type Model struct {
@@ -233,6 +240,7 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 	client := m.client
 	name := m.serverName
 	flavorID := flavor.ID
+	details := map[string]string{"flavor_id": flavorID, "flavor": flavor.Name}
 
 	var ids []string
 	var cmd tea.Cmd
@@ -242,20 +250,23 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 		cmd = func() tea.Msg {
 			shared.Debugf("[serverresize] resizing %d servers to flavor %s", len(ids), flavorID)
 			var errs []string
+			var recs []shared.AuditRecord
 			for _, id := range ids {
 				ctx, cancel := shared.RequestCtx()
 				err := compute.ResizeServer(ctx, client, id, flavorID)
 				cancel()
+				recs = append(recs, shared.AuditRecord{Action: audit.ActionResize, ResourceType: "server", ResourceID: id, Err: err})
 				if err != nil {
 					errs = append(errs, err.Error())
 				}
 			}
+			rec := shared.Audits(recs...).WithDetails(details)
 			if len(errs) > 0 {
 				shared.Debugf("[serverresize] error resizing servers: %s", strings.Join(errs, "; "))
-				return resizeErrMsg{err: fmt.Errorf("%s", strings.Join(errs, "; "))}
+				return resizeErrMsg{Audit: rec, err: fmt.Errorf("%s", strings.Join(errs, "; "))}
 			}
 			shared.Debugf("[serverresize] resized %d servers to flavor %s", len(ids), flavorID)
-			return resizeDoneMsg{name: name}
+			return resizeDoneMsg{Audit: rec, name: name}
 		}
 	} else {
 		// Single resize
@@ -266,12 +277,13 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 			defer cancel()
 			shared.Debugf("[serverresize] resizing server %s (%s) to flavor %s", id, name, flavorID)
 			err := compute.ResizeServer(ctx, client, id, flavorID)
+			rec := shared.NewAudit(audit.ActionResize, "server", id, name, err).WithDetails(details)
 			if err != nil {
 				shared.Debugf("[serverresize] error resizing server %s: %v", id, err)
-				return resizeErrMsg{err: err}
+				return resizeErrMsg{Audit: rec, err: err}
 			}
 			shared.Debugf("[serverresize] resized server %s (%s)", id, name)
-			return resizeDoneMsg{name: name}
+			return resizeDoneMsg{Audit: rec, name: name}
 		}
 	}
 

@@ -9,6 +9,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/testutil"
@@ -241,5 +242,27 @@ func TestTrackHookGuardsSubmission(t *testing.T) {
 	run(cmd)
 	if !wrapped || rec.count() != 2 {
 		t.Fatalf("wrapped=%v posts=%d", wrapped, rec.count())
+	}
+}
+
+// A bulk resize is audited once per server.
+func TestBulkResizeAuditsEachServer(t *testing.T) {
+	m, _ := newBulk(t)
+	m, _ = m.Update(keyDown)
+	m, _ = m.Update(keyEnter)
+	_, cmd := m.Update(keyY)
+	msgs := run(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("msgs=%v", msgs)
+	}
+	recs, ok := msgs[0].(shared.Auditable).TakeAudit()
+	if !ok || len(recs) != 2 {
+		t.Fatalf("records = %+v", recs)
+	}
+	for i, id := range []string{"srv-a", "srv-b"} {
+		r := recs[i]
+		if r.Action != audit.ActionResize || r.ResourceID != id || r.Err != nil || r.Details["flavor_id"] != "f-large" {
+			t.Errorf("record %d = %+v", i, r)
+		}
 	}
 }

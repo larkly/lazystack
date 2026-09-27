@@ -62,11 +62,11 @@ func TestSubmissionAndResult(t *testing.T) {
 		if !m.submitting || cmd == nil || !strings.Contains(m.View(), "Adding interface") {
 			t.Fatal("not submitting")
 		}
-		m, _ = m.Update(interfaceAddErrMsg{errors.New("denied")})
+		m, _ = m.Update(interfaceAddErrMsg{err: errors.New("denied")})
 		if m.submitting || !strings.Contains(m.View(), "denied") {
 			t.Fatal("error state")
 		}
-		m, cmd = m.Update(interfaceAddedMsg{"edge"})
+		m, cmd = m.Update(interfaceAddedMsg{routerName: "edge"})
 		if m.Active || cmd == nil {
 			t.Fatal("completion")
 		}

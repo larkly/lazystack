@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
@@ -17,8 +18,14 @@ import (
 
 type imagesLoadedMsg struct{ images []image.Image }
 type fetchErrMsg struct{ err error }
-type rebuildDoneMsg struct{ name string }
-type rebuildErrMsg struct{ err error }
+type rebuildDoneMsg struct {
+	shared.Audit
+	name string
+}
+type rebuildErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the rebuild image picker modal.
 type Model struct {
@@ -219,12 +226,14 @@ func (m Model) doRebuild(img image.Image) (Model, tea.Cmd) {
 		defer cancel()
 		shared.Debugf("[serverrebuild] rebuilding server %s (%s) with image %s", id, name, imageID)
 		err := compute.RebuildServer(ctx, client, id, imageID)
+		rec := shared.NewAudit(audit.ActionRebuild, "server", id, name, err).
+			WithDetails(map[string]string{"image_id": imageID})
 		if err != nil {
 			shared.Debugf("[serverrebuild] error rebuilding server %s: %v", id, err)
-			return rebuildErrMsg{err: err}
+			return rebuildErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[serverrebuild] rebuilt server %s (%s)", id, name)
-		return rebuildDoneMsg{name: name}
+		return rebuildDoneMsg{Audit: rec, name: name}
 	})
 }
 

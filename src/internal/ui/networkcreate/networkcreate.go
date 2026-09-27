@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -24,8 +25,11 @@ const (
 
 var adminStates = []string{"Up", "Down"}
 
-type netCreatedMsg struct{}
-type netCreateErrMsg struct{ err error }
+type netCreatedMsg struct{ shared.Audit }
+type netCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the network create modal.
 type Model struct {
@@ -223,14 +227,23 @@ func (m Model) submit() (Model, tea.Cmd) {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
 		shared.Debugf("[networkcreate] creating network %q", name)
-		_, err := network.CreateNetwork(ctx, client, name, adminUp)
+		n, err := network.CreateNetwork(ctx, client, name, adminUp)
+		rec := shared.NewAudit(audit.ActionCreateNet, "network", networkID(n), name, err)
 		if err != nil {
 			shared.Debugf("[networkcreate] error creating network %q: %v", name, err)
-			return netCreateErrMsg{err: err}
+			return netCreateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[networkcreate] created network %q", name)
-		return netCreatedMsg{}
+		return netCreatedMsg{Audit: rec}
 	})
+}
+
+// networkID returns the ID of a network returned by a request, if any.
+func networkID(n *network.Network) string {
+	if n == nil {
+		return ""
+	}
+	return n.ID
 }
 
 // View renders the modal.

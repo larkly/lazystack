@@ -45,10 +45,10 @@ func TestSelectExistingOrAllocate(t *testing.T) {
 		}
 		action := "Assigned"
 		if allocate {
-			m, cmd = m.Update(allocateDoneMsg{"192.0.2.1", "web"})
+			m, cmd = m.Update(allocateDoneMsg{fipAddr: "192.0.2.1", serverName: "web"})
 			action = "Allocated & assigned"
 		} else {
-			m, cmd = m.Update(associateDoneMsg{"192.0.2.1", "web"})
+			m, cmd = m.Update(associateDoneMsg{fipAddr: "192.0.2.1", serverName: "web"})
 		}
 		if m.Active || m.submitting || cmd == nil {
 			t.Fatal("completion state")
@@ -66,7 +66,7 @@ func TestEmptyAutoAllocatesAndErrorsCanClose(t *testing.T) {
 	if m.loading || !m.submitting || cmd == nil {
 		t.Fatal("empty list should allocate")
 	}
-	for _, msg := range []tea.Msg{fetchErrMsg{errors.New("denied")}, associateErrMsg{errors.New("denied")}, allocateErrMsg{errors.New("denied")}} {
+	for _, msg := range []tea.Msg{fetchErrMsg{errors.New("denied")}, associateErrMsg{err: errors.New("denied")}, allocateErrMsg{err: errors.New("denied")}} {
 		n := New(nil, "server", "web")
 		n.loading = false
 		n.submitting = false

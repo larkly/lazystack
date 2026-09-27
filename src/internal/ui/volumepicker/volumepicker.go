@@ -9,14 +9,21 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
 type volumesLoadedMsg struct{ volumes []volume.Volume }
 type fetchErrMsg struct{ err error }
-type attachDoneMsg struct{ serverName, volumeName string }
-type attachErrMsg struct{ err error }
+type attachDoneMsg struct {
+	shared.Audit
+	serverName, volumeName string
+}
+type attachErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the volume picker modal for attaching a volume to a server.
 type Model struct {
@@ -284,9 +291,11 @@ func (m Model) attachVolume(vol volume.Volume) tea.Cmd {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
 		_, err := volume.AttachVolume(ctx, client, serverID, volumeID)
+		rec := shared.NewAudit(audit.ActionAttachVolume, "volume", volumeID, volumeName, err).
+			WithDetails(map[string]string{"server_id": serverID, "server": serverName})
 		if err != nil {
-			return attachErrMsg{err: err}
+			return attachErrMsg{Audit: rec, err: err}
 		}
-		return attachDoneMsg{serverName: serverName, volumeName: volumeName}
+		return attachDoneMsg{Audit: rec, serverName: serverName, volumeName: volumeName}
 	}
 }

@@ -388,6 +388,7 @@ func (m Model) textInputFocused() bool {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	nm := next.(Model)
+	cmd = nm.auditResults(cmd)
 	if nm.connGen == 0 {
 		// Before the first connection there are no cloud clients, so no
 		// command can belong to a previous connection.

@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
@@ -27,8 +28,11 @@ const (
 	editNumFields = 4 // name, desc, submit, cancel
 )
 
-type lbCreatedMsg struct{}
-type lbCreateErrMsg struct{ err error }
+type lbCreatedMsg struct{ shared.Audit }
+type lbCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 type subnetsLoadedMsg struct{ subnets []network.Subnet }
 type subnetsFetchErrMsg struct{ err error }
 
@@ -413,10 +417,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 			ctx, cancel := shared.RequestCtx()
 			defer cancel()
 			err := loadbalancer.UpdateLoadBalancer(ctx, client, id, &name, &desc, nil)
+			rec := shared.NewAudit(audit.ActionUpdate, "load_balancer", id, name, err)
 			if err != nil {
-				return lbCreateErrMsg{err: err}
+				return lbCreateErrMsg{Audit: rec, err: err}
 			}
-			return lbCreatedMsg{}
+			return lbCreatedMsg{Audit: rec}
 		})
 	}
 
@@ -435,12 +440,22 @@ func (m Model) submit() (Model, tea.Cmd) {
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
-		_, err := loadbalancer.CreateLoadBalancer(ctx, client, name, desc, subnetID)
+		lb, err := loadbalancer.CreateLoadBalancer(ctx, client, name, desc, subnetID)
+		rec := shared.NewAudit(audit.ActionCreateLB, "load_balancer", lbID(lb), name, err).
+			WithDetails(map[string]string{"vip_subnet_id": subnetID})
 		if err != nil {
-			return lbCreateErrMsg{err: err}
+			return lbCreateErrMsg{Audit: rec, err: err}
 		}
-		return lbCreatedMsg{}
+		return lbCreatedMsg{Audit: rec}
 	})
+}
+
+// lbID returns the ID of a resource returned by a request, if any.
+func lbID(r *loadbalancer.LoadBalancer) string {
+	if r == nil {
+		return ""
+	}
+	return r.ID
 }
 
 // SetSize updates the dimensions.

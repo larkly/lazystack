@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -31,8 +32,14 @@ const (
 
 type subnetsLoadedMsg struct{ subnets []network.Subnet }
 type fetchErrMsg struct{ err error }
-type interfaceAddedMsg struct{ routerName string }
-type interfaceAddErrMsg struct{ err error }
+type interfaceAddedMsg struct {
+	shared.Audit
+	routerName string
+}
+type interfaceAddErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the subnet picker modal for adding router interfaces.
 type Model struct {
@@ -280,6 +287,11 @@ func (m Model) submitInterface() (Model, tea.Cmd) {
 // If the router already has a port on the same network, the new fixed IP
 // is added to that port instead of creating a new one.
 func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, routerName string, sub network.Subnet, ipStr string) tea.Cmd {
+	// record describes the interface add (onto portID) for the audit log.
+	record := func(portID string, err error) shared.Audit {
+		return shared.NewAudit(audit.ActionAddInterface, "router", routerID, routerName, err).
+			WithDetails(map[string]string{"subnet_id": sub.ID, "port_id": portID, "ip_address": ipStr})
+	}
 	return func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
@@ -288,7 +300,7 @@ func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, rout
 		existing, err := network.FindRouterPortOnNetwork(ctx, client, routerID, sub.NetworkID)
 		if err != nil {
 			shared.Debugf("[subnetpicker] error checking existing ports: %v", err)
-			return interfaceAddErrMsg{err: err}
+			return interfaceAddErrMsg{Audit: record("", err), err: err}
 		}
 
 		if existing != nil {
@@ -296,10 +308,10 @@ func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, rout
 			err = network.AddFixedIPToPort(ctx, client, existing.ID, sub.ID, ipStr)
 			if err != nil {
 				shared.Debugf("[subnetpicker] error adding fixed IP to port %s: %v", existing.ID, err)
-				return interfaceAddErrMsg{err: err}
+				return interfaceAddErrMsg{Audit: record(existing.ID, err), err: err}
 			}
 			shared.Debugf("[subnetpicker] added fixed IP (subnet %s) to existing port %s on router %s", sub.ID, existing.ID, routerName)
-			return interfaceAddedMsg{routerName: routerName}
+			return interfaceAddedMsg{Audit: record(existing.ID, nil), routerName: routerName}
 		}
 
 		// No existing port on this network — create a new one.
@@ -307,7 +319,7 @@ func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, rout
 		port, err := network.CreatePort(ctx, client, sub.NetworkID, sub.ID, ipStr)
 		if err != nil {
 			shared.Debugf("[subnetpicker] error creating port for router %s: %v", routerID, err)
-			return interfaceAddErrMsg{err: err}
+			return interfaceAddErrMsg{Audit: record("", err), err: err}
 		}
 
 		shared.Debugf("[subnetpicker] adding port %s to router %s (%s)", port.ID, routerID, routerName)
@@ -322,11 +334,11 @@ func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, rout
 				shared.Debugf("[subnetpicker] cleanup of port %s failed: %v", port.ID, delErr)
 				err = fmt.Errorf("%w (cleanup failed, port %s may be left behind: %v)", err, port.ID, delErr)
 			}
-			return interfaceAddErrMsg{err: err}
+			return interfaceAddErrMsg{Audit: record(port.ID, err), err: err}
 		}
 
 		shared.Debugf("[subnetpicker] added interface (port %s, ip %q) to router %s", port.ID, ipStr, routerName)
-		return interfaceAddedMsg{routerName: routerName}
+		return interfaceAddedMsg{Audit: record(port.ID, nil), routerName: routerName}
 	}
 }
 

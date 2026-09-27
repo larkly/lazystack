@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -36,8 +37,11 @@ var (
 	ipv6Modes  = []string{"SLAAC", "DHCPv6 stateful", "DHCPv6 stateless", "None"}
 )
 
-type subnetCreatedMsg struct{}
-type subnetCreateErrMsg struct{ err error }
+type subnetCreatedMsg struct{ shared.Audit }
+type subnetCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 type subnetPoolsLoadedMsg struct{ pools []network.SubnetPool }
 type subnetPoolsFetchErrMsg struct{ err error }
 
@@ -437,19 +441,29 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.submitting = true
 	m.err = ""
 	client := m.client
+	details := map[string]string{"network_id": m.networkID, "network": m.networkName, "cidr": cidr}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
 		shared.Debugf("[subnetcreate] creating subnet %q in network %s (cidr=%s)", opts.Name, m.networkID, cidr)
-		_, err := network.CreateSubnet(ctx, client, opts)
+		sub, err := network.CreateSubnet(ctx, client, opts)
+		rec := shared.NewAudit(audit.ActionCreateSubnet, "subnet", subnetID(sub), opts.Name, err).WithDetails(details)
 		if err != nil {
 			shared.Debugf("[subnetcreate] error creating subnet %q: %v", opts.Name, err)
-			return subnetCreateErrMsg{err: err}
+			return subnetCreateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[subnetcreate] created subnet %q in network %s", opts.Name, m.networkName)
-		return subnetCreatedMsg{}
+		return subnetCreatedMsg{Audit: rec}
 	})
+}
+
+// subnetID returns the ID of a subnet returned by a request, if any.
+func subnetID(s *network.Subnet) string {
+	if s == nil {
+		return ""
+	}
+	return s.ID
 }
 
 // View renders the modal.

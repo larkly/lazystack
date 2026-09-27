@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/shared"
@@ -44,8 +45,11 @@ var addressSourceOpts = []string{"IP", "Server"}
 var enabledDisabledOpts = []string{"Enabled", "Disabled"}
 var yesNoOpts = []string{"No", "Yes"}
 
-type memberCreatedMsg struct{}
-type memberCreateErrMsg struct{ err error }
+type memberCreatedMsg struct{ shared.Audit }
+type memberCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 type memberServersLoadedMsg struct{ servers []memberServerOption }
 type memberServersErrMsg struct{ err error }
 
@@ -652,10 +656,12 @@ func (m Model) submit() (Model, tea.Cmd) {
 				opts.MonitorPort = monitorPort
 			}
 			err := loadbalancer.UpdateMember(ctx, client, poolID, memberID, opts)
+			rec := shared.NewAudit(audit.ActionUpdate, "lb_member", memberID, name, err).
+				WithDetails(map[string]string{"pool_id": poolID})
 			if err != nil {
-				return memberCreateErrMsg{err: err}
+				return memberCreateErrMsg{Audit: rec, err: err}
 			}
-			return memberCreatedMsg{}
+			return memberCreatedMsg{Audit: rec}
 		})
 	}
 
@@ -698,7 +704,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
-		_, err := loadbalancer.CreateMember(ctx, client, poolID, loadbalancer.MemberCreateOpts{
+		member, err := loadbalancer.CreateMember(ctx, client, poolID, loadbalancer.MemberCreateOpts{
 			Name:           name,
 			Address:        addr,
 			ProtocolPort:   port,
@@ -709,11 +715,21 @@ func (m Model) submit() (Model, tea.Cmd) {
 			MonitorPort:    monitorPort,
 			Tags:           tags,
 		})
+		rec := shared.NewAudit(audit.ActionCreateLB, "lb_member", createdMemberID(member), name, err).
+			WithDetails(map[string]string{"pool_id": poolID, "address": addr, "port": strconv.Itoa(port)})
 		if err != nil {
-			return memberCreateErrMsg{err: err}
+			return memberCreateErrMsg{Audit: rec, err: err}
 		}
-		return memberCreatedMsg{}
+		return memberCreatedMsg{Audit: rec}
 	})
+}
+
+// createdMemberID returns the ID of a resource returned by a request, if any.
+func createdMemberID(r *loadbalancer.Member) string {
+	if r == nil {
+		return ""
+	}
+	return r.ID
 }
 
 // SetSize updates the dimensions.

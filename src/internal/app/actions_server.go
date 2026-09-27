@@ -830,11 +830,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			err := network.ReleaseFloatingIP(ctx, netClient, id)
 			if err != nil {
 				shared.Debugf("[action] release floating IP %s failed: %s", name, err)
-				m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "error", err.Error())
+				m.logAudit(audit.ActionReleaseFIP, "floating_ip", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Release FIP", Name: name, Err: err}
 			}
 			shared.Debugf("[action] released floating IP %s", name)
-			m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "success", "")
+			m.logAudit(audit.ActionReleaseFIP, "floating_ip", id, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Released", Name: name}
 		}
 	case "disassociate_fip":

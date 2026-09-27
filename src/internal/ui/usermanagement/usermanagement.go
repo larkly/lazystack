@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -27,6 +28,7 @@ type usersErrMsg struct {
 // failure; refreshErr is a failure of the follow-up list, which must not
 // hide a mutation that did succeed.
 type userMutatedMsg struct {
+	shared.Audit
 	action     actionKind
 	user       compute.User
 	err        error
@@ -433,13 +435,26 @@ func (m Model) doAction(p pendingAction) tea.Cmd {
 		case actionDelete:
 			err = compute.DeleteUser(ctx, pc, eo, p.user.ID)
 		}
-		msg := userMutatedMsg{action: p.kind, user: p.user, err: err}
+		msg := userMutatedMsg{Audit: userAudit(p, err), action: p.kind, user: p.user, err: err}
 		if err != nil {
 			return msg
 		}
 		msg.items, msg.refreshErr = compute.ListUsers(ctx, pc, eo)
 		return msg
 	}
+}
+
+// userAudit describes a user toggle or delete for the audit log.
+func userAudit(p pendingAction, err error) shared.Audit {
+	action := audit.ActionDelete
+	if p.kind == actionToggle {
+		action = audit.ActionDisableUser
+		if !p.user.Enabled {
+			action = audit.ActionEnableUser
+		}
+	}
+	return shared.NewAudit(action, "user", p.user.ID, p.user.Name, err).
+		WithDetails(map[string]string{"domain_id": p.user.DomainID})
 }
 
 func truncate(s string, n int) string {

@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -28,8 +29,11 @@ const (
 
 var protocolOpts = []string{"TCP", "HTTP", "HTTPS", "UDP"}
 
-type listenerCreatedMsg struct{}
-type listenerCreateErrMsg struct{ err error }
+type listenerCreatedMsg struct{ shared.Audit }
+type listenerCreateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the listener create form modal.
 type Model struct {
@@ -428,10 +432,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 			ctx, cancel := shared.RequestCtx()
 			defer cancel()
 			err := loadbalancer.UpdateListenerWithPool(ctx, client, id, update)
+			rec := shared.NewAudit(audit.ActionUpdate, "lb_listener", id, name, err)
 			if err != nil {
-				return listenerCreateErrMsg{err: err}
+				return listenerCreateErrMsg{Audit: rec, err: err}
 			}
-			return listenerCreatedMsg{}
+			return listenerCreatedMsg{Audit: rec}
 		})
 	}
 
@@ -451,12 +456,22 @@ func (m Model) submit() (Model, tea.Cmd) {
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
-		_, err := loadbalancer.CreateListener(ctx, client, lbID, name, protocol, port, poolID)
+		l, err := loadbalancer.CreateListener(ctx, client, lbID, name, protocol, port, poolID)
+		rec := shared.NewAudit(audit.ActionCreateLB, "lb_listener", listenerID(l), name, err).
+			WithDetails(map[string]string{"load_balancer_id": lbID, "protocol": protocol, "port": strconv.Itoa(port), "default_pool_id": poolID})
 		if err != nil {
-			return listenerCreateErrMsg{err: err}
+			return listenerCreateErrMsg{Audit: rec, err: err}
 		}
-		return listenerCreatedMsg{}
+		return listenerCreatedMsg{Audit: rec}
 	})
+}
+
+// listenerID returns the ID of a resource returned by a request, if any.
+func listenerID(r *loadbalancer.Listener) string {
+	if r == nil {
+		return ""
+	}
+	return r.ID
 }
 
 // SetSize updates the dimensions.

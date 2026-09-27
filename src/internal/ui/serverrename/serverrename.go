@@ -9,12 +9,19 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 )
 
-type renameSuccessMsg struct{ newName string }
-type renameErrMsg struct{ err error }
+type renameSuccessMsg struct {
+	shared.Audit
+	newName string
+}
+type renameErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // Model is the server rename overlay modal.
 type Model struct {
@@ -125,17 +132,20 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.err = ""
 	client := m.client
 	id := m.serverID
+	oldName := m.origName
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
 		shared.Debugf("[serverrename] renaming server %s to %q", id, newName)
 		err := compute.RenameServer(ctx, client, id, newName)
+		rec := shared.NewAudit(audit.ActionRename, "server", id, newName, err).
+			WithDetails(map[string]string{"old_name": oldName})
 		if err != nil {
 			shared.Debugf("[serverrename] error renaming server %s: %v", id, err)
-			return renameErrMsg{err: err}
+			return renameErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[serverrename] renamed server %s to %q", id, newName)
-		return renameSuccessMsg{newName: newName}
+		return renameSuccessMsg{Audit: rec, newName: newName}
 	})
 }
 

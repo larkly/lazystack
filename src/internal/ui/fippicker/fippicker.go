@@ -12,16 +12,29 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
+	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
 
 type fipsLoadedMsg struct{ fips []network.FloatingIP }
 type fetchErrMsg struct{ err error }
-type associateDoneMsg struct{ fipAddr, serverName string }
-type associateErrMsg struct{ err error }
-type allocateDoneMsg struct{ fipAddr, serverName string }
-type allocateErrMsg struct{ err error }
+type associateDoneMsg struct {
+	shared.Audit
+	fipAddr, serverName string
+}
+type associateErrMsg struct {
+	shared.Audit
+	err error
+}
+type allocateDoneMsg struct {
+	shared.Audit
+	fipAddr, serverName string
+}
+type allocateErrMsg struct {
+	shared.Audit
+	err error
+}
 
 // targetsLoadedMsg carries the server addresses a floating IP could be bound
 // to. fip is nil when a new floating IP will be allocated from extNetID.
@@ -453,8 +466,17 @@ func (m Model) resolveTargets(fip *network.FloatingIP) tea.Cmd {
 	}
 }
 
+// associateRecord describes binding a floating IP to a server address.
+func associateRecord(fipID, fipAddr, serverID, serverName string, target network.FloatingIPTarget, err error) shared.AuditRecord {
+	return shared.AuditRecord{
+		Action: audit.ActionAttachFIP, ResourceType: "floating_ip", ResourceID: fipID, ResourceName: fipAddr, Err: err,
+		Details: map[string]string{"server_id": serverID, "server": serverName, "port_id": target.PortID, "fixed_ip": target.IPAddress},
+	}
+}
+
 func (m Model) associateFIP(fip network.FloatingIP, target network.FloatingIPTarget) tea.Cmd {
 	client := m.client
+	serverID := m.serverID
 	serverName := m.serverName
 	fipID := fip.ID
 	fipAddr := fip.FloatingIP
@@ -463,49 +485,57 @@ func (m Model) associateFIP(fip network.FloatingIP, target network.FloatingIPTar
 		defer cancel()
 		shared.Debugf("[fippicker] associating FIP %s (%s) to %s on server %s", fipID, fipAddr, target.Label(), serverName)
 		err := network.AssociateFloatingIPToAddress(ctx, client, fipID, target.PortID, target.IPAddress)
+		rec := shared.Audits(associateRecord(fipID, fipAddr, serverID, serverName, target, err))
 		if err != nil {
 			shared.Debugf("[fippicker] error associating FIP %s: %v", fipID, err)
-			return associateErrMsg{err: err}
+			return associateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[fippicker] associated FIP %s to server %s", fipAddr, serverName)
-		return associateDoneMsg{fipAddr: fipAddr, serverName: serverName}
+		return associateDoneMsg{Audit: rec, fipAddr: fipAddr, serverName: serverName}
 	}
 }
 
 func (m Model) allocateAndAssociate(extNetID string, target network.FloatingIPTarget) tea.Cmd {
 	client := m.client
+	serverID := m.serverID
 	serverName := m.serverName
 	return func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
 		shared.Debugf("[fippicker] allocating FIP from %s for %s on server %s", extNetID, target.Label(), serverName)
 		fip, err := network.AllocateFloatingIP(ctx, client, extNetID)
+		allocDetails := map[string]string{"network_id": extNetID, "server_id": serverID, "server": serverName}
 		if err != nil {
 			shared.Debugf("[fippicker] error allocating FIP: %v", err)
-			return allocateErrMsg{err: err}
+			rec := shared.AuditRecord{Action: audit.ActionAllocateFIP, ResourceType: "floating_ip", Err: err, Details: allocDetails}
+			return allocateErrMsg{Audit: shared.Audits(rec), err: err}
 		}
+		recs := []shared.AuditRecord{{Action: audit.ActionAllocateFIP, ResourceType: "floating_ip", ResourceID: fip.ID, ResourceName: fip.FloatingIP, Details: allocDetails}}
 		err = network.AssociateFloatingIPToAddress(ctx, client, fip.ID, target.PortID, target.IPAddress)
+		recs = append(recs, associateRecord(fip.ID, fip.FloatingIP, serverID, serverName, target, err))
 		if err != nil {
 			shared.Debugf("[fippicker] error associating FIP %s: %v", fip.ID, err)
 			// Do not leave an unused, billable address behind.
-			return allocateErrMsg{err: releaseAfterFailure(client, fip, err)}
+			combined, releaseErr := releaseAfterFailure(client, fip, err)
+			recs = append(recs, shared.AuditRecord{Action: audit.ActionReleaseFIP, ResourceType: "floating_ip", ResourceID: fip.ID, ResourceName: fip.FloatingIP, Err: releaseErr})
+			return allocateErrMsg{Audit: shared.Audits(recs...), err: combined}
 		}
 		shared.Debugf("[fippicker] allocated and associated FIP %s to server %s", fip.FloatingIP, serverName)
-		return allocateDoneMsg{fipAddr: fip.FloatingIP, serverName: serverName}
+		return allocateDoneMsg{Audit: shared.Audits(recs...), fipAddr: fip.FloatingIP, serverName: serverName}
 	}
 }
 
 // releaseAfterFailure releases a floating IP that was allocated for a server
 // but could not be associated, so it does not linger unused and hold quota.
 // The returned error wraps cause and says whether the IP was released or, if
-// that failed too, which IP is left over.
-func releaseAfterFailure(client *gophercloud.ServiceClient, fip *network.FloatingIP, cause error) error {
+// that failed too, which IP is left over; releaseErr is the release outcome.
+func releaseAfterFailure(client *gophercloud.ServiceClient, fip *network.FloatingIP, cause error) (err, releaseErr error) {
 	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
 	defer cancel()
-	if err := network.ReleaseFloatingIP(ctx, client, fip.ID); err != nil {
-		shared.Debugf("[fippicker] error releasing unassociated FIP %s: %v", fip.ID, err)
-		return fmt.Errorf("%w; floating IP %s (ID %s) is still allocated, release it manually: %v", cause, fip.FloatingIP, fip.ID, err)
+	if releaseErr = network.ReleaseFloatingIP(ctx, client, fip.ID); releaseErr != nil {
+		shared.Debugf("[fippicker] error releasing unassociated FIP %s: %v", fip.ID, releaseErr)
+		return fmt.Errorf("%w; floating IP %s (ID %s) is still allocated, release it manually: %v", cause, fip.FloatingIP, fip.ID, releaseErr), releaseErr
 	}
 	shared.Debugf("[fippicker] released unassociated FIP %s", fip.ID)
-	return fmt.Errorf("%w (allocated floating IP %s was released)", cause, fip.FloatingIP)
+	return fmt.Errorf("%w (allocated floating IP %s was released)", cause, fip.FloatingIP), nil
 }
