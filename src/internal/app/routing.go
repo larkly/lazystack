@@ -1,23 +1,12 @@
 package app
 
 import (
-	"time"
-
 	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
 	"github.com/larkly/lazystack/internal/ui/serverdetail"
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 )
-
-// refreshTickCmd returns a single tea.Tick that fires shared.TickMsg after
-// the refresh interval. This is the ONLY tick source in the app — views
-// must not create their own tick timers.
-func (m Model) refreshTickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return shared.TickMsg{}
-	})
-}
 
 // setSizeAllViews propagates the terminal size to every view model, not
 // just the active one, so a list or detail kept in the background fits the

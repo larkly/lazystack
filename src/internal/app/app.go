@@ -9,7 +9,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
 	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
@@ -209,6 +208,9 @@ type Model struct {
 	currentProjectID    string
 	cloudName           string
 	autoCloud           string
+	connGen             uint64     // bumped on every successful connect
+	tickGen             uint64     // identifies the live refresh tick chain
+	connectSeq          uint64     // identifies the latest connect attempt
 	returnToView        activeView // cross-resource navigation back-nav
 	nav                 *NavStack  // local drill-down/overlay back-nav
 	refreshInterval     time.Duration
@@ -368,9 +370,39 @@ func (m Model) textInputFocused() bool {
 	return false
 }
 
-// Update handles all messages.
+// Update handles all messages. Every returned command is scoped to the
+// current connection generation (see connscope.go), so its result is
+// dropped if a newer cloud/project connection exists when it arrives.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	nm := next.(Model)
+	if nm.connGen == 0 {
+		// Before the first connection there are no cloud clients, so no
+		// command can belong to a previous connection.
+		return nm, cmd
+	}
+	return nm, scopeCmd(nm.connGen, cmd)
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case connScopedMsg:
+		if msg.gen != m.connGen {
+			shared.Debugf("[app] dropping %T from connection %d (current %d)", msg.msg, msg.gen, m.connGen)
+			return m, nil
+		}
+		return m.update(msg.msg)
+
+	case connectResultMsg:
+		return m.applyConnectResult(msg)
+
+	case refreshTickMsg:
+		if msg.gen != m.tickGen {
+			shared.Debugf("[app] ignoring tick from superseded chain %d (current %d)", msg.gen, m.tickGen)
+			return m, nil
+		}
+		return m.update(shared.TickMsg{})
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -401,6 +433,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.idlePaused = false
 			m.statusBar.Hint = ""
 			shared.Debugf("[app] resuming from idle, restarting tick")
+			m.tickGen++ // the resumed chain replaces any earlier one
 			return m, m.refreshTickCmd()
 		}
 
@@ -976,9 +1009,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shared.CloudSelectedMsg:
 		m.lastActivity = time.Now()
-		m.cloudName = msg.CloudName
 		m.statusBar.Hint = "Connecting..."
-		return m, m.connectToCloud(msg.CloudName)
+		// The cloud name is committed only when this attempt succeeds.
+		m.connectSeq++
+		return m, connectCmd(m.connectSeq, msg.CloudName, "", "", m.connectToCloud(msg.CloudName))
 
 	case shared.CloudConnectedMsg:
 		m.lastActivity = time.Now()
@@ -987,6 +1021,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cloud/project so nothing can restore models bound to old clients.
 		m.clearBackNav()
 		m.resetConnectionViews()
+		// New connection generation: results of commands issued for the
+		// previous connection are dropped, and its tick chain dies.
+		m.connGen++
+		m.tickGen++
+		// Project identity comes from the new token's scope, never from
+		// the previous connection; the project list is refetched below.
+		m.projects = nil
+		m.currentProjectID, m.statusBar.ProjectName = tokenProject(msg.ProviderClient)
+		m.quotaView.SetProjectID(m.currentProjectID)
 		m.client = &cloud.Client{
 			CloudName:      m.cloudName,
 			Compute:        msg.ComputeClient,
@@ -1036,43 +1079,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				defer cancel()
 				projs, err := cloud.ListAccessibleProjects(ctx, pc, eo)
 				if err != nil {
-					return nil
+					return projectsLoadErrMsg{err: err}
 				}
 				var infos []shared.ProjectInfo
 				for _, p := range projs {
 					infos = append(infos, shared.ProjectInfo{ID: p.ID, Name: p.Name})
 				}
-				// Extract current project ID from the auth token scope
-				currentID := ""
-				if ar, ok := pc.GetAuthResult().(interface {
-					ExtractProject() (*tokens.Project, error)
-				}); ok {
-					if proj, err := ar.ExtractProject(); err == nil && proj != nil {
-						currentID = proj.ID
-					}
-				}
+				currentID, _ := tokenProject(pc)
 				return shared.ProjectsLoadedMsg{Projects: infos, CurrentID: currentID}
 			})
 		}
 		return m, tea.Batch(cmds...)
 
 	case shared.ProjectsLoadedMsg:
+		// Only reaches here for the current connection (connection scope).
 		m.projects = msg.Projects
-		// Find current project name for status bar
-		for _, p := range msg.Projects {
-			if p.ID == msg.CurrentID {
-				m.statusBar.ProjectName = p.Name
-				m.currentProjectID = p.ID
-				break
+		// The token scope set on connect wins; fall back to the list only
+		// when the token carried no project.
+		if m.currentProjectID == "" {
+			for _, p := range msg.Projects {
+				if p.ID == msg.CurrentID {
+					m.currentProjectID = p.ID
+					break
+				}
+			}
+			if m.currentProjectID == "" && len(msg.Projects) == 1 {
+				m.currentProjectID = msg.Projects[0].ID
 			}
 		}
-		// If we couldn't identify the current project but have only one, use it
-		if m.statusBar.ProjectName == "" && len(msg.Projects) == 1 {
-			m.statusBar.ProjectName = msg.Projects[0].Name
-			m.currentProjectID = msg.Projects[0].ID
-		}
-		// If we have a current project ID set from project switching, preserve the name
-		if m.currentProjectID != "" && m.statusBar.ProjectName == "" {
+		if m.statusBar.ProjectName == "" {
 			for _, p := range msg.Projects {
 				if p.ID == m.currentProjectID {
 					m.statusBar.ProjectName = p.Name
@@ -1085,15 +1120,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case projectsLoadErrMsg:
+		m.statusBar.StickyHint = "Project list unavailable (project switching disabled): " + msg.err.Error()
+		return m, nil
+
 	case shared.ProjectSelectedMsg:
 		m.lastActivity = time.Now()
 		m.projectPicker.Active = false
 		m.statusBar.Hint = fmt.Sprintf("Switching to project %s...", msg.ProjectName)
-		m.currentProjectID = msg.ProjectID
-		m.statusBar.ProjectName = msg.ProjectName
+		// Identity (and the audit scope derived from it) switches only when
+		// the new connection succeeds; until then the old clients are live.
 		cloudName := m.cloudName
 		projectID := msg.ProjectID
-		return m, func() tea.Msg {
+		m.connectSeq++
+		return m, connectCmd(m.connectSeq, cloudName, projectID, msg.ProjectName, func() tea.Msg {
 			ctx, cancel := actionCtxLong()
 			defer cancel()
 			client, err := cloud.ConnectWithProject(ctx, cloudName, projectID)
@@ -1111,7 +1151,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				EndpointOpts:       client.EndpointOpts,
 				Region:             client.Region,
 			}
-		}
+		})
 
 	case shared.CloudConnectErrMsg:
 		m.errModal = modal.NewError("Cloud Connection", msg.Err)
