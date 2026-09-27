@@ -126,23 +126,25 @@ func GetPort(ctx context.Context, client *gophercloud.ServiceClient, portID stri
 	return &port, nil
 }
 
-// FindRouterPortOnNetwork returns the router interface port on a given network, if any.
+// FindRouterPortOnNetwork returns the router interface port (legacy, HA or
+// DVR) on a given network, if any.
 func FindRouterPortOnNetwork(ctx context.Context, client *gophercloud.ServiceClient, routerID, networkID string) (*Port, error) {
 	shared.Debugf("[network] finding router port for router %s on network %s", routerID, networkID)
 	var result *Port
 	err := ports.List(client, ports.ListOpts{
-		DeviceID:    routerID,
-		DeviceOwner: "network:router_interface",
-		NetworkID:   networkID,
+		DeviceID:  routerID,
+		NetworkID: networkID,
 	}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := ports.ExtractPorts(page)
 		if err != nil {
 			return false, err
 		}
-		if len(extracted) > 0 {
-			p := mapPortBasic(extracted[0])
-			result = &p
-			return false, nil // stop paginating once found
+		for _, ep := range extracted {
+			if ep.NetworkID == networkID && isRouterInterfacePort(ep, routerID) {
+				p := mapPortBasic(ep)
+				result = &p
+				return false, nil // stop paginating once found
+			}
 		}
 		return true, nil
 	})

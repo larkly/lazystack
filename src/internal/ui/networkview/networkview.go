@@ -1445,7 +1445,7 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 
 		// Also resolve router device IDs
 		for _, p := range fetchedPorts {
-			if strings.HasPrefix(p.DeviceOwner, "network:router_interface") && p.DeviceID != "" {
+			if network.IsRouterInterfaceOwner(p.DeviceOwner) && p.DeviceID != "" {
 				router, err := network.GetRouter(context.Background(), networkClient, p.DeviceID)
 				if err == nil && router != nil {
 					srvNames[p.DeviceID] = router.Name
