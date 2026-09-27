@@ -19,6 +19,35 @@ func (m Model) refreshTickCmd() tea.Cmd {
 	})
 }
 
+// setSizeAllViews propagates the terminal size to every view model, not
+// just the active one, so a list or detail kept in the background fits the
+// current terminal as soon as the user returns to it. Size setters only
+// store dimensions, so this is safe for views that were never opened.
+func (m *Model) setSizeAllViews(w, h int) {
+	m.serverList.SetSize(w, h)
+	m.serverDetail.SetSize(w, h)
+	m.serverCreate.SetSize(w, h)
+	m.consoleLog.SetSize(w, h)
+	m.actionLog.SetSize(w, h)
+	m.auditLog.SetSize(w, h)
+	m.volumeList.SetSize(w, h)
+	m.volumeDetail.SetSize(w, h)
+	m.volumeCreate.SetSize(w, h)
+	m.floatingIPList.SetSize(w, h)
+	m.secGroupView.SetSize(w, h)
+	m.keypairList.SetSize(w, h)
+	m.keypairCreate.SetSize(w, h)
+	m.keypairDetail.SetSize(w, h)
+	m.networkView.SetSize(w, h)
+	m.routerView.SetSize(w, h)
+	m.lbView.SetSize(w, h)
+	m.imageView.SetSize(w, h)
+	m.hypervisorList.SetSize(w, h)
+	m.serviceCatalog.SetSize(w, h)
+	m.dnsList.SetSize(w, h)
+	m.userManagement.SetSize(w, h)
+}
+
 func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.view {

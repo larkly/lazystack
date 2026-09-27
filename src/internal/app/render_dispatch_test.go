@@ -3,12 +3,15 @@ package app
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/actionlog"
 	"github.com/larkly/lazystack/internal/ui/auditlog"
 	"github.com/larkly/lazystack/internal/ui/consolelog"
@@ -95,6 +98,58 @@ func TestEveryActiveViewHasRenderDispatch(t *testing.T) {
 				t.Fatalf("root frame does not include the view's first line %q", first)
 			}
 		})
+	}
+}
+
+func TestResizeReachesInactiveViews(t *testing.T) {
+	for _, active := range []activeView{viewServerDetail, viewVolumeDetail, viewKeypairDetail, viewHypervisorList, viewCloudPicker} {
+		m := renderModel()
+		m.view = active
+		for i := range m.tabInited {
+			m.tabInited[i] = true
+		}
+		next, _ := m.Update(tea.WindowSizeMsg{Width: 173, Height: 57})
+		m = next.(Model)
+		rv := reflect.ValueOf(m)
+		for _, field := range []string{
+			"serverList", "serverDetail", "serverCreate", "consoleLog", "actionLog", "auditLog",
+			"volumeList", "volumeDetail", "volumeCreate", "floatingIPList", "secGroupView",
+			"keypairList", "keypairCreate", "keypairDetail", "networkView", "routerView",
+			"lbView", "imageView", "hypervisorList", "serviceCatalog", "dnsList", "userManagement",
+		} {
+			child := rv.FieldByName(field)
+			if w, h := child.FieldByName("width").Int(), child.FieldByName("height").Int(); w != 173 || h != 57 {
+				t.Errorf("active=%d: %s size = %dx%d, want 173x57", active, field, w, h)
+			}
+		}
+	}
+}
+
+func TestServerListFitsNewSizeAfterDetailResize(t *testing.T) {
+	m := serverListWithServers(t)
+	m.serverList.SetSize(100, 30)
+	next, _ := m.Update(press("enter"))
+	m = next.(Model)
+	m = drive(m, func() tea.Msg { return shared.ViewChangeMsg{View: "serverdetail"} })
+	if m.view != viewServerDetail {
+		t.Fatalf("setup: view = %v, want detail", m.view)
+	}
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 180, Height: 50})
+	m = next.(Model)
+	next, _ = m.Update(shared.ViewChangeMsg{View: "serverlist"})
+	m = next.(Model)
+	if m.view != viewServerList {
+		t.Fatalf("view = %v, want server list", m.view)
+	}
+	lines := strings.Split(m.serverList.View(), "\n")
+	widest := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > widest {
+			widest = w
+		}
+	}
+	if widest <= 100 || widest > 180 {
+		t.Fatalf("server list rendered %d columns wide after resizing to 180", widest)
 	}
 }
 

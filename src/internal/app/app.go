@@ -375,6 +375,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.tooSmall = m.width < m.minWidth || m.height < m.minHeight
 		m.cloudPicker.SetSize(m.width, m.height)
+		m.setSizeAllViews(m.width, m.height)
 		m.setSizeAllModals(m.width, m.height)
 		m.help.Width = m.width
 		m.help.Height = m.height
