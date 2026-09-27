@@ -52,6 +52,7 @@ type Model struct {
 	focusField     int
 	submitting     bool
 	loadingSGs     bool
+	sgLoadErr      string // non-empty when security group discovery failed
 	spinner        spinner.Model
 	err            string
 	width          int
@@ -136,7 +137,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case sgLoadErrMsg:
 		m.loadingSGs = false
-		m.err = "Failed to load security groups: " + msg.err.Error()
+		m.sgLoadErr = msg.err.Error()
+		m.err = "Failed to load security groups: " + m.sgLoadErr + " (the server default will apply)"
 		return m, nil
 	case portCreatedMsg:
 		m.submitting = false
@@ -147,6 +149,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case portCreateErrMsg:
 		m.submitting = false
 		m.err = msg.err.Error()
+		if m.sgLoadErr != "" {
+			m.err += " (security groups could not be loaded; the server default was requested)"
+		}
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting || m.loadingSGs {
@@ -368,6 +373,10 @@ func (m Model) sgDisplayValue() string {
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
+	if m.loadingSGs {
+		m.err = "Security groups are still loading"
+		return m, nil
+	}
 	opts := network.PortCreateOpts{
 		NetworkID:    m.networkID,
 		Name:         strings.TrimSpace(m.nameInput.Value()),
@@ -388,13 +397,17 @@ func (m Model) submit() (Model, tea.Cmd) {
 		opts.FixedIPs = fips
 	}
 
-	// Collect selected security groups (empty slice = no SGs, nil = server default)
-	indices := m.sortedSGIndices()
-	sgIDs := make([]string, 0, len(indices))
-	for _, idx := range indices {
-		sgIDs = append(sgIDs, m.secGroups[idx].ID)
+	// Collect selected security groups (empty slice = no SGs, nil = server
+	// default). If discovery failed the empty selection is not a user
+	// choice, so leave the field out and let Neutron apply its default.
+	if m.sgLoadErr == "" {
+		indices := m.sortedSGIndices()
+		sgIDs := make([]string, 0, len(indices))
+		for _, idx := range indices {
+			sgIDs = append(sgIDs, m.secGroups[idx].ID)
+		}
+		opts.SecurityGroups = sgIDs
 	}
-	opts.SecurityGroups = sgIDs
 
 	// Parse allowed address pairs
 	apRaw := strings.TrimSpace(m.allowPairInput.Value())
@@ -507,6 +520,8 @@ func (m Model) View() string {
 	sgValue := m.sgDisplayValue()
 	if m.loadingSGs {
 		sgValue = m.spinner.View() + " Loading..."
+	} else if m.sgLoadErr != "" {
+		sgValue = lipgloss.NewStyle().Foreground(shared.ColorWarning).Render("unavailable, server default")
 	}
 
 	fields := []field{
