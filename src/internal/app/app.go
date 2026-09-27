@@ -1189,6 +1189,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bulkResultMsg:
 		return m.handleBulkResult(msg)
 
+	case actionWarningMsg:
+		return m.handleActionWarning(msg)
+
+	case serveradminact.ActionRequestMsg:
+		return m.executeAdminAction(msg)
+
 	case shared.ResourceActionMsg:
 		return m.handleResourceActionMsg(msg)
 

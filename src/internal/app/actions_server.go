@@ -1212,7 +1212,7 @@ func (m Model) openAdminActions() (Model, tea.Cmd) {
 	if id == "" {
 		return m, nil
 	}
-	m.serverAdminAct = serveradminact.New(m.client.Compute, id, name)
+	m.serverAdminAct = serveradminact.New(id, name)
 	m.serverAdminAct.SetSize(m.width, m.height)
 	return m, m.serverAdminAct.Init()
 }
