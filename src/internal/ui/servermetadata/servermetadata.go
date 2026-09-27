@@ -17,14 +17,20 @@ import (
 )
 
 type metaOpDoneMsg struct {
-	action string
-	name   string
+	action  string
+	name    string
+	deleted string // key removed from the server, if any
 }
 
 type metaOpErrMsg struct {
 	action string
 	name   string
 	err    error
+	// setKey/setValue record a write that succeeded before the operation
+	// failed (e.g. a rename whose old-key cleanup failed), so the local view
+	// reflects what is actually stored on the server.
+	setKey   string
+	setValue string
 }
 
 // Model is the server metadata editor modal.
@@ -94,12 +100,26 @@ func (m Model) sortedKeys() []string {
 	return keys
 }
 
+// clampCursor keeps the cursor on an existing key (or zero when empty).
+func (m *Model) clampCursor() {
+	if n := len(m.metadata); m.cursor >= n {
+		m.cursor = n - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+}
+
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case metaOpDoneMsg:
 		m.submitting = false
 		m.Active = false
+		if msg.deleted != "" {
+			delete(m.metadata, msg.deleted)
+			m.clampCursor()
+		}
 		return m, func() tea.Msg {
 			return shared.ServerActionMsg{Action: msg.action, Name: msg.name}
 		}
@@ -107,6 +127,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case metaOpErrMsg:
 		m.submitting = false
 		m.err = fmt.Sprintf("%s %s: %v", msg.action, msg.name, msg.err)
+		if msg.setKey != "" {
+			m.metadata[msg.setKey] = msg.setValue
+			m.mode = ""
+			m.keyInput.Blur()
+			m.valueInput.Blur()
+			m.clampCursor()
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -154,7 +181,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.cursor--
 			}
 		case key.Matches(msg, shared.Keys.Down):
-			if m.cursor < len(keys) {
+			if m.cursor < len(keys)-1 {
 				m.cursor++
 			}
 		case msg.String() == "a":
@@ -233,7 +260,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) addMetadatum() tea.Cmd {
+func (m *Model) addMetadatum() tea.Cmd {
 	key := strings.TrimSpace(m.keyInput.Value())
 	value := strings.TrimSpace(m.valueInput.Value())
 	if key == "" {
@@ -259,7 +286,7 @@ func (m Model) addMetadatum() tea.Cmd {
 	}
 }
 
-func (m Model) updateMetadatum() tea.Cmd {
+func (m *Model) updateMetadatum() tea.Cmd {
 	newKey := strings.TrimSpace(m.keyInput.Value())
 	value := strings.TrimSpace(m.valueInput.Value())
 	if newKey == "" {
@@ -276,24 +303,33 @@ func (m Model) updateMetadatum() tea.Cmd {
 
 	return func() tea.Msg {
 		shared.Debugf("[servermetadata] updating metadata %s=%s for server %s", newKey, value, name)
-		// CreateMetadatum handles both create and update (Nova PUT /metadata/{key})
-		if oldKey != newKey {
-			dr := servers.DeleteMetadatum(context.Background(), client, id, oldKey)
-			if dr.Err != nil {
-				shared.Debugf("[servermetadata] delete old key failed: %v", dr.Err)
-			}
-		}
+		// CreateMetadatum handles both create and update (Nova PUT /metadata/{key}).
+		// On rename, write the new key first so a failed write never loses the
+		// original value; only then remove the old key.
 		cr := servers.CreateMetadatum(context.Background(), client, id, servers.MetadatumOpts{newKey: value})
 		if cr.Err != nil {
 			shared.Debugf("[servermetadata] update metadata failed: %v", cr.Err)
 			return metaOpErrMsg{action: "Update metadata", name: name, err: cr.Err}
+		}
+		if oldKey != newKey {
+			dr := servers.DeleteMetadatum(context.Background(), client, id, oldKey)
+			if dr.Err != nil {
+				shared.Debugf("[servermetadata] delete old key failed: %v", dr.Err)
+				return metaOpErrMsg{
+					action:   "Rename metadata",
+					name:     name,
+					err:      fmt.Errorf("saved %q but failed to remove old key %q: %w", newKey, oldKey, dr.Err),
+					setKey:   newKey,
+					setValue: value,
+				}
+			}
 		}
 		shared.Debugf("[servermetadata] updated metadata for %s", name)
 		return metaOpDoneMsg{action: "Updated metadata", name: name}
 	}
 }
 
-func (m Model) deleteMetadatum(key string) tea.Cmd {
+func (m *Model) deleteMetadatum(key string) tea.Cmd {
 	m.submitting = true
 	m.err = ""
 	client := m.client
@@ -308,7 +344,7 @@ func (m Model) deleteMetadatum(key string) tea.Cmd {
 			return metaOpErrMsg{action: "Delete metadata", name: name, err: r.Err}
 		}
 		shared.Debugf("[servermetadata] deleted metadata from %s", name)
-		return metaOpDoneMsg{action: "Updated metadata", name: name}
+		return metaOpDoneMsg{action: "Deleted metadata", name: name, deleted: key}
 	}
 }
 
@@ -384,8 +420,8 @@ func (m Model) renderMetadataList() string {
 		vStyle := valueStyle
 		if i == m.cursor {
 			prefix = cursorMark
-			kStyle = keyStyle.Copy().Foreground(shared.ColorHighlight).Bold(true)
-			vStyle = valueStyle.Copy().Foreground(shared.ColorHighlight).Bold(true)
+			kStyle = keyStyle.Foreground(shared.ColorHighlight).Bold(true)
+			vStyle = valueStyle.Foreground(shared.ColorHighlight).Bold(true)
 		}
 		val := m.metadata[k]
 		if len(val) > 30 {

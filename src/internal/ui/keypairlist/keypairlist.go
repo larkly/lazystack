@@ -28,6 +28,7 @@ type Model struct {
 	client          *gophercloud.ServiceClient
 	pairs           []compute.KeyPair
 	cursor          int
+	scrollOff       int
 	width           int
 	height          int
 	loading         bool
@@ -80,9 +81,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		}
-		if m.cursor >= len(m.pairs) {
-			m.cursor = max(0, len(m.pairs)-1)
-		}
+		m.ensureVisible()
 		return m, nil
 
 	case keypairsErrMsg:
@@ -108,8 +107,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case sortClearMsg:
@@ -136,6 +134,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					}
 				}
 			}
+			m.ensureVisible()
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})
@@ -156,30 +155,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					}
 				}
 			}
+			m.ensureVisible()
 			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
 				return sortClearMsg{}
 			})
 		case key.Matches(msg, shared.Keys.Up):
-			if m.cursor > 0 {
-				m.cursor--
-			}
+			m.cursor--
+			m.ensureVisible()
 		case key.Matches(msg, shared.Keys.Down):
-			if m.cursor < len(m.pairs)-1 {
-				m.cursor++
-			}
+			m.cursor++
+			m.ensureVisible()
 		case key.Matches(msg, shared.Keys.PageDown):
-			m.cursor += m.height - 5
-			if m.cursor >= len(m.pairs) {
-				m.cursor = len(m.pairs) - 1
-			}
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
+			m.cursor += m.tableHeight()
+			m.ensureVisible()
 		case key.Matches(msg, shared.Keys.PageUp):
-			m.cursor -= m.height - 5
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
+			m.cursor -= m.tableHeight()
+			m.ensureVisible()
 		}
 	}
 	return m, nil
@@ -236,7 +227,9 @@ func (m Model) View() string {
 	b.WriteString("  " + strings.Join(headerParts, " ") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(strings.Repeat("─", m.width)) + "\n")
 
-	for i, kp := range m.pairs {
+	end := min(len(m.pairs), m.scrollOff+m.tableHeight())
+	for i := m.scrollOff; i < end; i++ {
+		kp := m.pairs[i]
 		cursor := "  "
 		style := lipgloss.NewStyle().Foreground(shared.ColorFg)
 		if i == m.cursor {
@@ -249,6 +242,27 @@ func (m Model) View() string {
 	}
 
 	return b.String()
+}
+
+// ensureVisible clamps the cursor to the list and scrolls so the cursor row
+// is visible without leaving blank rows below the last keypair.
+func (m *Model) ensureVisible() {
+	m.cursor = max(0, min(m.cursor, len(m.pairs)-1))
+	th := m.tableHeight()
+	if m.cursor < m.scrollOff {
+		m.scrollOff = m.cursor
+	}
+	if m.cursor >= m.scrollOff+th {
+		m.scrollOff = m.cursor - th + 1
+	}
+	m.scrollOff = max(0, min(m.scrollOff, len(m.pairs)-th))
+}
+
+// tableHeight is the number of keypair rows that fit: the app gives the view
+// the terminal height minus the tab bar and status bar, and the view itself
+// uses title, blank line, header and separator.
+func (m Model) tableHeight() int {
+	return max(1, m.height-6)
 }
 
 func (m *Model) sortPairs() {
@@ -316,10 +330,11 @@ func (m *Model) ForceRefresh() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, m.fetchKeypairs())
 }
 
-// SetSize updates dimensions.
+// SetSize updates dimensions and keeps the cursor row visible.
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.ensureVisible()
 }
 
 // Hints returns key hints.
