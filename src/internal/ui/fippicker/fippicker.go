@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -29,12 +31,17 @@ type targetsLoadedMsg struct {
 	targets  []network.FloatingIPTarget
 }
 
+// releaseTimeout bounds the cleanup of a floating IP that was allocated but
+// could not be associated.
+const releaseTimeout = 30 * time.Second
+
 // Model is the floating IP picker modal.
 type Model struct {
 	Active     bool
 	client     *gophercloud.ServiceClient
 	serverID   string
 	serverName string
+	projectID  string               // scope of the token; "" if unknown
 	fips       []network.FloatingIP // unassociated FIPs
 	cursor     int
 	loading    bool
@@ -65,9 +72,29 @@ func New(client *gophercloud.ServiceClient, serverID, serverName string) Model {
 		client:     client,
 		serverID:   serverID,
 		serverName: serverName,
+		projectID:  tokenProjectID(client),
 		loading:    true,
 		spinner:    s,
 	}
+}
+
+// tokenProjectID returns the project the client's token is scoped to, or ""
+// when it cannot be determined.
+func tokenProjectID(client *gophercloud.ServiceClient) string {
+	if client == nil || client.ProviderClient == nil {
+		return ""
+	}
+	ar, ok := client.ProviderClient.GetAuthResult().(interface {
+		ExtractProject() (*tokens.Project, error)
+	})
+	if !ok {
+		return ""
+	}
+	proj, err := ar.ExtractProject()
+	if err != nil || proj == nil {
+		return ""
+	}
+	return proj.ID
 }
 
 // Init fetches unassociated floating IPs.
@@ -356,6 +383,7 @@ func (m *Model) SetSize(w, h int) {
 
 func (m Model) fetchUnassociatedFIPs() tea.Cmd {
 	client := m.client
+	projectID := m.projectID
 	return func() tea.Msg {
 		fips, err := network.ListFloatingIPs(context.Background(), client)
 		if err != nil {
@@ -363,6 +391,11 @@ func (m Model) fetchUnassociatedFIPs() tea.Cmd {
 		}
 		var unassociated []network.FloatingIP
 		for _, fip := range fips {
+			// Admin credentials list every project's FIPs; only offer
+			// our own so a server is never given another project's IP.
+			if projectID != "" && fip.TenantID != "" && fip.TenantID != projectID {
+				continue
+			}
 			if fip.PortID == "" {
 				unassociated = append(unassociated, fip)
 			}
@@ -449,12 +482,24 @@ func (m Model) allocateAndAssociate(extNetID string, target network.FloatingIPTa
 		if err != nil {
 			shared.Debugf("[fippicker] error associating FIP %s: %v", fip.ID, err)
 			// Do not leave an unused, billable address behind.
-			if relErr := network.ReleaseFloatingIP(ctx, client, fip.ID); relErr != nil {
-				return allocateErrMsg{err: fmt.Errorf("%w; the new floating IP %s could not be released: %v", err, fip.FloatingIP, relErr)}
-			}
-			return allocateErrMsg{err: fmt.Errorf("%w (the new floating IP %s was released)", err, fip.FloatingIP)}
+			return allocateErrMsg{err: releaseAfterFailure(client, fip, err)}
 		}
 		shared.Debugf("[fippicker] allocated and associated FIP %s to server %s", fip.FloatingIP, serverName)
 		return allocateDoneMsg{fipAddr: fip.FloatingIP, serverName: serverName}
 	}
+}
+
+// releaseAfterFailure releases a floating IP that was allocated for a server
+// but could not be associated, so it does not linger unused and hold quota.
+// The returned error wraps cause and says whether the IP was released or, if
+// that failed too, which IP is left over.
+func releaseAfterFailure(client *gophercloud.ServiceClient, fip *network.FloatingIP, cause error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
+	defer cancel()
+	if err := network.ReleaseFloatingIP(ctx, client, fip.ID); err != nil {
+		shared.Debugf("[fippicker] error releasing unassociated FIP %s: %v", fip.ID, err)
+		return fmt.Errorf("%w; floating IP %s (ID %s) is still allocated, release it manually: %v", cause, fip.FloatingIP, fip.ID, err)
+	}
+	shared.Debugf("[fippicker] released unassociated FIP %s", fip.ID)
+	return fmt.Errorf("%w (allocated floating IP %s was released)", cause, fip.FloatingIP)
 }

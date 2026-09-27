@@ -36,13 +36,18 @@ func ListFloatingIPs(ctx context.Context, client *gophercloud.ServiceClient) ([]
 			return false, err
 		}
 		for _, fip := range extracted {
+			// Newer Neutron releases may report the owner only as project_id.
+			owner := fip.TenantID
+			if owner == "" {
+				owner = fip.ProjectID
+			}
 			result = append(result, FloatingIP{
 				ID:                fip.ID,
 				FloatingIP:        fip.FloatingIP,
 				FixedIP:           fip.FixedIP,
 				FloatingNetworkID: fip.FloatingNetworkID,
 				PortID:            fip.PortID,
-				TenantID:          fip.TenantID,
+				TenantID:          owner,
 				Status:            fip.Status,
 				RouterID:          fip.RouterID,
 			})
