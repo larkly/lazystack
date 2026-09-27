@@ -211,15 +211,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "add":
 		switch {
-		case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
-			// Switch to value input
-			if m.keyInput.Focused() {
-				m.keyInput.Blur()
-				m.valueInput.Focus()
-			} else {
-				m.valueInput.Blur()
-				m.keyInput.Focus()
-			}
+		case isFieldSwitch(msg):
+			m.toggleField()
 			return m, nil
 		case key.Matches(msg, shared.Keys.Enter):
 			return m, m.addMetadatum()
@@ -235,14 +228,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "edit":
 		switch {
-		case key.Matches(msg, shared.Keys.Tab), key.Matches(msg, shared.Keys.Down):
-			if m.keyInput.Focused() {
-				m.keyInput.Blur()
-				m.valueInput.Focus()
-			} else {
-				m.valueInput.Blur()
-				m.keyInput.Focus()
-			}
+		case isFieldSwitch(msg):
+			m.toggleField()
 			return m, nil
 		case key.Matches(msg, shared.Keys.Enter):
 			return m, m.updateMetadatum()
@@ -257,6 +244,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// isFieldSwitch reports whether msg moves between the key and value inputs.
+// Only tab/shift+tab and the arrows qualify: j/k must reach the inputs as
+// text so keys like "project_id" can be typed.
+func isFieldSwitch(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "up", "down":
+		return true
+	}
+	return key.Matches(msg, shared.Keys.Tab) || key.Matches(msg, shared.Keys.ShiftTab)
+}
+
+// toggleField moves focus between the key and value inputs.
+func (m *Model) toggleField() {
+	if m.keyInput.Focused() {
+		m.keyInput.Blur()
+		m.valueInput.Focus()
+	} else {
+		m.valueInput.Blur()
+		m.keyInput.Focus()
+	}
 }
 
 func (m *Model) addMetadatum() tea.Cmd {
