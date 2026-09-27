@@ -1,6 +1,7 @@
 package app
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +82,7 @@ func TestServerListFilterKeepsQAsText(t *testing.T) {
 	m.view = viewServerList
 	m.serverList = serverlist.New(nil, nil, time.Hour)
 	m.serverList.SetSize(m.width, m.height)
+	m.serverList.SetConfig(m.configView.Cfg())
 	m, _ = typeKeys(t, m, "/")
 	if !m.serverList.IsFiltering() {
 		t.Fatal("setup: filter mode not active")
@@ -94,6 +96,14 @@ func TestServerListFilterKeepsQAsText(t *testing.T) {
 	}
 	if _, quit = typeKeys(t, m, "ctrl+c"); !quit {
 		t.Fatal("ctrl+c must still quit while filtering")
+	}
+	// Naming a saved filter is text entry too.
+	m, _ = typeKeys(t, m, "enter", "f")
+	if !m.textInputFocused() {
+		t.Fatal("saved-filter name input should capture keys")
+	}
+	if _, quit = typeKeys(t, m, "q", "1", "R"); quit {
+		t.Fatal("typing q in the filter name quit the app")
 	}
 }
 
@@ -139,6 +149,70 @@ func TestCtrlCQuitsFromEveryFocusState(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLBAndImageSearchCaptureTypedKeys(t *testing.T) {
+	cases := []struct {
+		tab  string
+		view activeView
+	}{
+		{"loadbalancers", viewLBView},
+		{"images", viewImageView},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tab, func(t *testing.T) {
+			m, requests := listFixture(t)
+			m.tabs = []TabDef{{Key: "servers"}, {Key: tc.tab}, {Key: "volumes"}, {Key: "keypairs"}}
+			m.tabInited = make([]bool, len(m.tabs))
+			var cmd tea.Cmd
+			m, cmd = m.switchTab(1)
+			for _, msg := range commandMessages(cmd) {
+				m, _ = m.updateActiveView(msg)
+			}
+			m, _ = typeKeys(t, m, "/")
+			*requests = nil
+			typed := strings.Split("q123hlRodwY", "")
+			m, quit := typeKeys(t, m, typed...)
+			if quit {
+				t.Fatal("typing in search quit the app")
+			}
+			if m.view != tc.view || m.activeTab != 1 {
+				t.Fatalf("search keys switched view/tab: view=%v tab=%d", m.view, m.activeTab)
+			}
+			if m.activeModal != modalNone || m.copyPicker.Active {
+				t.Fatal("search keys opened a confirmation or picker")
+			}
+			if len(*requests) != 0 {
+				t.Fatalf("search keys issued API requests: %v", *requests)
+			}
+			if got := searchFilter(m, tc.view); got != "q123hlRodwY" || !m.textInputFocused() {
+				t.Fatalf("query = %q, want the typed text while searching", got)
+			}
+			// Enter keeps the filter and leaves search mode; the next key is
+			// an ordinary shortcut again.
+			m, _ = typeKeys(t, m, "enter")
+			if m.view != tc.view || m.textInputFocused() {
+				t.Fatal("enter should leave search mode on the same view")
+			}
+			m, _ = typeKeys(t, m, "/")
+			m, _ = typeKeys(t, m, "esc")
+			if m.view != tc.view || m.textInputFocused() {
+				t.Fatal("esc should leave search mode on the same view")
+			}
+			m, _ = typeKeys(t, m, "/")
+			if _, quit := typeKeys(t, m, "ctrl+c"); !quit {
+				t.Fatal("ctrl+c must quit while searching")
+			}
+		})
+	}
+}
+
+func searchFilter(m Model, view activeView) string {
+	child := reflect.ValueOf(m.lbView)
+	if view == viewImageView {
+		child = reflect.ValueOf(m.imageView)
+	}
+	return child.FieldByName("searchFilter").String()
 }
 
 func TestCreateFormsKeepQAsInput(t *testing.T) {

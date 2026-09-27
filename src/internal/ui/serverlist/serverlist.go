@@ -108,9 +108,10 @@ func (m Model) SelectedServer() *compute.Server {
 	return nil
 }
 
-// IsFiltering reports whether the list is currently in filter input mode.
+// IsFiltering reports whether the list is currently in filter input mode,
+// including naming a filter to save.
 func (m Model) IsFiltering() bool {
-	return m.filtering
+	return m.filtering || m.namingFilter
 }
 
 // CopyEntries returns the title and copyable fields for the selected server.

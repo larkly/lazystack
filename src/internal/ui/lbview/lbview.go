@@ -143,6 +143,9 @@ func (m Model) FocusedPane() FocusPane { return m.focus }
 // InSelector returns true if the selector pane is focused.
 func (m Model) InSelector() bool { return m.focus == FocusSelector }
 
+// IsSearching reports whether the search input has focus.
+func (m Model) IsSearching() bool { return m.searchActive }
+
 // SelectedLB returns the load balancer under the selector cursor.
 func (m Model) SelectedLB() *loadbalancer.LoadBalancer {
 	visible := m.visibleLBs()

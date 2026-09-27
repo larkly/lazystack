@@ -238,6 +238,9 @@ func (m Model) SelectedImages() []img.Image {
 	return nil
 }
 
+// IsSearching reports whether the search input has focus.
+func (m Model) IsSearching() bool { return m.searchActive }
+
 // SelectionCount returns the number of selected images.
 func (m Model) SelectionCount() int {
 	return len(m.selected)

@@ -347,6 +347,20 @@ func isForceQuit(msg tea.KeyMsg) bool {
 	return msg.String() == "ctrl+c"
 }
 
+// textInputFocused reports whether the active view has a focused filter or
+// search input that must receive every key before global shortcuts do.
+func (m Model) textInputFocused() bool {
+	switch m.view {
+	case viewServerList:
+		return m.serverList.IsFiltering()
+	case viewLBView:
+		return m.lbView.IsSearching()
+	case viewImageView:
+		return m.imageView.IsSearching()
+	}
+	return false
+}
+
 // Update handles all messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -421,6 +435,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.view != viewServerCreate && m.view != viewVolumeCreate && m.view != viewKeypairCreate {
+			// Filter/search input mode (server list filter, LB and image
+			// search): every keystroke belongs to the input — never let
+			// global handlers see them (typing "q" would otherwise quit the
+			// app, digits would switch tabs). Ctrl+C is handled above.
+			if m.textInputFocused() {
+				return m.updateActiveView(msg)
+			}
 			// Volume list: esc clears selection when items are selected
 			if m.view == viewVolumeList && m.volumeList.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
 				m.volumeList.ClearSelection()
@@ -430,12 +451,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewImageView && m.imageView.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
 				m.imageView.ClearSelection()
 				return m, nil
-			}
-			// Server list filter mode: every keystroke belongs to the filter
-			// input — never let global handlers see them (typing "q" would
-			// otherwise quit the app). Ctrl+C is handled above.
-			if m.view == viewServerList && m.serverList.IsFiltering() {
-				return m.updateActiveView(msg)
 			}
 
 			switch {
