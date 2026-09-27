@@ -50,8 +50,18 @@ type ruleCreateErrMsg struct {
 	shared.Audit
 	err error
 }
-type ruleLoadedMsg struct{ spec *network.SecurityRuleSpec }
-type ruleLoadErrMsg struct{ err error }
+
+// ruleLoadedMsg and ruleLoadErrMsg carry the ID of the rule that was
+// requested. The app routes them to whichever rule modal is active, so a
+// late reply for a closed edit form must not fill a newer one.
+type ruleLoadedMsg struct {
+	ruleID string
+	spec   *network.SecurityRuleSpec
+}
+type ruleLoadErrMsg struct {
+	ruleID string
+	err    error
+}
 
 // ruleReplaceErrMsg reports that the replacement rule was created but the
 // original could not be deleted. rollbackErr is nil when the replacement
@@ -262,16 +272,25 @@ func (m Model) Init() tea.Cmd {
 		defer cancel()
 		spec, err := network.GetSecurityRuleSpec(ctx, client, id)
 		if err != nil {
-			return ruleLoadErrMsg{err: err}
+			return ruleLoadErrMsg{ruleID: id, err: err}
 		}
-		return ruleLoadedMsg{spec: spec}
+		return ruleLoadedMsg{ruleID: id, spec: spec}
 	})
+}
+
+// awaitingRule reports whether a rule load reply for id belongs to this
+// form: it must be an edit form still loading that same rule.
+func (m Model) awaitingRule(id string) bool {
+	return m.editMode && m.loadingRule && id != "" && id == m.oldRuleID
 }
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ruleLoadedMsg:
+		if !m.awaitingRule(msg.ruleID) || msg.spec == nil {
+			return m, nil
+		}
 		m.loadingRule = false
 		spec := *msg.spec
 		spec.SecGroupID = m.sgID
@@ -279,6 +298,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.fill(spec)
 		return m, nil
 	case ruleLoadErrMsg:
+		if !m.awaitingRule(msg.ruleID) {
+			return m, nil
+		}
 		m.loadingRule = false
 		m.blocked = "could not load the rule details (" + msg.err.Error() + "); nothing was changed"
 		return m, nil

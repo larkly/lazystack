@@ -2,6 +2,7 @@ package sgrulecreate
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -205,6 +206,42 @@ func TestRuleLoadFailureBlocksEdit(t *testing.T) {
 	m, out := submit(m)
 	if len(f.posts) != 0 || len(f.deletes) != 0 || len(out) != 0 || !strings.Contains(m.View(), "denied") {
 		t.Fatalf("edit proceeded after load failure: posts=%v out=%v", f.posts, out)
+	}
+}
+
+// A reply for a previously opened edit form (edit A, Esc, edit B) must not
+// fill B's form, or saving would create a copy of A and delete B.
+func TestStaleRuleLoadIsIgnored(t *testing.T) {
+	f := &fakeRules{original: baseRule(map[string]any{"id": "rule-b", "port_range_min": 80, "port_range_max": 80})}
+	client, cleanup := testutil.FakeServiceClient(f.handler(t))
+	t.Cleanup(cleanup)
+	m := NewEdit(client, "sg-1", "web", listRule(f.original))
+	m.SetSize(100, 40)
+	init := m.Init()
+
+	ruleA := network.SecurityRuleSpec{ID: "rule-a", Direction: "egress", EtherType: "IPv6", Protocol: "udp"}
+	m, _ = m.Update(ruleLoadedMsg{ruleID: "rule-a", spec: &ruleA})
+	m, _ = m.Update(ruleLoadErrMsg{ruleID: "rule-a", err: fmt.Errorf("stale")})
+	if m.original != nil || !m.loadingRule || m.blocked != "" {
+		t.Fatalf("stale reply applied: original=%+v loading=%v blocked=%q", m.original, m.loadingRule, m.blocked)
+	}
+
+	m, _ = drive(m, init)
+	if m.original == nil || m.original.ID != "rule-b" || m.loadingRule {
+		t.Fatalf("own reply not applied: original=%+v loading=%v", m.original, m.loadingRule)
+	}
+	// A late duplicate after loading finished is ignored too.
+	m, _ = m.Update(ruleLoadedMsg{ruleID: "rule-a", spec: &ruleA})
+	if m.original.ID != "rule-b" {
+		t.Fatalf("late reply replaced original: %+v", m.original)
+	}
+	m = setPortMax(m, "81")
+	_, out := submit(m)
+	if len(out) != 1 || strings.Join(f.deletes, ",") != "rule-b" {
+		t.Fatalf("out=%v deletes=%v", out, f.deletes)
+	}
+	if len(f.posts) != 1 || f.posts[0]["direction"] != "ingress" || f.posts[0]["protocol"] != "tcp" {
+		t.Fatalf("replacement is not based on rule B: %v", f.posts)
 	}
 }
 
