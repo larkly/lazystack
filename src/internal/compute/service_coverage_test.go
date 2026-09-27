@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -152,6 +153,60 @@ func TestRescueAndEvacuateHTTP(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// An accepted evacuation whose admin password cannot be decoded is a
+// partial result: it must be distinguishable from both a failed request and
+// a legitimately absent password, and must not be retried.
+func TestEvacuatePasswordExtraction(t *testing.T) {
+	for _, tc := range []struct {
+		name, body  string
+		want        string
+		unreadable  bool
+		contentType string
+	}{
+		{"password", `{"adminPass":"generated"}`, "generated", false, "application/json"},
+		{"absent field", `{}`, "", false, "application/json"},
+		{"empty body", ``, "", false, ""},
+		{"malformed field", `{"adminPass":123}`, "", true, "application/json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if tc.contentType != "" {
+					w.Header().Set("Content-Type", tc.contentType)
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(tc.body))
+			}))
+			defer close()
+			got, err := EvacuateServer(context.Background(), client, "vm", "", false)
+			if requests != 1 {
+				t.Fatalf("requests=%d, evacuation must not be retried", requests)
+			}
+			if got != tc.want {
+				t.Fatalf("password=%q want %q", got, tc.want)
+			}
+			if tc.unreadable {
+				if !errors.Is(err, ErrAdminPassUnreadable) {
+					t.Fatalf("err=%v, want ErrAdminPassUnreadable", err)
+				}
+			} else if err != nil {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+func TestEvacuateDroppedConnectionIsFailure(t *testing.T) {
+	client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic(http.ErrAbortHandler) // close the connection without a response
+	}))
+	defer close()
+	if _, err := EvacuateServer(context.Background(), client, "vm", "", false); err == nil || errors.Is(err, ErrAdminPassUnreadable) {
+		t.Fatalf("dropped connection reported as success: %v", err)
 	}
 }
 

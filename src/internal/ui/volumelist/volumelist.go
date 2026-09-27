@@ -204,6 +204,17 @@ func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
 }
 
+// SelectIDs adds the given IDs to the bulk selection (e.g. to keep failed
+// targets of a bulk action selected for a retry).
+func (m *Model) SelectIDs(ids []string) {
+	if m.selected == nil {
+		m.selected = make(map[string]bool)
+	}
+	for _, id := range ids {
+		m.selected[id] = true
+	}
+}
+
 // CopyEntries returns the title and copyable fields for the selected volume.
 func (m Model) CopyEntries() (string, []copypicker.Entry) {
 	v := m.SelectedVolume()

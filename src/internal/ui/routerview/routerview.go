@@ -171,6 +171,17 @@ func (m Model) SelectedInterface() *network.RouterInterface {
 	return &m.interfaces[m.interfaceCursor]
 }
 
+// InterfaceCount returns the number of subnet interfaces loaded for the
+// selected router. ok is false while that router's detail is not (yet)
+// loaded, so callers do not report a count for a different router.
+func (m Model) InterfaceCount() (n int, ok bool) {
+	r := m.selectedRouter()
+	if r == nil || m.detailLoading || m.lastDetailID != r.ID {
+		return 0, false
+	}
+	return len(m.interfaces), true
+}
+
 // InterfacesOnPort returns how many interfaces share the same port as the selected interface.
 func (m Model) InterfacesOnPort(portID string) int {
 	count := 0

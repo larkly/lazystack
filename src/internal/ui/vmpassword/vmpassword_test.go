@@ -1,6 +1,8 @@
 package vmpassword
 
 import (
+	"fmt"
+
 	tea "charm.land/bubbletea/v2"
 	"strings"
 	"testing"
@@ -77,5 +79,49 @@ func TestEncryptedDisplayTruncatesWithoutTruncatingCopy(t *testing.T) {
 	}
 	if value, _ := m.copyValue(); value != blob {
 		t.Fatal("copy lost blob contents")
+	}
+}
+
+func TestCredentialsAreMaskedUntilRevealed(t *testing.T) {
+	creds := []Credential{{Server: "alpha", Secret: "secret-a"}, {Server: "beta", Secret: "secret-b"}}
+	m := NewCredentials("Rescue Passwords", "Shown once; not stored.", creds)
+	m.SetSize(100, 40)
+	view := m.View()
+	for _, s := range []string{"Rescue Passwords", "alpha", "beta", "Shown once"} {
+		if !strings.Contains(view, s) {
+			t.Fatalf("missing %q in %q", s, view)
+		}
+	}
+	if strings.Contains(view, "secret-a") || strings.Contains(view, "secret-b") {
+		t.Fatal("secrets rendered before explicit reveal")
+	}
+	for _, c := range creds {
+		for _, s := range []string{c.String(), fmt.Sprintf("%v", c), fmt.Sprintf("%+v", c), fmt.Sprintf("%#v", c)} {
+			if strings.Contains(s, c.Secret) {
+				t.Fatalf("formatting leaks secret: %q", s)
+			}
+		}
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Text: "r"}))
+	view = m.View()
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "secret-a") && !strings.Contains(line, "alpha") {
+			t.Fatalf("secret shown without its server: %q", line)
+		}
+	}
+	if !strings.Contains(view, "secret-a") || !strings.Contains(view, "secret-b") {
+		t.Fatal("reveal did not show the secrets")
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	if value, label := m.copyValue(); value != "secret-b" || !strings.Contains(label, "beta") {
+		t.Fatalf("copy=(%q,%q), want selected server's secret", value, label)
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Text: "r"}))
+	if strings.Contains(m.View(), "secret-b") {
+		t.Fatal("hide did not mask again")
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if m.Active {
+		t.Fatal("escape did not close")
 	}
 }

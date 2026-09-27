@@ -71,6 +71,14 @@ const (
 	ActionUnknown      ActionType = "unknown"
 )
 
+// Action types for operations that previously had no distinct audit type.
+const (
+	ActionConfirmResize   ActionType = "confirm_resize"
+	ActionRevertResize    ActionType = "revert_resize"
+	ActionLiveMigrate     ActionType = "live_migrate"
+	ActionRemoveInterface ActionType = "remove_router_interface"
+)
+
 // Entry is a single audit log record.
 type Entry struct {
 	Timestamp    time.Time       `json:"timestamp"`

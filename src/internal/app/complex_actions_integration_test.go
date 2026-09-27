@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/spinner"
@@ -69,8 +70,9 @@ func TestBulkMemberDeletionWaitsAndAggregates(t *testing.T) {
 			if m.lbView.SelectedMemberCount() != 3 {
 				t.Fatalf("fixture selected %d members", m.lbView.SelectedMemberCount())
 			}
+			m, _ = m.openLBBulkMemberDeleteConfirm()
 			executing = true
-			next, cmd := m.executeAction(modal.ConfirmAction{Action: "delete_lb_members_bulk", ServerID: "pool"})
+			next, cmd := m.executeAction(confirmCurrent(m))
 			if next.lbView.SelectedMemberCount() != 0 {
 				t.Fatal("bulk deletion retained selection")
 			}
@@ -82,20 +84,16 @@ func TestBulkMemberDeletionWaitsAndAggregates(t *testing.T) {
 			if !reflect.DeepEqual(actions, want) {
 				t.Fatalf("action order=%v want=%v", actions, want)
 			}
-			if mode == "success" {
-				s, ok := msg.(shared.ResourceActionMsg)
-				if !ok || s.Action != "Deleted 3 members from" || s.Name != "pool" {
-					t.Fatalf("result=%#v", msg)
-				}
-			} else {
-				e, ok := msg.(shared.ResourceActionErrMsg)
-				failed := 1
-				if mode == "wait-error" {
-					failed = 2
-				}
-				if !ok || e.Name != fmt.Sprintf("%d of 3 members", failed) || e.Err.Error() != fmt.Sprintf("%d members failed to delete", failed) {
-					t.Fatalf("result=%#v", msg)
-				}
+			r, ok := msg.(bulkResultMsg)
+			failed := map[string]int{"success": 0, "delete-error": 1, "wait-error": 2}[mode]
+			if !ok || len(r.failed) != failed || len(r.succeeded) != 3-failed || r.resource != "lb_member" {
+				t.Fatalf("result=%#v", msg)
+			}
+			if mode == "success" && r.summary() != "Delete members 3 members" {
+				t.Errorf("summary=%q", r.summary())
+			}
+			if mode != "success" && !strings.Contains(r.summary(), fmt.Sprintf("%d of 3 members succeeded, %d failed", 3-failed, failed)) {
+				t.Errorf("summary=%q", r.summary())
 			}
 		})
 	}
@@ -144,7 +142,7 @@ func TestRouterInterfaceRemovalChoosesDetachOrFixedIPUpdate(t *testing.T) {
 					case "/ports":
 						fmt.Fprintf(w, `{"ports":[{"id":"port","device_owner":"network:router_interface","fixed_ips":%s}]}`, ips)
 					case "/ports/port":
-						fmt.Fprintf(w, `{"port":{"id":"port","fixed_ips":%s}}`, ips)
+						fmt.Fprintf(w, `{"port":{"id":"port","device_id":"router","fixed_ips":%s}}`, ips)
 					case "/networks":
 						fmt.Fprint(w, `{"networks":[]}`)
 					case "/subnets":
@@ -166,7 +164,8 @@ func TestRouterInterfaceRemovalChoosesDetachOrFixedIPUpdate(t *testing.T) {
 					t.Fatalf("fixture selected interface=%+v", iface)
 				}
 				executing = true
-				_, cmd := m.executeAction(modal.ConfirmAction{Action: "remove_router_interface", ServerID: "router", Name: "fixture-router"})
+				m, _ = m.openRemoveRouterInterfaceConfirm()
+				_, cmd := m.executeAction(confirmCurrent(m))
 				if cmd == nil {
 					t.Fatal("missing removal command")
 				}
