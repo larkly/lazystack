@@ -31,6 +31,16 @@ var httpClient = &http.Client{Timeout: 30 * time.Second, CheckRedirect: httpsOnl
 // downloadClient is used for binary downloads (5 minute timeout).
 var downloadClient = &http.Client{Timeout: 5 * time.Minute, CheckRedirect: httpsOnlyRedirects}
 
+// Download size limits. Real release assets are far below them; they stop a
+// broken or hostile server from exhausting memory or disk. They are
+// variables so tests can lower them.
+var (
+	maxReleaseJSONSize int64 = 10 << 20  // GitHub release API response
+	maxChecksumsSize   int64 = 1 << 20   // SHA256SUMS
+	maxSignatureSize   int64 = 4 << 10   // SHA256SUMS.sig
+	maxBinarySize      int64 = 256 << 20 // release binary
+)
+
 // githubRelease is the subset of the GitHub release API response we need.
 type githubRelease struct {
 	TagName string        `json:"tag_name"`
@@ -52,7 +62,7 @@ func CheckLatest(ctx context.Context, currentVersion string) (latest, downloadUR
 		return "", "", "", errors.New("cannot check for updates on a dev build; build with -ldflags \"-X main.version=vX.Y.Z\"")
 	}
 
-	body, err := httpGet(ctx, releaseAPI)
+	body, err := httpGet(ctx, releaseAPI, maxReleaseJSONSize)
 	if err != nil {
 		shared.Debugf("[selfupdate] CheckLatest: error fetching release: %v", err)
 		return "", "", "", fmt.Errorf("fetching latest release: %w", err)
@@ -190,9 +200,17 @@ func apply(ctx context.Context, downloadURL, checksumsURL string, signatureRequi
 
 	hasher := sha256.New()
 	w := io.MultiWriter(tmp, hasher)
-	if _, err := io.Copy(w, resp.Body); err != nil {
+	// Read one byte past the limit so an oversized download is reported
+	// rather than silently truncated; the deferred cleanup removes the
+	// staged file.
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxBinarySize+1))
+	if err != nil {
 		shared.Debugf("[selfupdate] Apply: error writing binary: %v", err)
 		return fmt.Errorf("writing binary: %w", err)
+	}
+	if n > maxBinarySize {
+		shared.Debugf("[selfupdate] Apply: binary exceeds %d bytes", maxBinarySize)
+		return fmt.Errorf("downloading binary: %w", &tooLargeError{What: "binary", Limit: maxBinarySize})
 	}
 	// Make the staged bytes durable before they can replace the binary:
 	// an atomic rename of unsynced data can leave an empty file after a
@@ -365,7 +383,7 @@ func httpsOnlyRedirects(req *http.Request, via []*http.Request) error {
 // verifying the SHA256SUMS signature (see verifyChecksumsSignature). It
 // reports whether the checksums were signature-verified.
 func verifyChecksum(ctx context.Context, checksumsURL, gotHash string, signatureRequired bool) (bool, error) {
-	body, err := httpGet(ctx, checksumsURL)
+	body, err := httpGet(ctx, checksumsURL, maxChecksumsSize)
 	if err != nil {
 		return false, fmt.Errorf("downloading checksums: %w", err)
 	}
@@ -388,7 +406,9 @@ func verifyChecksum(ctx context.Context, checksumsURL, gotHash string, signature
 	return false, fmt.Errorf("no checksum found for %s in SHA256SUMS", assetName)
 }
 
-func httpGet(ctx context.Context, url string) ([]byte, error) {
+// httpGet fetches url and returns its body, failing if the body is larger
+// than limit bytes.
+func httpGet(ctx context.Context, url string, limit int64) ([]byte, error) {
 	if err := requireHTTPS(url); err != nil {
 		return nil, err
 	}
@@ -404,7 +424,26 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, &httpStatusError{Code: resp.StatusCode, URL: url}
 	}
-	return io.ReadAll(resp.Body)
+	// Read one byte past the limit to tell a body of exactly limit bytes
+	// from an oversized one.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, &tooLargeError{What: url, Limit: limit}
+	}
+	return body, nil
+}
+
+// tooLargeError is returned when a download exceeds its size limit.
+type tooLargeError struct {
+	What  string
+	Limit int64
+}
+
+func (e *tooLargeError) Error() string {
+	return fmt.Sprintf("%s is larger than the %d byte limit", e.What, e.Limit)
 }
 
 // httpStatusError is returned by httpGet for a non-200 response.

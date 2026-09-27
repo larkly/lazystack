@@ -88,7 +88,7 @@ func verifyChecksumsSignature(ctx context.Context, checksumsURL string, sums []b
 		shared.Debugf("[selfupdate] verifyChecksumsSignature: no release key in this build; using SHA256SUMS only")
 		return false, nil
 	}
-	sig, err := httpGet(ctx, checksumsURL+signatureSuffix)
+	sig, err := httpGet(ctx, checksumsURL+signatureSuffix, maxSignatureSize)
 	if err != nil {
 		var status *httpStatusError
 		if !required && errors.As(err, &status) && status.Code == http.StatusNotFound {
