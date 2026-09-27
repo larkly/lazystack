@@ -48,7 +48,7 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 - **Column sorting** on all list views
 - **Client-side filtering** with `/`
 - **Bulk select** with `space` for multi-server operations
-- **Self-update** — `--update` flag to update to the latest release; the download must match the release's `SHA256SUMS`, which must be signed with the project's release key from v0.20.0 on; older releases fall back to the checksum alone with a warning (see [SECURITY.md](SECURITY.md#release-signing-and-self-update-verification))
+- **Self-update** — `--update` flag to update to the latest release; the download must match the release's `SHA256SUMS`, which must be signed for that release's tag with the project's release key from v0.20.0 on; older releases fall back to the checksum alone with a warning (see [SECURITY.md](SECURITY.md#release-signing-and-self-update-verification))
 - **Solarized Dark** color scheme with status-aware coloring
 
 ## Installation
