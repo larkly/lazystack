@@ -341,6 +341,12 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// isForceQuit reports whether msg is the unconditional exit key (ctrl+c).
+// Plain "q" is only a quit key where no text input has focus.
+func isForceQuit(msg tea.KeyMsg) bool {
+	return msg.String() == "ctrl+c"
+}
+
 // Update handles all messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -360,6 +366,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateActiveView(msg)
 
 	case tea.KeyMsg:
+		// Ctrl+C always exits, whatever has focus: create forms, text
+		// inputs, overlays, pickers and the idle-paused state. Shutdown is
+		// immediate: requests already sent complete server-side, but their
+		// results and any background clone/download tracking are abandoned.
+		if isForceQuit(msg) {
+			return m, tea.Quit
+		}
 		m.lastActivity = time.Now()
 		m.statusBar.StickyHint = ""
 		if m.idlePaused {
@@ -420,9 +433,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Server list filter mode: every keystroke belongs to the filter
 			// input — never let global handlers see them (typing "q" would
-			// otherwise quit the app). Quit (ctrl+c) stays global so the
-			// app can always be exited.
-			if m.view == viewServerList && m.serverList.IsFiltering() && !key.Matches(msg, shared.Keys.Quit) {
+			// otherwise quit the app). Ctrl+C is handled above.
+			if m.view == viewServerList && m.serverList.IsFiltering() {
 				return m.updateActiveView(msg)
 			}
 
