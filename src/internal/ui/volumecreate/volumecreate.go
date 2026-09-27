@@ -326,7 +326,7 @@ func (m Model) pickerItems() []pickerItem {
 	case fieldType:
 		items := make([]pickerItem, len(m.volumeTypes))
 		for i, vt := range m.volumeTypes {
-			items[i] = pickerItem{id: i, name: vt.Name, desc: vt.ID[:8]}
+			items[i] = pickerItem{id: i, name: vt.Name, desc: shared.ShortID(vt.ID)}
 		}
 		return items
 	case fieldAZ:

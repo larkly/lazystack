@@ -35,6 +35,11 @@ func TestTruncateID(t *testing.T) {
 			t.Errorf("TruncateID(%q, %d) produced invalid UTF-8", c.id, c.n)
 		}
 	}
+	for id, want := range map[string]string{"": "", "x": "x", "abcdefgh": "abcdefgh", uuid: "0f8e2c5a…", "ÆØÅæøåéü漢": "ÆØÅæøåéü…"} {
+		if got := AbbrevID(id); got != want {
+			t.Errorf("AbbrevID(%q) = %q, want %q", id, got, want)
+		}
+	}
 	if ShortID(uuid) != "0f8e2c5a" || ShortID("x") != "x" {
 		t.Errorf("ShortID mismatch: %q %q", ShortID(uuid), ShortID("x"))
 	}

@@ -424,7 +424,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	portID := m.port.ID
 	displayName := name
 	if displayName == "" {
-		displayName = portID[:8]
+		displayName = shared.ShortID(portID)
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {

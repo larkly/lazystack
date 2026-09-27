@@ -722,8 +722,8 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		name := r.Name
-		if name == "" && len(r.ID) > 8 {
-			name = r.ID[:8] + "..."
+		if name == "" {
+			name = shared.AbbrevID(r.ID)
 		}
 
 		statusStyle := lipgloss.NewStyle().Foreground(shared.ColorSuccess)
@@ -747,9 +747,7 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		line := prefix + nameStyle.Render(name) + shared.StyleHelp.Render(meta+adminStr) + "  " + statusStr
-		if lipgloss.Width(line) > maxWidth+2 {
-			line = line[:maxWidth+1]
-		}
+		line = shared.TruncateCells(line, maxWidth+2)
 		lines = append(lines, line)
 	}
 
@@ -821,9 +819,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 			continue
 		}
 		val := p.value
-		if lipgloss.Width(val) > valW {
-			val = val[:valW-1] + "\u2026"
-		}
+		val = shared.TruncateCells(val, valW)
 		rendered := valueStyle.Render(val)
 		if p.label == "Status" {
 			statusColor := shared.ColorSuccess
@@ -912,14 +908,10 @@ func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
 		}
 
 		netName := m.resolveInterfaceNetwork(iface)
-		if len(netName) > netW {
-			netName = netName[:netW-1] + "\u2026"
-		}
+		netName = shared.TruncateCells(netName, netW)
 
 		ip := iface.IPAddress
-		if len(ip) > ipW {
-			ip = ip[:ipW-1] + "\u2026"
-		}
+		ip = shared.TruncateCells(ip, ipW)
 
 		portShort := iface.PortID
 		if len(portShort) > portW {
@@ -945,10 +937,7 @@ func (m Model) resolveInterfaceNetwork(iface network.RouterInterface) string {
 		}
 	}
 	// Fall back to subnet ID
-	if len(iface.SubnetID) > 8 {
-		return iface.SubnetID[:8] + "\u2026"
-	}
-	return iface.SubnetID
+	return shared.AbbrevID(iface.SubnetID)
 }
 
 // --- Routes rendering ---
@@ -1012,13 +1001,9 @@ func (m Model) renderRoutesContent(maxWidth, maxHeight int) string {
 		}
 
 		dest := route.DestinationCIDR
-		if len(dest) > destW {
-			dest = dest[:destW-1] + "\u2026"
-		}
+		dest = shared.TruncateCells(dest, destW)
 		hop := route.NextHop
-		if len(hop) > hopW {
-			hop = hop[:hopW-1] + "\u2026"
-		}
+		hop = shared.TruncateCells(hop, hopW)
 
 		line := fmt.Sprintf("%s%-*s%s%s", prefix, destW, dest, sep, hop)
 

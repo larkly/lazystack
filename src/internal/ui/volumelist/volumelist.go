@@ -461,10 +461,7 @@ func (m Model) serverName(id string) string {
 	if name, ok := m.serverNames[id]; ok {
 		return name
 	}
-	if len(id) > 8 {
-		return id[:8] + "…"
-	}
-	return id
+	return shared.AbbrevID(id)
 }
 
 // View renders the volume list.
@@ -525,8 +522,8 @@ func (m Model) View() string {
 		cursor := i == m.cursor
 
 		name := v.Name
-		if name == "" && len(v.ID) > 8 {
-			name = v.ID[:8] + "…"
+		if name == "" {
+			name = shared.AbbrevID(v.ID)
 		}
 
 		attached := ""
@@ -536,10 +533,7 @@ func (m Model) View() string {
 			device = v.AttachedDevice
 		}
 
-		shortID := v.ID
-		if len(shortID) > 8 {
-			shortID = shortID[:8]
-		}
+		shortID := shared.ShortID(v.ID)
 
 		values := map[string]string{
 			"name":     name,
@@ -589,9 +583,7 @@ func (m Model) renderDataRow(values map[string]string, status string, cursor boo
 		}
 		val := values[col.Key]
 		w := col.width
-		if len(val) > w && w > 1 {
-			val = val[:w-1] + "…"
-		}
+		val = shared.TruncateCells(val, w)
 
 		style := lipgloss.NewStyle().Width(w)
 		if col.Key == "status" {

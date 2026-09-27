@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/network"
@@ -112,5 +113,20 @@ func TestUnchangedListsOmittedAndPopulatedTrimmed(t *testing.T) {
 	want := `{"allocation_pools":[{"end":"10.0.0.30","start":"10.0.0.20"}],"dns_nameservers":["192.0.2.99","192.0.2.100"]}`
 	if string(raw) != want {
 		t.Fatalf("body = %s, want %s", raw, want)
+	}
+}
+
+func TestUnnamedSubnetWithShortIDSubmits(t *testing.T) {
+	for _, id := range []string{"s", "abcdefg", "子網子網子網子網"} {
+		var bodies []map[string]any
+		client, cleanup := testutil.FakeServiceClient(subnetPutRecorder(t, &bodies))
+		m := New(client, network.Subnet{ID: id, Name: "old", CIDR: "10.0.0.0/24"})
+		m.nameInput.SetValue("")
+		_, cmd := m.submit()
+		msg, ok := runSubmit(cmd).(subnetUpdatedMsg)
+		cleanup()
+		if !ok || !utf8.ValidString(msg.name) {
+			t.Fatalf("id %q: result %#v", id, msg)
+		}
 	}
 }

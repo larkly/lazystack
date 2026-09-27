@@ -384,7 +384,7 @@ func (m Model) viewList() string {
 			}
 			name := sub.Name
 			if name == "" {
-				name = sub.ID[:8]
+				name = shared.ShortID(sub.ID)
 			}
 			cidr := lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(" " + sub.CIDR)
 			lines = append(lines, fmt.Sprintf("%s%s%s", cursor, style.Render(name), cidr))
@@ -419,7 +419,7 @@ func (m Model) viewConfirm() string {
 
 	subName := m.selectedSubnet.Name
 	if subName == "" {
-		subName = m.selectedSubnet.ID[:8]
+		subName = shared.ShortID(m.selectedSubnet.ID)
 	}
 	subLine := lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true).Render(subName)
 	subLine += lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(" " + m.selectedSubnet.CIDR)

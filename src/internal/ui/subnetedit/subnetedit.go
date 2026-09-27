@@ -333,7 +333,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	id := m.subnetID
 	displayName := name
 	if displayName == "" {
-		displayName = id[:8]
+		displayName = shared.ShortID(id)
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {

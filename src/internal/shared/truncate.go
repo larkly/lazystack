@@ -24,6 +24,15 @@ func ShortID(id string) string {
 	return TruncateID(id, 8)
 }
 
+// AbbrevID returns id unchanged when it is at most 8 characters long and
+// otherwise its short form followed by an ellipsis.
+func AbbrevID(id string) string {
+	if short := ShortID(id); short != id {
+		return short + "…"
+	}
+	return id
+}
+
 // TruncateCells shortens s to at most width terminal cells, ending with an
 // ellipsis when anything was cut. It is aware of ANSI escape sequences and
 // wide or combining characters, so styled text and Unicode stay valid.

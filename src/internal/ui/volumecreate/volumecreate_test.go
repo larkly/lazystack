@@ -2,6 +2,7 @@ package volumecreate
 
 import (
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/volume"
@@ -56,5 +57,16 @@ func TestPickerFiltersAcceptJAndK(t *testing.T) {
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.pickerOpen || m.selectedAZ != -1 {
 		t.Fatalf("esc: open=%v selected=%d", m.pickerOpen, m.selectedAZ)
+	}
+}
+
+func TestShortVolumeTypeIDsDoNotPanic(t *testing.T) {
+	m := New(nil)
+	m, _ = m.Update(volumeTypesLoadedMsg{types: []volume.VolumeType{{ID: "", Name: "a"}, {ID: "t", Name: "b"}, {ID: "類型類型類型類型類型", Name: "c"}}})
+	m.focusField = fieldType
+	m.updateFocus()
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.pickerOpen || !utf8.ValidString(m.View()) {
+		t.Fatal("type picker did not render")
 	}
 }

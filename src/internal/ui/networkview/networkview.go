@@ -157,10 +157,7 @@ func (m Model) SelectedSubnetName() string {
 	name := subs[m.subnetCursor].Name
 	if name == "" {
 		id := subs[m.subnetCursor].ID
-		if len(id) > 8 {
-			return id[:8] + "..."
-		}
-		return id
+		return shared.AbbrevID(id)
 	}
 	return name
 }
@@ -848,9 +845,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 			continue
 		}
 		val := p.value
-		if lipgloss.Width(val) > valW {
-			val = val[:valW-1] + "\u2026"
-		}
+		val = shared.TruncateCells(val, valW)
 		rendered := valueStyle.Render(val)
 		if p.label == "Status" {
 			statusColor := shared.ColorSuccess
@@ -937,22 +932,16 @@ func (m Model) renderSubnetsContent(maxWidth, maxHeight int) string {
 		}
 
 		name := s.Name
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		cidr := s.CIDR
-		if len(cidr) > cidrW {
-			cidr = cidr[:cidrW-1] + "\u2026"
-		}
+		cidr = shared.TruncateCells(cidr, cidrW)
 
 		gw := s.GatewayIP
 		if gw == "" {
 			gw = "\u2014"
 		}
-		if len(gw) > gwW {
-			gw = gw[:gwW-1] + "\u2026"
-		}
+		gw = shared.TruncateCells(gw, gwW)
 
 		dhcp := "off"
 		if s.EnableDHCP {
@@ -1079,19 +1068,13 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 		statusPlain := fmt.Sprintf("%-*s", statusW, statusIcon+p.Status)
 
 		ipStr := m.portIPStr(p)
-		if len(ipStr) > ipsW {
-			ipStr = ipStr[:ipsW-1] + "\u2026"
-		}
+		ipStr = shared.TruncateCells(ipStr, ipsW)
 
 		device := m.deviceName(p)
-		if len(device) > deviceW {
-			device = device[:deviceW-1] + "\u2026"
-		}
+		device = shared.TruncateCells(device, deviceW)
 
 		owner := shortOwner(p.DeviceOwner)
-		if len(owner) > ownerW {
-			owner = owner[:ownerW-1] + "\u2026"
-		}
+		owner = shared.TruncateCells(owner, ownerW)
 
 		mac := p.MACAddress
 
@@ -1122,7 +1105,7 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 			if !p.AdminStateUp {
 				adminStr = lipgloss.NewStyle().Foreground(shared.ColorError).Render("down")
 			}
-			detailLine := fmt.Sprintf("      ID: %s  Admin: %s", p.ID[:min(8, len(p.ID))]+"\u2026", adminStr)
+			detailLine := fmt.Sprintf("      ID: %s  Admin: %s", shared.AbbrevID(p.ID), adminStr)
 			if p.Name != "" {
 				detailLine += "  Name: " + p.Name
 			}
@@ -1134,10 +1117,8 @@ func (m Model) renderPortsContent(maxWidth, maxHeight int) string {
 				for _, sgID := range p.SecurityGroups {
 					if name, ok := m.sgNames[sgID]; ok {
 						sgStrs = append(sgStrs, name)
-					} else if len(sgID) > 8 {
-						sgStrs = append(sgStrs, sgID[:8]+"\u2026")
 					} else {
-						sgStrs = append(sgStrs, sgID)
+						sgStrs = append(sgStrs, shared.AbbrevID(sgID))
 					}
 				}
 				sgLine := "      SGs: " + strings.Join(sgStrs, ", ")
@@ -1186,10 +1167,7 @@ func (m Model) deviceName(p network.Port) string {
 		return name
 	}
 	if p.DeviceID != "" {
-		if len(p.DeviceID) > 8 {
-			return p.DeviceID[:8] + "\u2026"
-		}
-		return p.DeviceID
+		return shared.AbbrevID(p.DeviceID)
 	}
 	return "\u2014"
 }

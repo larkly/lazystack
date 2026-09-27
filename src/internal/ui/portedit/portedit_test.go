@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/network"
@@ -117,6 +118,21 @@ func TestSecurityGroupLoadFailureNeverClearsGroups(t *testing.T) {
 			if strings.Contains(b, "security_groups") {
 				t.Fatalf("failed=%v: security groups sent without a successful load: %s", failed, b)
 			}
+		}
+	}
+}
+
+func TestUnnamedPortWithShortIDSubmits(t *testing.T) {
+	for _, id := range []string{"", "p", "abcdefg", "ポートポートポートポート"} {
+		var bodies []string
+		client, cleanup := testutil.FakeServiceClient(putRecorder(t, &bodies))
+		m := New(client, network.Port{ID: id, Name: "old", AdminStateUp: true, PortSecurityEnabled: true})
+		m.nameInput.SetValue("")
+		_, cmd := m.submit()
+		msg, ok := run(cmd).(portUpdatedMsg)
+		cleanup()
+		if !ok || !utf8.ValidString(msg.name) {
+			t.Fatalf("id %q: result %#v", id, msg)
 		}
 	}
 }
