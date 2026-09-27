@@ -2,7 +2,9 @@ package keypaircreate
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,15 +232,37 @@ func (m Model) handleSaveInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 			home, _ := os.UserHomeDir()
 			path = filepath.Join(home, path[2:])
 		}
+		// Never replace an existing key: check both files before writing
+		// either, and leave the input open so another path can be entered.
+		targets := []string{path}
+		if m.publicKey != "" {
+			targets = append(targets, path+".pub")
+		}
+		for _, p := range targets {
+			if _, err := os.Lstat(p); err == nil {
+				m.saveErr = fmt.Sprintf("%s already exists; enter a different path", p)
+				return m, nil
+			}
+		}
+		// Create a missing ~/.ssh (or other parent) private to the user.
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			m.saveErr = err.Error()
+			m.showSaveInput = false
+			return m, nil
+		}
 		// Save private key with 0600 permissions
-		if err := os.WriteFile(path, []byte(m.privateKey), 0600); err != nil {
+		if err := writeNewFile(path, []byte(m.privateKey), 0600); err != nil {
+			if errors.Is(err, fs.ErrExist) {
+				m.saveErr = fmt.Sprintf("%s already exists; enter a different path", path)
+				return m, nil
+			}
 			m.saveErr = err.Error()
 			m.showSaveInput = false
 			return m, nil
 		}
 		// Save public key alongside
 		if m.publicKey != "" {
-			if err := os.WriteFile(path+".pub", []byte(m.publicKey), 0644); err != nil {
+			if err := writeNewFile(path+".pub", []byte(m.publicKey), 0644); err != nil {
 				m.saveErr = fmt.Sprintf("private key saved to %s, but failed to save public key: %v", path, err)
 				m.savedPath = path
 				m.showSaveInput = false
@@ -254,6 +278,27 @@ func (m Model) handleSaveInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.savePathInput, cmd = m.savePathInput.Update(msg)
 		return m, cmd
 	}
+}
+
+// writeNewFile writes data to a file that must not exist yet (O_EXCL), so an
+// existing key is never silently replaced, and forces perm on it regardless
+// of the umask. A partially written file is removed.
+func writeNewFile(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	err = f.Chmod(perm)
+	if err == nil {
+		_, err = f.Write(data)
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(path)
+	}
+	return err
 }
 
 func (m Model) handleFilePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
