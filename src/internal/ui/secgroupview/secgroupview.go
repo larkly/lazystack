@@ -244,6 +244,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.resetDetailState()
 			return m, m.fetchDetail(sg.ID)
 		}
+		// Same group refreshed: its rules may have shrunk, so keep the rule
+		// cursor on a real rule (or empty) instead of past the end.
+		m.clampDetailCursors()
 		return m, nil
 
 	case sgErrMsg:

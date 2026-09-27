@@ -694,7 +694,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if pane == secgroupview.FocusRules && m.secGroupView.SelectedRuleID() != "" {
 					return m.openSGRuleDeleteConfirm()
 				}
-				if (pane == secgroupview.FocusSelector || pane == secgroupview.FocusRules) && m.secGroupView.SelectedGroupName() != "default" {
+				// Whole-group delete only from the selector: an empty or stale
+				// Rules pane must never fall back to deleting the group.
+				if pane == secgroupview.FocusSelector && m.secGroupView.SelectedGroupName() != "default" {
 					return m.openSGDeleteConfirm()
 				}
 			case key.Matches(msg, shared.Keys.Create):
