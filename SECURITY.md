@@ -38,20 +38,36 @@ Every release publishes `SHA256SUMS` (one SHA-256 line per released binary and
 package) and `SHA256SUMS.sig`, a detached Ed25519 signature of `SHA256SUMS`
 (base64-encoded, one line).
 
-`lazystack --update` trusts a download only if all of the following hold, and
-refuses the update otherwise:
+`lazystack --update` always requires HTTPS for every download and checks the
+downloaded binary's SHA-256 against its line in `SHA256SUMS`. How
+`SHA256SUMS` itself is trusted depends on the versions involved.
 
-1. `SHA256SUMS.sig` exists next to `SHA256SUMS` in the release.
-2. The signature verifies against the Ed25519 public key compiled into the
+**From v0.20.0 (mandatory signatures).** When the release being installed
+or the running binary is v0.20.0 or later, the update is refused unless:
+
+1. `SHA256SUMS.sig` exists next to `SHA256SUMS` in the release, and
+2. the signature verifies against the Ed25519 public key compiled into the
    running binary (`ReleaseSigningPublicKey` in
    `src/internal/selfupdate/signature.go`).
-3. The downloaded binary's SHA-256 matches its line in the signed `SHA256SUMS`.
 
-There is no fallback: a release without a signature, with a malformed
-signature, or signed by any other key is rejected. Releases published before
-signing was introduced cannot be installed with `--update`; install those
-from the releases page or a package manager instead. A build whose embedded
-key is still the empty placeholder rejects every update.
+A release without a signature, with a malformed signature, or signed by any
+other key is rejected, and so is every such update from a build that has no
+embedded key (development builds made before the key was added).
+
+**Before v0.20.0 (transition).** While both versions are older than v0.20.0,
+signing is being rolled out and older clients must be able to keep updating
+without a reinstall:
+
+- If the release has `SHA256SUMS.sig` and the running binary has a key, the
+  signature is verified, and an invalid signature is rejected just as above.
+- If the release has no `SHA256SUMS.sig` (HTTP 404), or the running binary has
+  no key configured, the update falls back to `SHA256SUMS` alone and prints a
+  warning that it was not signature-verified.
+- Any other failure to fetch the signature (for example an HTTP 5xx) is an
+  error, not a fallback.
+
+The switch-over version is `SignatureRequiredFrom` in
+`src/internal/selfupdate/signature.go`.
 
 ### What this protects against, and what it does not
 

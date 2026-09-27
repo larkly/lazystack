@@ -133,7 +133,7 @@ func TestVerifyChecksum_RequiresValidSignature(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			url := releaseServer(t, tc.sums, tc.sig)
-			err := verifyChecksum(context.Background(), url, tc.hash)
+			_, err := verifyChecksum(context.Background(), url, tc.hash, true)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -144,5 +144,17 @@ func TestVerifyChecksum_RequiresValidSignature(t *testing.T) {
 				t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// The embedded release key must be a well-formed Ed25519 public key, so a
+// typo cannot silently disable signature verification.
+func TestEmbeddedReleaseKeyIsValid(t *testing.T) {
+	pub, err := base64.StdEncoding.DecodeString(ReleaseSigningPublicKey)
+	if err != nil {
+		t.Fatalf("ReleaseSigningPublicKey is not valid base64: %v", err)
+	}
+	if len(pub) != ed25519.PublicKeySize {
+		t.Fatalf("ReleaseSigningPublicKey is %d bytes, want %d", len(pub), ed25519.PublicKeySize)
 	}
 }

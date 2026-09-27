@@ -114,7 +114,21 @@ func CheckLatest(ctx context.Context, currentVersion string) (latest, downloadUR
 // rename, followed by an fsync of the directory. Any failure before the
 // rename leaves the current binary untouched. The previous binary is kept as
 // "<executable>.old"; to roll back, move it over the executable.
-func Apply(ctx context.Context, downloadURL, checksumsURL string) error {
+//
+// current and target are the running and the new release version. They
+// decide whether the release must carry a valid SHA256SUMS signature (from
+// SignatureRequiredFrom on) or may fall back to SHA256SUMS alone. Apply
+// reports whether the installed binary was signature-verified.
+func Apply(ctx context.Context, current, target, downloadURL, checksumsURL string) (signed bool, err error) {
+	required := signatureRequired(current, target)
+	shared.Debugf("[selfupdate] Apply: %s -> %s, signature required=%v", current, target, required)
+	if err := apply(ctx, downloadURL, checksumsURL, required, &signed); err != nil {
+		return false, err
+	}
+	return signed, nil
+}
+
+func apply(ctx context.Context, downloadURL, checksumsURL string, signatureRequired bool, signed *bool) error {
 	shared.Debugf("[selfupdate] Apply: start downloadURL=%s", downloadURL)
 	if checksumsURL == "" {
 		shared.Debugf("[selfupdate] Apply: refusing to install without checksums")
@@ -195,11 +209,13 @@ func Apply(ctx context.Context, downloadURL, checksumsURL string) error {
 	got := hex.EncodeToString(hasher.Sum(nil))
 
 	shared.Debugf("[selfupdate] Apply: verifying checksum")
-	if err := verifyChecksum(ctx, checksumsURL, got); err != nil {
+	verified, err := verifyChecksum(ctx, checksumsURL, got, signatureRequired)
+	if err != nil {
 		shared.Debugf("[selfupdate] Apply: error checksum verification: %v", err)
 		return err
 	}
-	shared.Debugf("[selfupdate] Apply: checksum verified")
+	*signed = verified
+	shared.Debugf("[selfupdate] Apply: checksum verified (signed=%v)", verified)
 
 	if err := checkExecutableFormat(tmpPath); err != nil {
 		shared.Debugf("[selfupdate] Apply: staged binary rejected: %v", err)
@@ -344,13 +360,17 @@ func httpsOnlyRedirects(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-func verifyChecksum(ctx context.Context, checksumsURL, gotHash string) error {
+// verifyChecksum checks gotHash against the release's SHA256SUMS after
+// verifying the SHA256SUMS signature (see verifyChecksumsSignature). It
+// reports whether the checksums were signature-verified.
+func verifyChecksum(ctx context.Context, checksumsURL, gotHash string, signatureRequired bool) (bool, error) {
 	body, err := httpGet(ctx, checksumsURL)
 	if err != nil {
-		return fmt.Errorf("downloading checksums: %w", err)
+		return false, fmt.Errorf("downloading checksums: %w", err)
 	}
-	if err := verifyChecksumsSignature(ctx, checksumsURL, body); err != nil {
-		return err
+	signed, err := verifyChecksumsSignature(ctx, checksumsURL, body, signatureRequired)
+	if err != nil {
+		return false, err
 	}
 
 	assetName := fmt.Sprintf("lazystack-%s-%s", runtime.GOOS, runtime.GOARCH)
@@ -358,13 +378,13 @@ func verifyChecksum(ctx context.Context, checksumsURL, gotHash string) error {
 		parts := strings.Fields(line)
 		if len(parts) == 2 && parts[1] == assetName {
 			if parts[0] != gotHash {
-				return fmt.Errorf("checksum mismatch: expected %s, got %s", parts[0], gotHash)
+				return false, fmt.Errorf("checksum mismatch: expected %s, got %s", parts[0], gotHash)
 			}
-			return nil
+			return signed, nil
 		}
 	}
 
-	return fmt.Errorf("no checksum found for %s in SHA256SUMS", assetName)
+	return false, fmt.Errorf("no checksum found for %s in SHA256SUMS", assetName)
 }
 
 func httpGet(ctx context.Context, url string) ([]byte, error) {
@@ -381,10 +401,18 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+		return nil, &httpStatusError{Code: resp.StatusCode, URL: url}
 	}
 	return io.ReadAll(resp.Body)
 }
+
+// httpStatusError is returned by httpGet for a non-200 response.
+type httpStatusError struct {
+	Code int
+	URL  string
+}
+
+func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d from %s", e.Code, e.URL) }
 
 // isNewer returns true if latest is a higher semver than current.
 // Both must be in "vX.Y.Z" format.

@@ -46,6 +46,7 @@ type release struct {
 	bin      []byte
 	sums     string
 	truncate bool
+	unsigned bool // serve no SHA256SUMS.sig
 	extra    http.HandlerFunc
 }
 
@@ -72,6 +73,10 @@ func newRelease(t *testing.T, bin []byte, configure func(*release)) *release {
 		case "/SHA256SUMS":
 			fmt.Fprint(w, r.sums)
 		case "/SHA256SUMS.sig":
+			if r.unsigned {
+				http.NotFound(w, req)
+				return
+			}
 			w.Write(encodeSig(priv, []byte(r.sums)))
 		default:
 			if r.extra != nil {
@@ -128,7 +133,7 @@ func TestApplyInstallsVerifiedBinaryAndKeepsBackup(t *testing.T) {
 	syncDir = func(dir string) error { synced = append(synced, "dir"); return prevDir(dir) }
 	t.Cleanup(func() { syncFile, syncDir = prevSync, prevDir })
 
-	if err := Apply(context.Background(), r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS"); err != nil {
+	if err := applyStrict(context.Background(), r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(exe); string(got) != string(bin) {
@@ -177,7 +182,7 @@ func TestApplyFailuresPreserveOriginal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRelease(t, bin, func(r *release) { tc.setup(t, r) })
 			exe := installed(t)
-			err := Apply(context.Background(), r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS")
+			err := applyStrict(context.Background(), r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS")
 			if err == nil {
 				t.Fatal("Apply succeeded")
 			}
@@ -202,7 +207,7 @@ func TestApplyRejectsPlainHTTPBeforeTouchingAnything(t *testing.T) {
 		{r.srv.URL + "/bin", plain.URL + "/SHA256SUMS"},
 		{"ftp://example.com/bin", r.srv.URL + "/SHA256SUMS"},
 	} {
-		err := Apply(context.Background(), urls[0], urls[1])
+		err := applyStrict(context.Background(), urls[0], urls[1])
 		if err == nil || !strings.Contains(err.Error(), "https") {
 			t.Errorf("Apply(%s, %s) = %v, want an HTTPS error", urls[0], urls[1], err)
 		}
@@ -240,7 +245,7 @@ func TestApplyRejectsDowngradeRedirects(t *testing.T) {
 			} else {
 				sumsURL = r.srv.URL + "/redirect/SHA256SUMS"
 			}
-			err := Apply(context.Background(), binURL, sumsURL)
+			err := applyStrict(context.Background(), binURL, sumsURL)
 			if err == nil || !strings.Contains(err.Error(), "https") {
 				t.Fatalf("Apply = %v, want the HTTPS-to-HTTP redirect rejected", err)
 			}
@@ -261,7 +266,7 @@ func TestApplyFollowsHTTPSRedirects(t *testing.T) {
 		}
 	})
 	exe := installed(t)
-	if err := Apply(context.Background(), r.srv.URL+"/redirect/bin", r.srv.URL+"/redirect/SHA256SUMS"); err != nil {
+	if err := applyStrict(context.Background(), r.srv.URL+"/redirect/bin", r.srv.URL+"/redirect/SHA256SUMS"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(exe); string(got) != string(bin) {
@@ -285,4 +290,34 @@ func TestCheckLatestRejectsPlainHTTPAssetURLs(t *testing.T) {
 			t.Errorf("CheckLatest accepted %v: err=%v", tc, err)
 		}
 	}
+}
+
+// applyStrict applies an update to the first release that requires a
+// signature, so the tests exercise the mandatory-signature path.
+func applyStrict(ctx context.Context, downloadURL, checksumsURL string) error {
+	_, err := Apply(ctx, "v0.19.0", SignatureRequiredFrom, downloadURL, checksumsURL)
+	return err
+}
+
+func TestApplyUnsignedReleaseBeforeSignatureRequirement(t *testing.T) {
+	bin := validBinary(t)
+	r := newRelease(t, bin, func(r *release) { r.unsigned = true })
+	exe := installed(t)
+
+	signed, err := Apply(context.Background(), "v0.12.0", "v0.13.0", r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS")
+	if err != nil {
+		t.Fatalf("unsigned pre-v0.20.0 update refused: %v", err)
+	}
+	if signed {
+		t.Fatal("unsigned release reported as signed")
+	}
+	if got, _ := os.ReadFile(exe); string(got) != string(bin) {
+		t.Fatalf("binary not replaced: %q", got)
+	}
+
+	exe = installed(t)
+	if _, err := Apply(context.Background(), "v0.19.0", "v0.20.0", r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS"); err == nil || !strings.Contains(err.Error(), "SHA256SUMS.sig") {
+		t.Fatalf("unsigned v0.20.0 update: err = %v, want a missing-signature error", err)
+	}
+	assertOriginal(t, exe)
 }
