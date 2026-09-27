@@ -8,7 +8,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/subnetpools"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
-	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 	"github.com/larkly/lazystack/internal/shared"
@@ -371,31 +370,4 @@ func ListExternalNetworks(ctx context.Context, client *gophercloud.ServiceClient
 	}
 	shared.Debugf("[network] listed %d external networks", len(result))
 	return result, nil
-}
-
-// FindServerPortID returns the first port ID for the given server (device_id).
-func FindServerPortID(ctx context.Context, client *gophercloud.ServiceClient, serverID string) (string, error) {
-	shared.Debugf("[network] finding port for server %s", serverID)
-	var portID string
-	err := ports.List(client, ports.ListOpts{DeviceID: serverID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
-		extracted, err := ports.ExtractPorts(page)
-		if err != nil {
-			return false, err
-		}
-		if len(extracted) > 0 {
-			portID = extracted[0].ID
-			return false, nil // stop after first
-		}
-		return true, nil
-	})
-	if err != nil {
-		shared.Debugf("[network] find server port %s: %v", serverID, err)
-		return "", fmt.Errorf("finding port for server %s: %w", serverID, err)
-	}
-	if portID == "" {
-		shared.Debugf("[network] find server port: no ports found for server %s", serverID)
-		return "", fmt.Errorf("no ports found for server %s", serverID)
-	}
-	shared.Debugf("[network] found port %s for server %s", portID, serverID)
-	return portID, nil
 }
