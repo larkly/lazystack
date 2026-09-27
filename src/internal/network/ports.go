@@ -406,7 +406,13 @@ func UpdatePort(ctx context.Context, client *gophercloud.ServiceClient, portID s
 		baseOpts.AdminStateUp = opts.AdminStateUp
 	}
 	if opts.SecurityGroups != nil {
-		baseOpts.SecurityGroups = opts.SecurityGroups
+		// A nil slice would be sent as security_groups:null; clearing all
+		// groups must be an explicit empty array.
+		sgs := *opts.SecurityGroups
+		if sgs == nil {
+			sgs = []string{}
+		}
+		baseOpts.SecurityGroups = &sgs
 	}
 	if opts.AllowedAddressPairs != nil {
 		pairs := make([]ports.AddressPair, len(*opts.AllowedAddressPairs))
