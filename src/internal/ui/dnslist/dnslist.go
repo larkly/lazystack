@@ -29,7 +29,8 @@ type recordsetsLoadedMsg struct {
 }
 
 type recordsetsErrMsg struct {
-	err error
+	zoneID string
+	err    error
 }
 
 // Model is the DNS zone/record list viewer.
@@ -84,12 +85,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case recordsetsLoadedMsg:
+		if !m.isSelectedZone(msg.zoneID) {
+			// Late response for a zone the cursor has already left.
+			return m, nil
+		}
 		m.loading = false
 		m.recordsets = msg.recordsets
 		m.err = ""
 		return m, nil
 
 	case recordsetsErrMsg:
+		if !m.isSelectedZone(msg.zoneID) {
+			return m, nil
+		}
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
@@ -279,6 +287,11 @@ func (m Model) Hints() string {
 	return "↑↓ navigate zones • esc back • R refresh • ? help"
 }
 
+// isSelectedZone reports whether zoneID is the zone currently selected.
+func (m Model) isSelectedZone(zoneID string) bool {
+	return m.selectedZone != nil && m.selectedZone.ID == zoneID
+}
+
 // ForceRefresh triggers a reload.
 func (m *Model) ForceRefresh() tea.Cmd {
 	m.loading = true
@@ -311,11 +324,11 @@ func (m Model) fetchRecordsets(zoneID string) tea.Cmd {
 	return func() tea.Msg {
 		allPages, err := recordsets.ListByZone(client, zoneID, nil).AllPages(context.Background())
 		if err != nil {
-			return recordsetsErrMsg{err: err}
+			return recordsetsErrMsg{zoneID: zoneID, err: err}
 		}
 		rs, err := recordsets.ExtractRecordSets(allPages)
 		if err != nil {
-			return recordsetsErrMsg{err: err}
+			return recordsetsErrMsg{zoneID: zoneID, err: err}
 		}
 		return recordsetsLoadedMsg{zoneID: zoneID, recordsets: rs}
 	}
