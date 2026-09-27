@@ -16,7 +16,7 @@ import (
 // cloudsEnv isolates clouds.yaml discovery: HOME, XDG_CONFIG_HOME, the
 // system path and the working directory all point into fresh temp dirs.
 type cloudsEnv struct {
-	home, xdg, cwd string
+	home, cwd string
 }
 
 func newCloudsEnv(t *testing.T) cloudsEnv {
