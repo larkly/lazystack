@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -65,9 +66,7 @@ func main() {
 	}
 
 	cfg, cfgErr := config.Load()
-	if cfgErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to load config: %v\n", cfgErr)
-	}
+	reportConfigLoad(os.Stderr, cfg, cfgErr)
 
 	// Detect which CLI flags were explicitly set
 	var cliFlags config.CLIFlags
@@ -129,5 +128,16 @@ func main() {
 			os.Exit(1)
 		}
 		syscall.Exec(exe, os.Args, os.Environ())
+	}
+}
+
+// reportConfigLoad prints config load problems (a failed load, or values
+// that were rejected and replaced by defaults) as warnings.
+func reportConfigLoad(w io.Writer, cfg config.Config, err error) {
+	if err != nil {
+		fmt.Fprintf(w, "Warning: failed to load config: %v\n", err)
+	}
+	for _, warning := range cfg.Warnings {
+		fmt.Fprintf(w, "Warning: config: %s\n", warning)
 	}
 }

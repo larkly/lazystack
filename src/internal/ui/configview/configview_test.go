@@ -32,7 +32,7 @@ func TestKeybindingCaptureRejectsReservedAndSupportsCancelAndSave(t *testing.T) 
 	if !m.keyCapture {
 		t.Fatal("enter did not start capture")
 	}
-	for _, r := range []rune{'a', 'u'} {
+	for _, r := range []rune{'a', 'b'} {
 		var cmd tea.Cmd
 		m, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Mod: tea.ModCtrl}))
 		if !m.keyCapture || !strings.Contains(m.errMsg, "reserved key") || m.cfg.Keybindings["help"] != original || cmd != nil {
@@ -54,6 +54,33 @@ func TestKeybindingCaptureRejectsReservedAndSupportsCancelAndSave(t *testing.T) 
 	loaded, err := config.Load()
 	if err != nil || loaded.Keybindings["help"] != "z" {
 		t.Fatalf("saved binding not persisted: %v", err)
+	}
+}
+
+func TestKeybindingOrderCoversEveryDefault(t *testing.T) {
+	listed := map[string]bool{}
+	for _, name := range keybindingOrder() {
+		listed[name] = true
+	}
+	for name := range config.DefaultKeybindings() {
+		if !listed[name] {
+			t.Errorf("keybinding %q is not editable in the config view", name)
+		}
+	}
+}
+
+func TestKeybindingCaptureAcceptsAssignFIPDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	defaults := config.Defaults()
+	t.Cleanup(func() { config.ApplyAll(defaults) })
+	m := New(nil)
+	m.Open()
+	selectItem(t, &m, "assign_fip")
+	m.cfg.Keybindings["assign_fip"] = "F7"
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'u', Mod: tea.ModCtrl}))
+	if m.keyCapture || m.errMsg != "" || m.cfg.Keybindings["assign_fip"] != "ctrl+u" {
+		t.Fatalf("restoring the ctrl+u default was rejected: %q", m.errMsg)
 	}
 }
 
@@ -84,7 +111,7 @@ func TestNumericAndColorValidation(t *testing.T) {
 		}
 	}
 	for _, item := range m.buildKeybindingItems() {
-		for _, bad := range []string{"ctrl+a", "ctrl+u"} {
+		for _, bad := range []string{"ctrl+a", "ctrl+b", "q,ctrl+b"} {
 			before := item.get()
 			if item.set(bad) == nil || item.get() != before {
 				t.Fatal("setter bypasses reserved validation")

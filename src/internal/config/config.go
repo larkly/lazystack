@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/larkly/lazystack/internal/shared"
@@ -25,6 +26,10 @@ type Config struct {
 	SavedFilters []SavedFilter     `yaml:"saved_filters,omitempty"`
 	Columns      []ColumnConfig    `yaml:"columns,omitempty"`
 	Audit        AuditConfig       `yaml:"audit,omitempty"`
+
+	// Warnings collects non-fatal problems found while loading (for
+	// example a rejected keybinding). It is never persisted.
+	Warnings []string `yaml:"-"`
 }
 
 // AuditConfig controls the unified lazystack-native audit trail.
@@ -143,7 +148,7 @@ func DefaultKeybindings() map[string]string {
 		"confirm":         "y",
 		"deny":            "n",
 		"restart":         "ctrl+r",
-		"attach":          "ctrl+a",
+		"attach":          "i",
 		"assign_fip":      "ctrl+u",
 		"detach":          "ctrl+t",
 		"allocate":        "ctrl+n",
@@ -265,7 +270,30 @@ func LoadFrom(path string) (Config, error) {
 		file.General.UpdateCheckInterval = defaults.General.UpdateCheckInterval
 	}
 
+	file.Warnings = dropReservedKeybindings(file.Keybindings, defaults.Keybindings)
 	return mergeWithDefaults(file, defaults), nil
+}
+
+// dropReservedKeybindings removes bindings that use a reserved key (Ctrl+A,
+// Ctrl+B) so the default is used instead, and returns one warning per
+// rejected binding.
+func dropReservedKeybindings(kb, defaults map[string]string) []string {
+	var warnings []string
+	names := make([]string, 0, len(kb))
+	for name := range kb {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if !shared.ContainsReservedKey(kb[name]) {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf(
+			"keybinding %s=%q uses a reserved key (ctrl+a/ctrl+b belong to screen/tmux); using default %q",
+			name, kb[name], defaults[name]))
+		delete(kb, name)
+	}
+	return warnings
 }
 
 // mergeWithDefaults fills zero-valued fields in file with defaults.

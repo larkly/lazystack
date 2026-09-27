@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,36 @@ func TestLoadAuditAndSavedFilters(t *testing.T) {
 		want := []SavedFilter{{Name: "web", Pattern: "name:web-*"}, {Name: "errors", Pattern: "status:ERROR"}}
 		if !reflect.DeepEqual(cfg.SavedFilters, want) {
 			t.Errorf("SavedFilters = %#v, want %#v", cfg.SavedFilters, want)
+		}
+	}
+}
+
+func TestLoadRejectsReservedKeybindings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := "keybindings:\n  attach: ctrl+a\n  detach: \"x, ctrl+b\"\n  refresh: F5\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	d := DefaultKeybindings()
+	if cfg.Keybindings["attach"] != d["attach"] {
+		t.Errorf("attach = %q, want default %q", cfg.Keybindings["attach"], d["attach"])
+	}
+	if cfg.Keybindings["detach"] != d["detach"] {
+		t.Errorf("detach = %q, want default %q", cfg.Keybindings["detach"], d["detach"])
+	}
+	if cfg.Keybindings["refresh"] != "F5" {
+		t.Errorf("refresh = %q, want F5 (unaffected)", cfg.Keybindings["refresh"])
+	}
+	if len(cfg.Warnings) != 2 {
+		t.Fatalf("Warnings = %q, want one per rejected binding", cfg.Warnings)
+	}
+	for _, w := range cfg.Warnings {
+		if !strings.Contains(w, "reserved") {
+			t.Errorf("warning %q does not explain the rejection", w)
 		}
 	}
 }

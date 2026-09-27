@@ -853,7 +853,7 @@ func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
 		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.detailErr)
 	}
 	if len(m.interfaces) == 0 && !m.detailLoading {
-		return shared.StyleHelp.Render("No interfaces \u2014 Ctrl+A to add")
+		return shared.StyleHelp.Render("No interfaces \u2014 " + shared.Keys.Attach.Help().Key + " to add")
 	}
 
 	const gap = 2
@@ -1057,7 +1057,7 @@ func (m Model) renderActionBar() string {
 		buttons = append(buttons, btn("^n", "New Router"))
 		buttons = append(buttons, btn("^d", "Delete Router"))
 	case FocusInterfaces:
-		buttons = append(buttons, btn("^a", "Add Interface"))
+		buttons = append(buttons, btn(shared.Keys.Attach.Help().Key, "Add Interface"))
 		if m.SelectedInterfaceSubnetID() != "" {
 			buttons = append(buttons, btn("^t", "Remove Interface"))
 		}
@@ -1143,7 +1143,7 @@ func (m *Model) applyHighlightNames() {
 func (m Model) Hints() string {
 	switch m.focus {
 	case FocusInterfaces:
-		return "\u2191\u2193 navigate \u2022 ^a add interface \u2022 ^t remove \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 " + shared.Keys.Attach.Help().Key + " add interface \u2022 ^t remove \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
 	case focusRoutes:
 		return "\u2191\u2193 navigate \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
 	case focusInfo:

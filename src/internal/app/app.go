@@ -628,7 +628,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Volume list: Enter to open detail, ctrl+d to delete, ctrl+n to create, ctrl+a attach, ctrl+t detach
+		// Volume list: Enter to open detail, ctrl+d to delete, ctrl+n to create, attach, ctrl+t detach
 		if m.view == viewVolumeList {
 			if key.Matches(msg, shared.Keys.Enter) {
 				return m.openVolumeDetail()
@@ -653,7 +653,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Volume detail: ctrl+d delete, ctrl+a attach, ctrl+t detach
+		// Volume detail: ctrl+d delete, attach, ctrl+t detach
 		if m.view == viewVolumeDetail {
 			if key.Matches(msg, shared.Keys.Delete) {
 				return m.openVolumeDeleteConfirm()

@@ -1,10 +1,39 @@
 package shared
 
 import (
+	"reflect"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
 )
+
+func TestNoDefaultBindingUsesReservedKey(t *testing.T) {
+	v := reflect.ValueOf(Keys)
+	for i := 0; i < v.NumField(); i++ {
+		b := v.Field(i).Interface().(key.Binding)
+		for _, k := range b.Keys() {
+			if IsReservedKey(k) {
+				t.Errorf("%s is bound to reserved key %q", v.Type().Field(i).Name, k)
+			}
+		}
+	}
+}
+
+func TestIsReservedKey(t *testing.T) {
+	for _, k := range []string{"ctrl+a", "ctrl+b", " CTRL+A "} {
+		if !IsReservedKey(k) {
+			t.Errorf("%q should be reserved", k)
+		}
+	}
+	for _, k := range []string{"ctrl+u", "a", "b", "i", "ctrl+shift+c"} {
+		if IsReservedKey(k) {
+			t.Errorf("%q should not be reserved", k)
+		}
+	}
+	if !ContainsReservedKey("i, ctrl+b") || ContainsReservedKey("i,ctrl+u") {
+		t.Error("ContainsReservedKey must check every comma-separated key")
+	}
+}
 
 func TestKeys_IsNonNil(t *testing.T) {
 	if Keys.Quit.Keys() == nil {
