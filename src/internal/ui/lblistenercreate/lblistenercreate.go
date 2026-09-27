@@ -1,7 +1,6 @@
 package lblistenercreate
 
 import (
-	"context"
 	"strconv"
 	"strings"
 
@@ -426,7 +425,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 			update.DefaultPoolID = &poolID // "" removes the binding
 		}
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdateListenerWithPool(context.Background(), client, id, update)
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
+			err := loadbalancer.UpdateListenerWithPool(ctx, client, id, update)
 			if err != nil {
 				return listenerCreateErrMsg{err: err}
 			}
@@ -448,7 +449,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 	protocol := protocolOpts[m.selectedProtocol]
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		_, err := loadbalancer.CreateListener(context.Background(), client, lbID, name, protocol, port, poolID)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		_, err := loadbalancer.CreateListener(ctx, client, lbID, name, protocol, port, poolID)
 		if err != nil {
 			return listenerCreateErrMsg{err: err}
 		}

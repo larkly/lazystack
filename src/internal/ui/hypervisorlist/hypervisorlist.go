@@ -1,7 +1,6 @@
 package hypervisorlist
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -217,7 +216,9 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) fetch() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		items, err := compute.ListHypervisors(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		items, err := compute.ListHypervisors(ctx, client)
 		if err != nil {
 			return hypervisorsErrMsg{err: err}
 		}

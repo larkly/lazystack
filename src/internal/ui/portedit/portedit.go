@@ -1,7 +1,6 @@
 package portedit
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -123,7 +122,9 @@ func New(client *gophercloud.ServiceClient, port network.Port) Model {
 func (m Model) Init() tea.Cmd {
 	client := m.client
 	return tea.Batch(textinput.Blink, m.spinner.Tick, func() tea.Msg {
-		sgs, err := network.ListSecurityGroups(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		sgs, err := network.ListSecurityGroups(ctx, client)
 		if err != nil {
 			return sgLoadErrMsg{err: err}
 		}
@@ -428,8 +429,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[portedit] updating port %s", portID)
-		err := network.UpdatePort(context.Background(), client, portID, opts)
+		err := network.UpdatePort(ctx, client, portID, opts)
 		if err != nil {
 			shared.Debugf("[portedit] error: %v", err)
 			return portUpdateErrMsg{err: err}

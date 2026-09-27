@@ -1,7 +1,6 @@
 package serversnapshot
 
 import (
-	"context"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -123,8 +122,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	id := m.serverID
 	serverName := m.serverName
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serversnapshot] creating snapshot %q for server %s", name, id)
-		err := compute.CreateSnapshot(context.Background(), client, id, name)
+		err := compute.CreateSnapshot(ctx, client, id, name)
 		if err != nil {
 			shared.Debugf("[serversnapshot] error creating snapshot %q: %v", name, err)
 			return snapshotErrMsg{err: err}

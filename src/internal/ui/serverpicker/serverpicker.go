@@ -1,7 +1,6 @@
 package serverpicker
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -247,7 +246,9 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) fetchServers() tea.Cmd {
 	client := m.computeClient
 	return func() tea.Msg {
-		servers, err := compute.ListServers(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		servers, err := compute.ListServers(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -270,8 +271,10 @@ func (m Model) attachVolume(srv compute.Server) tea.Cmd {
 	serverName := srv.Name
 	_ = volumeName // used in the msg struct
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serverpicker] attaching volume %s to server %s (%s)", volumeID, serverID, serverName)
-		_, err := volume.AttachVolume(context.Background(), client, serverID, volumeID)
+		_, err := volume.AttachVolume(ctx, client, serverID, volumeID)
 		if err != nil {
 			shared.Debugf("[serverpicker] error attaching volume %s to server %s: %v", volumeID, serverID, err)
 			return attachErrMsg{err: err}

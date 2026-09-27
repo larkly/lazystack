@@ -1,7 +1,6 @@
 package lbcreate
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -136,7 +135,9 @@ func (m Model) Init() tea.Cmd {
 func (m Model) fetchSubnets() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
-		subnets, err := network.ListSubnets(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		subnets, err := network.ListSubnets(ctx, client)
 		if err != nil {
 			return subnetsFetchErrMsg{err: err}
 		}
@@ -409,7 +410,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 		id := m.lbID
 		desc := strings.TrimSpace(m.descInput.Value())
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdateLoadBalancer(context.Background(), client, id, &name, &desc, nil)
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
+			err := loadbalancer.UpdateLoadBalancer(ctx, client, id, &name, &desc, nil)
 			if err != nil {
 				return lbCreateErrMsg{err: err}
 			}
@@ -430,7 +433,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 	subnetID := m.subnets[m.selectedSubnet].ID
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		_, err := loadbalancer.CreateLoadBalancer(context.Background(), client, name, desc, subnetID)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		_, err := loadbalancer.CreateLoadBalancer(ctx, client, name, desc, subnetID)
 		if err != nil {
 			return lbCreateErrMsg{err: err}
 		}

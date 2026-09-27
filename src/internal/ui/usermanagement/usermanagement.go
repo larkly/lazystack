@@ -1,7 +1,6 @@
 package usermanagement
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -410,7 +409,9 @@ func (m Model) fetch() tea.Cmd {
 	pc := m.providerClient
 	eo := m.endpointOpts
 	return func() tea.Msg {
-		items, err := compute.ListUsers(context.Background(), pc, eo)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		items, err := compute.ListUsers(ctx, pc, eo)
 		if err != nil {
 			return usersErrMsg{err: err}
 		}
@@ -423,7 +424,8 @@ func (m Model) doAction(p pendingAction) tea.Cmd {
 	pc := m.providerClient
 	eo := m.endpointOpts
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		var err error
 		switch p.kind {
 		case actionToggle:

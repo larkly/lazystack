@@ -1,7 +1,6 @@
 package keypaircreate
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -521,8 +520,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	if publicKey != "" {
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			shared.Debugf("[keypaircreate] importing keypair %q", name)
-			kp, err := compute.ImportKeyPair(context.Background(), client, name, publicKey)
+			kp, err := compute.ImportKeyPair(ctx, client, name, publicKey)
 			if err != nil {
 				shared.Debugf("[keypaircreate] error importing keypair %q: %v", name, err)
 				return keypairCreateErrMsg{err: err}
@@ -535,8 +536,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	algo := kt.algorithm
 	keySize := kt.keySize
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[keypaircreate] generating keypair %q (algo=%s)", name, algo)
-		kp, err := compute.GenerateAndImportKeyPair(context.Background(), client, name, algo, keySize)
+		kp, err := compute.GenerateAndImportKeyPair(ctx, client, name, algo, keySize)
 		if err != nil {
 			shared.Debugf("[keypaircreate] error generating keypair %q: %v", name, err)
 			return keypairCreateErrMsg{err: err}

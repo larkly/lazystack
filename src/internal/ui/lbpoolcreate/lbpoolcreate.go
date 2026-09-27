@@ -458,7 +458,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 		client := m.client
 		id := m.poolID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdatePool(context.Background(), client, id, &name, lbMethod, nil)
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
+			err := loadbalancer.UpdatePool(ctx, client, id, &name, lbMethod, nil)
 			if err != nil {
 				return poolCreateErrMsg{err: err}
 			}

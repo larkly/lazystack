@@ -2,6 +2,7 @@ package imagecreate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -679,31 +680,40 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 
 	client := m.client
 	return m, tea.Batch(m.spinner.Tick, scheduleProgressTick(), func() tea.Msg {
-		ctx := context.Background()
-
-		img, err := image.CreateImage(ctx, client, image.CreateImageOpts{
+		createCtx, cancelCreate := shared.RequestCtx()
+		img, err := image.CreateImage(createCtx, client, image.CreateImageOpts{
 			Name:       name,
 			DiskFormat: diskFmt,
 			Visibility: vis,
 			MinDisk:    minDisk,
 			MinRAM:     minRAM,
 		})
+		cancelCreate()
 		if err != nil {
 			return uploadErrMsg{err: err}
 		}
 
 		f, err := os.Open(path)
 		if err != nil {
-			return uploadErrMsg{err: cleanupFailedImage(ctx, client, img.ID, fmt.Errorf("opening file: %w", err))}
+			return uploadErrMsg{err: cleanupFailedImage(client, img.ID, fmt.Errorf("opening file: %w", err))}
 		}
 		defer f.Close()
 
 		ur := image.NewUploadReader(f, size)
 		sharedUpload.Store(ur)
 
+		// The data transfer may legitimately take hours, so it has no
+		// overall deadline; it is abandoned only if it stops making
+		// progress. (Waiting for the response once the body is sent is
+		// bounded by the transport's response-header timeout.)
+		ctx, cancel := shared.StallCtx(ur.BytesRead)
+		defer cancel()
 		err = image.UploadImageData(ctx, client, img.ID, ur)
 		if err != nil {
-			return uploadErrMsg{err: cleanupFailedImage(ctx, client, img.ID, err)}
+			if errors.Is(context.Cause(ctx), shared.ErrTransferStalled) {
+				err = fmt.Errorf("upload made no progress for %s: %w", shared.TransferStallTimeout, err)
+			}
+			return uploadErrMsg{err: cleanupFailedImage(client, img.ID, err)}
 		}
 
 		return uploadDoneMsg{name: name}
@@ -724,7 +734,8 @@ func (m Model) doURLImport() (Model, tea.Cmd) {
 	m.submitting = true
 	client := m.client
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 
 		img, err := image.CreateImage(ctx, client, image.CreateImageOpts{
 			Name:       name,
@@ -739,7 +750,7 @@ func (m Model) doURLImport() (Model, tea.Cmd) {
 
 		err = image.ImportImageURL(ctx, client, img.ID, url)
 		if err != nil {
-			return uploadErrMsg{err: cleanupFailedImage(ctx, client, img.ID, err)}
+			return uploadErrMsg{err: cleanupFailedImage(client, img.ID, err)}
 		}
 
 		return importStartedMsg{name: name}
@@ -766,7 +777,10 @@ func expandHome(p string) string {
 // cleanupFailedImage deletes an image whose data step failed. The primary
 // error is always kept; a failed delete is appended with the image ID so the
 // user knows which resource was left behind.
-func cleanupFailedImage(ctx context.Context, client *gophercloud.ServiceClient, imageID string, primary error) error {
+func cleanupFailedImage(client *gophercloud.ServiceClient, imageID string, primary error) error {
+	// A fresh deadline: the failed step's context may already be done.
+	ctx, cancel := shared.RequestCtx()
+	defer cancel()
 	if err := image.DeleteImage(ctx, client, imageID); err != nil {
 		shared.Debugf("[imagecreate] cleanup of image %s failed: %v", imageID, err)
 		return fmt.Errorf("%w (cleanup failed, image %s may be left behind: %v)", primary, imageID, err)

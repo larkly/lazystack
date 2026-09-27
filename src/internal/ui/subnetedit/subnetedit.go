@@ -1,7 +1,6 @@
 package subnetedit
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -337,8 +336,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[subnetedit] updating subnet %s", id)
-		err := network.UpdateSubnet(context.Background(), client, id, opts)
+		err := network.UpdateSubnet(ctx, client, id, opts)
 		if err != nil {
 			shared.Debugf("[subnetedit] error updating subnet %s: %v", id, err)
 			return subnetUpdateErrMsg{err: err}

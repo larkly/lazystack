@@ -1,7 +1,6 @@
 package volumedetail
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -319,15 +318,17 @@ func (m Model) fetchVolume(seq uint64) tea.Cmd {
 	computeClient := m.computeClient
 	id := m.volumeID
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[volumedetail] fetch start id=%s", id)
-		vol, err := volume.GetVolume(context.Background(), client, id)
+		vol, err := volume.GetVolume(ctx, client, id)
 		if err != nil {
 			shared.Debugf("[volumedetail] fetch error: %v", err)
 			return volumeDetailErrMsg{seq: seq, err: err}
 		}
 		serverName := ""
 		if vol.AttachedServerID != "" && computeClient != nil {
-			srv, err := compute.GetServer(context.Background(), computeClient, vol.AttachedServerID)
+			srv, err := compute.GetServer(ctx, computeClient, vol.AttachedServerID)
 			if err == nil && srv != nil {
 				serverName = srv.Name
 			}

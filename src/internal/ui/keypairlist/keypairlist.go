@@ -1,7 +1,6 @@
 package keypairlist
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -326,8 +325,10 @@ func (m Model) CopyEntries() (string, []copypicker.Entry) {
 func (m Model) fetchKeypairs(seq uint64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[keypairlist] fetch start")
-		kps, err := compute.ListKeyPairs(context.Background(), client)
+		kps, err := compute.ListKeyPairs(ctx, client)
 		if err != nil {
 			shared.Debugf("[keypairlist] fetch error: %v", err)
 			return keypairsErrMsg{seq: seq, err: err}

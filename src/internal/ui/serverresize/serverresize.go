@@ -1,7 +1,6 @@
 package serverresize
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -244,7 +243,9 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 			shared.Debugf("[serverresize] resizing %d servers to flavor %s", len(ids), flavorID)
 			var errs []string
 			for _, id := range ids {
-				err := compute.ResizeServer(context.Background(), client, id, flavorID)
+				ctx, cancel := shared.RequestCtx()
+				err := compute.ResizeServer(ctx, client, id, flavorID)
+				cancel()
 				if err != nil {
 					errs = append(errs, err.Error())
 				}
@@ -261,8 +262,10 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 		id := m.serverID
 		ids = []string{id}
 		cmd = func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			shared.Debugf("[serverresize] resizing server %s (%s) to flavor %s", id, name, flavorID)
-			err := compute.ResizeServer(context.Background(), client, id, flavorID)
+			err := compute.ResizeServer(ctx, client, id, flavorID)
 			if err != nil {
 				shared.Debugf("[serverresize] error resizing server %s: %v", id, err)
 				return resizeErrMsg{err: err}
@@ -409,7 +412,9 @@ func (m Model) renderBox(content string) string {
 func (m Model) fetchFlavors() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		flavors, err := compute.ListFlavors(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		flavors, err := compute.ListFlavors(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}

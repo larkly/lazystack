@@ -1,7 +1,6 @@
 package sgrulecreate
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -254,7 +253,9 @@ func (m Model) Init() tea.Cmd {
 	client := m.client
 	id := m.oldRuleID
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
-		spec, err := network.GetSecurityRuleSpec(context.Background(), client, id)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		spec, err := network.GetSecurityRuleSpec(ctx, client, id)
 		if err != nil {
 			return ruleLoadErrMsg{err: err}
 		}
@@ -619,7 +620,8 @@ func (m Model) submit() (Model, tea.Cmd) {
 	oldRuleID := m.oldRuleID
 	sgName := m.sgName
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		if editMode {
 			shared.Debugf("[sgrulecreate] editing rule in %q (replacing %s)", sgName, oldRuleID)
 		} else {
@@ -635,7 +637,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 			delErr := network.DeleteSecurityGroupRule(ctx, client, oldRuleID)
 			if delErr != nil && !gophercloud.ResponseCodeIs(delErr, http.StatusNotFound) {
 				shared.Debugf("[sgrulecreate] could not delete original rule %s: %v; rolling back %s", oldRuleID, delErr, newID)
-				rbErr := network.DeleteSecurityGroupRule(ctx, client, newID)
+				// Fresh deadline: the delete may have failed by timing out.
+				rbCtx, rbCancel := shared.RequestCtx()
+				rbErr := network.DeleteSecurityGroupRule(rbCtx, client, newID)
+				rbCancel()
 				return ruleReplaceErrMsg{oldID: oldRuleID, newID: newID, deleteErr: delErr, rollbackErr: rbErr}
 			}
 			shared.Debugf("[sgrulecreate] edited rule in %q (%s -> %s)", sgName, oldRuleID, newID)

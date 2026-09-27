@@ -1,7 +1,6 @@
 package quotaview
 
 import (
-	"context"
 	"fmt"
 	"image/color"
 	"strings"
@@ -98,7 +97,8 @@ func (m *Model) fetchQuotas() tea.Cmd {
 		if projectID == "" {
 			return quotaLoadedMsg{err: fmt.Errorf("no project selected")}
 		}
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		var (
 			computeQuotas []quota.QuotaUsage
 			networkQuotas []quota.QuotaUsage

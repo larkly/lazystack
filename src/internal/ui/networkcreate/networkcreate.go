@@ -1,7 +1,6 @@
 package networkcreate
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -221,8 +220,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[networkcreate] creating network %q", name)
-		_, err := network.CreateNetwork(context.Background(), client, name, adminUp)
+		_, err := network.CreateNetwork(ctx, client, name, adminUp)
 		if err != nil {
 			shared.Debugf("[networkcreate] error creating network %q: %v", name, err)
 			return netCreateErrMsg{err: err}

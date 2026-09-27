@@ -1,7 +1,6 @@
 package lbmonitorcreate
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -368,7 +367,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 			httpMethodPtr = &httpMethod
 		}
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-			err := loadbalancer.UpdateHealthMonitor(context.Background(), client, id, &delay, &timeout, &retries, urlPathPtr, codesPtr, httpMethodPtr)
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
+			err := loadbalancer.UpdateHealthMonitor(ctx, client, id, &delay, &timeout, &retries, urlPathPtr, codesPtr, httpMethodPtr)
 			if err != nil {
 				return monitorCreateErrMsg{err: err}
 			}
@@ -390,7 +391,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		_, err := loadbalancer.CreateHealthMonitor(context.Background(), client, poolID, monType, delay, timeout, retries, urlPath, codes, httpMethod)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		_, err := loadbalancer.CreateHealthMonitor(ctx, client, poolID, monType, delay, timeout, retries, urlPath, codes, httpMethod)
 		if err != nil {
 			return monitorCreateErrMsg{err: err}
 		}

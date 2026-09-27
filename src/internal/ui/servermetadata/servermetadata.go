@@ -1,7 +1,6 @@
 package servermetadata
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -275,8 +274,10 @@ func (m *Model) addMetadatum() tea.Cmd {
 	name := m.serverName
 
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[servermetadata] creating metadata %s=%s for server %s", key, value, name)
-		r := servers.CreateMetadatum(context.Background(), client, id, servers.MetadatumOpts{key: value})
+		r := servers.CreateMetadatum(ctx, client, id, servers.MetadatumOpts{key: value})
 		if r.Err != nil {
 			shared.Debugf("[servermetadata] create metadata failed: %v", r.Err)
 			return metaOpErrMsg{action: "Update metadata", name: name, err: r.Err}
@@ -302,17 +303,19 @@ func (m *Model) updateMetadatum() tea.Cmd {
 	oldKey := m.editKey
 
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[servermetadata] updating metadata %s=%s for server %s", newKey, value, name)
 		// CreateMetadatum handles both create and update (Nova PUT /metadata/{key}).
 		// On rename, write the new key first so a failed write never loses the
 		// original value; only then remove the old key.
-		cr := servers.CreateMetadatum(context.Background(), client, id, servers.MetadatumOpts{newKey: value})
+		cr := servers.CreateMetadatum(ctx, client, id, servers.MetadatumOpts{newKey: value})
 		if cr.Err != nil {
 			shared.Debugf("[servermetadata] update metadata failed: %v", cr.Err)
 			return metaOpErrMsg{action: "Update metadata", name: name, err: cr.Err}
 		}
 		if oldKey != newKey {
-			dr := servers.DeleteMetadatum(context.Background(), client, id, oldKey)
+			dr := servers.DeleteMetadatum(ctx, client, id, oldKey)
 			if dr.Err != nil {
 				shared.Debugf("[servermetadata] delete old key failed: %v", dr.Err)
 				return metaOpErrMsg{
@@ -337,8 +340,10 @@ func (m *Model) deleteMetadatum(key string) tea.Cmd {
 	name := m.serverName
 
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[servermetadata] deleting metadata %s from server %s", key, name)
-		r := servers.DeleteMetadatum(context.Background(), client, id, key)
+		r := servers.DeleteMetadatum(ctx, client, id, key)
 		if r.Err != nil {
 			shared.Debugf("[servermetadata] delete metadata failed: %v", r.Err)
 			return metaOpErrMsg{action: "Delete metadata", name: name, err: r.Err}

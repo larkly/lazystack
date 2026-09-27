@@ -1,7 +1,6 @@
 package serverrebuild
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -216,8 +215,10 @@ func (m Model) doRebuild(img image.Image) (Model, tea.Cmd) {
 	id := m.serverID
 	imageID := img.ID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serverrebuild] rebuilding server %s (%s) with image %s", id, name, imageID)
-		err := compute.RebuildServer(context.Background(), client, id, imageID)
+		err := compute.RebuildServer(ctx, client, id, imageID)
 		if err != nil {
 			shared.Debugf("[serverrebuild] error rebuilding server %s: %v", id, err)
 			return rebuildErrMsg{err: err}
@@ -355,7 +356,9 @@ func (m Model) View() string {
 func (m Model) fetchImages() tea.Cmd {
 	client := m.imageClient
 	return func() tea.Msg {
-		imgs, err := image.ListImages(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		imgs, err := image.ListImages(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}

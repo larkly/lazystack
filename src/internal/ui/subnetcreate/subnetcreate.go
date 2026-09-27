@@ -1,7 +1,6 @@
 package subnetcreate
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -122,7 +121,9 @@ func (m Model) Init() tea.Cmd {
 func (m Model) fetchSubnetPools() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		pools, err := network.ListSubnetPools(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		pools, err := network.ListSubnetPools(ctx, client)
 		if err != nil {
 			return subnetPoolsFetchErrMsg{err: err}
 		}
@@ -438,8 +439,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[subnetcreate] creating subnet %q in network %s (cidr=%s)", opts.Name, m.networkID, cidr)
-		_, err := network.CreateSubnet(context.Background(), client, opts)
+		_, err := network.CreateSubnet(ctx, client, opts)
 		if err != nil {
 			shared.Debugf("[subnetcreate] error creating subnet %q: %v", opts.Name, err)
 			return subnetCreateErrMsg{err: err}

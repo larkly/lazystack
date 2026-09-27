@@ -1,7 +1,6 @@
 package lbview
 
 import (
-	"context"
 	"fmt"
 	"image/color"
 	"sort"
@@ -2016,8 +2015,10 @@ func (m Model) fetchLBs() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[lbview] fetch LBs start")
-		lbs, err := loadbalancer.ListLoadBalancers(context.Background(), client)
+		lbs, err := loadbalancer.ListLoadBalancers(ctx, client)
 		if err != nil {
 			shared.Debugf("[lbview] fetch LBs error: %v", err)
 			return lbsErrMsg{err: err}
@@ -2031,7 +2032,8 @@ func (m Model) fetchDetail(lbID string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		shared.Debugf("[lbview] fetchDetail start for %s", lbID)
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 
 		lb, err := loadbalancer.GetLoadBalancer(ctx, client, lbID)
 		if err != nil {

@@ -1,7 +1,6 @@
 package serverlist
 
 import (
-	"context"
 	"fmt"
 	"image/color"
 	"sort"
@@ -784,8 +783,10 @@ func formatAge(created time.Time) string {
 func (m Model) fetchServers(seq uint64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serverlist] fetchServers start")
-		servers, err := compute.ListServers(context.Background(), client)
+		servers, err := compute.ListServers(ctx, client)
 		if err != nil {
 			shared.Debugf("[serverlist] fetchServers error: %v", err)
 			return serversErrMsg{seq: seq, err: err}
@@ -814,8 +815,10 @@ func (m Model) fetchMissingImageNames() tea.Cmd {
 
 	client := m.imageClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		result := make(imageNamesMsg)
-		images, err := img.ListImages(context.Background(), client)
+		images, err := img.ListImages(ctx, client)
 		if err != nil {
 			return result // silently fail, names are optional
 		}

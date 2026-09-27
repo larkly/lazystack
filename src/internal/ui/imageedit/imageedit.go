@@ -1,7 +1,6 @@
 package imageedit
 
 import (
-	"context"
 	"strconv"
 	"strings"
 
@@ -346,7 +345,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 	imageID := m.imageID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		err := image.UpdateImage(context.Background(), client, imageID, opts)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		err := image.UpdateImage(ctx, client, imageID, opts)
 		if err != nil {
 			return imageEditErrMsg{err: err}
 		}

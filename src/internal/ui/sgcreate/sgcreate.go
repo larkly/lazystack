@@ -1,7 +1,6 @@
 package sgcreate
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -275,8 +274,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	case ModeRename:
 		sgID := m.sgID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			shared.Debugf("[sgcreate] renaming security group %s to %q", sgID, name)
-			_, err := network.UpdateSecurityGroup(context.Background(), client, sgID, name, &desc)
+			_, err := network.UpdateSecurityGroup(ctx, client, sgID, name, &desc)
 			if err != nil {
 				shared.Debugf("[sgcreate] error renaming security group %s: %v", sgID, err)
 				return sgCreateErrMsg{err: err}
@@ -287,8 +288,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	case ModeClone:
 		srcID := m.srcSGID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			shared.Debugf("[sgcreate] cloning security group %s as %q", srcID, name)
-			_, err := network.CloneSecurityGroup(context.Background(), client, srcID, name, desc)
+			_, err := network.CloneSecurityGroup(ctx, client, srcID, name, desc)
 			if err != nil {
 				shared.Debugf("[sgcreate] error cloning security group %s: %v", srcID, err)
 				return sgCreateErrMsg{err: err}
@@ -298,8 +301,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		})
 	default:
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			shared.Debugf("[sgcreate] creating security group %q", name)
-			_, err := network.CreateSecurityGroup(context.Background(), client, name, desc)
+			_, err := network.CreateSecurityGroup(ctx, client, name, desc)
 			if err != nil {
 				shared.Debugf("[sgcreate] error creating security group %q: %v", name, err)
 				return sgCreateErrMsg{err: err}

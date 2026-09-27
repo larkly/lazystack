@@ -1,7 +1,6 @@
 package volumepicker
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -256,7 +255,9 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) fetchVolumes() tea.Cmd {
 	client := m.blockClient
 	return func() tea.Msg {
-		vols, err := volume.ListVolumes(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		vols, err := volume.ListVolumes(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -280,7 +281,9 @@ func (m Model) attachVolume(vol volume.Volume) tea.Cmd {
 		volumeName = shared.TruncateID(vol.ID, 12)
 	}
 	return func() tea.Msg {
-		_, err := volume.AttachVolume(context.Background(), client, serverID, volumeID)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		_, err := volume.AttachVolume(ctx, client, serverID, volumeID)
 		if err != nil {
 			return attachErrMsg{err: err}
 		}

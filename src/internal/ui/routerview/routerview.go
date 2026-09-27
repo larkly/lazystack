@@ -1,7 +1,6 @@
 package routerview
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -1148,8 +1147,10 @@ func (m Model) Hints() string {
 func (m Model) fetchRouters(seq uint64) tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[routerview] fetchRouters: start ListRouters")
-		routers, err := network.ListRouters(context.Background(), client)
+		routers, err := network.ListRouters(ctx, client)
 		if err != nil {
 			shared.Debugf("[routerview] fetchRouters: error: %s", err)
 			return routersErrMsg{seq: seq, err: err}
@@ -1165,7 +1166,8 @@ func (m Model) fetchRouters(seq uint64) tea.Cmd {
 func (m Model) fetchNames() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[routerview] fetchNames: start ListNetworks")
 		nets, err := network.ListNetworks(ctx, client)
 		if err != nil {
@@ -1198,8 +1200,10 @@ func (m Model) fetchDetail(routerID string, seq uint64) tea.Cmd {
 		short = short[:8]
 	}
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[routerview] fetchDetail: start ListRouterInterfaces router=%s", short)
-		ifaces, err := network.ListRouterInterfaces(context.Background(), client, routerID)
+		ifaces, err := network.ListRouterInterfaces(ctx, client, routerID)
 		if err != nil {
 			shared.Debugf("[routerview] fetchDetail: error: %s", err)
 			return detailErrMsg{seq: seq, routerID: routerID, err: err}

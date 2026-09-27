@@ -1,7 +1,6 @@
 package subnetpicker
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -282,7 +281,8 @@ func (m Model) submitInterface() (Model, tea.Cmd) {
 // is added to that port instead of creating a new one.
 func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, routerName string, sub network.Subnet, ipStr string) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 
 		// Check if the router already has a port on this network.
 		existing, err := network.FindRouterPortOnNetwork(ctx, client, routerID, sub.NetworkID)
@@ -483,7 +483,9 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) fetchSubnets() tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		subnets, err := network.ListSubnets(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		subnets, err := network.ListSubnets(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}

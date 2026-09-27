@@ -1,7 +1,6 @@
 package secgroupview
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -1299,8 +1298,10 @@ func (m Model) Hints() string {
 func (m Model) fetchGroups(seq uint64) tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[secgroupview] fetchGroups start")
-		groups, err := network.ListSecurityGroups(context.Background(), client)
+		groups, err := network.ListSecurityGroups(ctx, client)
 		if err != nil {
 			shared.Debugf("[secgroupview] fetchGroups error: %v", err)
 			return sgErrMsg{seq: seq, err: err}
@@ -1314,13 +1315,15 @@ func (m Model) fetchDetail(sgID string, seq uint64) tea.Cmd {
 	networkClient := m.networkClient
 	computeClient := m.computeClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[secgroupview] fetchDetail start")
 		if computeClient == nil {
 			shared.Debugf("[secgroupview] fetchDetail done (no compute client)")
 			return detailLoadedMsg{seq: seq, sgID: sgID}
 		}
 
-		fetchedPorts, err := network.ListPortsBySecurityGroup(context.Background(), networkClient, sgID)
+		fetchedPorts, err := network.ListPortsBySecurityGroup(ctx, networkClient, sgID)
 		if err != nil {
 			shared.Debugf("[secgroupview] fetchDetail error: %v", err)
 			return detailErrMsg{seq: seq, sgID: sgID, err: err}
@@ -1338,7 +1341,7 @@ func (m Model) fetchDetail(sgID string, seq uint64) tea.Cmd {
 			return detailLoadedMsg{seq: seq, sgID: sgID, ports: fetchedPorts}
 		}
 
-		allServers, err := compute.ListServers(context.Background(), computeClient)
+		allServers, err := compute.ListServers(ctx, computeClient)
 		if err != nil {
 			return detailErrMsg{seq: seq, sgID: sgID, err: err}
 		}

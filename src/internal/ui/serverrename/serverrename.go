@@ -1,7 +1,6 @@
 package serverrename
 
 import (
-	"context"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -127,8 +126,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	client := m.client
 	id := m.serverID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[serverrename] renaming server %s to %q", id, newName)
-		err := compute.RenameServer(context.Background(), client, id, newName)
+		err := compute.RenameServer(ctx, client, id, newName)
 		if err != nil {
 			shared.Debugf("[serverrename] error renaming server %s: %v", id, err)
 			return renameErrMsg{err: err}

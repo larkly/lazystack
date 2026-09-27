@@ -1,7 +1,6 @@
 package imageview
 
 import (
-	"context"
 	"fmt"
 	"image/color"
 	"sort"
@@ -1557,8 +1556,10 @@ func (m Model) fetchImages(seq uint64) tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[imageview] fetch images start")
-		imgs, err := img.ListImages(context.Background(), client)
+		imgs, err := img.ListImages(ctx, client)
 		if err != nil {
 			shared.Debugf("[imageview] fetch images error: %v", err)
 			return imagesErrMsg{seq: seq, err: err}
@@ -1580,8 +1581,10 @@ func (m *Model) startServersFetch() tea.Cmd {
 func (m Model) fetchServers(seq uint64) tea.Cmd {
 	client := m.computeClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[imageview] fetch servers start")
-		srvs, err := compute.ListServers(context.Background(), client)
+		srvs, err := compute.ListServers(ctx, client)
 		if err != nil {
 			shared.Debugf("[imageview] fetch servers error (non-fatal): %v", err)
 			return serversLoadedMsg{seq: seq, err: err}

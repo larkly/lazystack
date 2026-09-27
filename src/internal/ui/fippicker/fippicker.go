@@ -385,7 +385,9 @@ func (m Model) fetchUnassociatedFIPs() tea.Cmd {
 	client := m.client
 	projectID := m.projectID
 	return func() tea.Msg {
-		fips, err := network.ListFloatingIPs(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		fips, err := network.ListFloatingIPs(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -411,7 +413,8 @@ func (m Model) resolveTargets(fip *network.FloatingIP) tea.Cmd {
 	client := m.client
 	serverID := m.serverID
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		targets, err := network.ListFloatingIPTargets(ctx, client, serverID)
 		if err != nil {
 			shared.Debugf("[fippicker] error listing addresses for server %s: %v", serverID, err)
@@ -456,8 +459,10 @@ func (m Model) associateFIP(fip network.FloatingIP, target network.FloatingIPTar
 	fipID := fip.ID
 	fipAddr := fip.FloatingIP
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[fippicker] associating FIP %s (%s) to %s on server %s", fipID, fipAddr, target.Label(), serverName)
-		err := network.AssociateFloatingIPToAddress(context.Background(), client, fipID, target.PortID, target.IPAddress)
+		err := network.AssociateFloatingIPToAddress(ctx, client, fipID, target.PortID, target.IPAddress)
 		if err != nil {
 			shared.Debugf("[fippicker] error associating FIP %s: %v", fipID, err)
 			return associateErrMsg{err: err}
@@ -471,7 +476,8 @@ func (m Model) allocateAndAssociate(extNetID string, target network.FloatingIPTa
 	client := m.client
 	serverName := m.serverName
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[fippicker] allocating FIP from %s for %s on server %s", extNetID, target.Label(), serverName)
 		fip, err := network.AllocateFloatingIP(ctx, client, extNetID)
 		if err != nil {

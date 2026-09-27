@@ -1,7 +1,6 @@
 package lbmembercreate
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -635,6 +634,8 @@ func (m Model) submit() (Model, tea.Cmd) {
 		poolID := m.poolID
 		memberID := m.memberID
 		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			ctx, cancel := shared.RequestCtx()
+			defer cancel()
 			opts := loadbalancer.MemberUpdateOpts{
 				Name:              &name,
 				Weight:            &weight,
@@ -650,7 +651,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 			if monitorPort != nil {
 				opts.MonitorPort = monitorPort
 			}
-			err := loadbalancer.UpdateMember(context.Background(), client, poolID, memberID, opts)
+			err := loadbalancer.UpdateMember(ctx, client, poolID, memberID, opts)
 			if err != nil {
 				return memberCreateErrMsg{err: err}
 			}
@@ -695,7 +696,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 	poolID := m.poolID
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		_, err := loadbalancer.CreateMember(context.Background(), client, poolID, loadbalancer.MemberCreateOpts{
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		_, err := loadbalancer.CreateMember(ctx, client, poolID, loadbalancer.MemberCreateOpts{
 			Name:           name,
 			Address:        addr,
 			ProtocolPort:   port,
@@ -958,7 +961,9 @@ func (m Model) fetchServers() tea.Cmd {
 	client := m.computeClient
 	preferredVersion := m.preferredIPVer
 	return func() tea.Msg {
-		servers, err := compute.ListServers(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		servers, err := compute.ListServers(ctx, client)
 		if err != nil {
 			return memberServersErrMsg{err: err}
 		}

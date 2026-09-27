@@ -1,7 +1,6 @@
 package volumelist
 
 import (
-	"context"
 	"fmt"
 	"image/color"
 	"sort"
@@ -721,8 +720,10 @@ func (m Model) fetchVolumes(seq uint64) tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[volumelist] fetch start")
-		vols, err := volume.ListVolumes(context.Background(), client)
+		vols, err := volume.ListVolumes(ctx, client)
 		if err != nil {
 			shared.Debugf("[volumelist] fetch error: %v", err)
 			return volumesErrMsg{seq: seq, err: err}
@@ -749,9 +750,11 @@ func (m Model) fetchMissingServerNames() tea.Cmd {
 	}
 	client := m.computeClient
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		result := make(serverNamesMsg)
 		for id := range missing {
-			srv, err := compute.GetServer(context.Background(), client, id)
+			srv, err := compute.GetServer(ctx, client, id)
 			if err == nil && srv != nil {
 				result[id] = srv.Name
 			}

@@ -1,7 +1,6 @@
 package floatingiplist
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -381,8 +380,10 @@ func fipStatusStyle(status string) lipgloss.Style {
 func (m Model) fetchFIPs(seq uint64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[floatingiplist] fetch start")
-		fips, err := network.ListFloatingIPs(context.Background(), client)
+		fips, err := network.ListFloatingIPs(ctx, client)
 		if err != nil {
 			shared.Debugf("[floatingiplist] fetch error: %v", err)
 			return fipsErrMsg{seq: seq, err: err}

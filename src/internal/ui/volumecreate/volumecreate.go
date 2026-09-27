@@ -1,7 +1,6 @@
 package volumecreate
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -441,8 +440,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.err = ""
 	client := m.bsClient
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[volumecreate] creating volume %q (size=%dGB)", name, size)
-		vol, err := volume.CreateVolume(context.Background(), client, opts)
+		vol, err := volume.CreateVolume(ctx, client, opts)
 		if err != nil {
 			shared.Debugf("[volumecreate] error creating volume %q: %v", name, err)
 			return volumeCreateErrMsg{err: err}
@@ -592,7 +593,9 @@ func (m Model) renderPicker() string {
 func (m Model) fetchVolumeTypes() tea.Cmd {
 	client := m.bsClient
 	return func() tea.Msg {
-		types, err := volume.ListVolumeTypes(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		types, err := volume.ListVolumeTypes(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -603,7 +606,9 @@ func (m Model) fetchVolumeTypes() tea.Cmd {
 func (m Model) fetchAZs() tea.Cmd {
 	client := m.bsClient
 	return func() tea.Msg {
-		azs, err := volume.ListAvailabilityZones(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		azs, err := volume.ListAvailabilityZones(ctx, client)
 		return azsLoadedMsg{azs: azs, err: err}
 	}
 }

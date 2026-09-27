@@ -1,7 +1,6 @@
 package servercreate
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -919,8 +918,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[servercreate] creating server %q (count %d)", name, count)
-		srv, err := compute.CreateServerWithOpts(context.Background(), client, build(name, count))
+		srv, err := compute.CreateServerWithOpts(ctx, client, build(name, count))
 		if err != nil {
 			shared.Debugf("[servercreate] error creating server %q: %v", name, err)
 			return serverCreateErrMsg{err: err}
@@ -938,7 +939,9 @@ func createNamed(client *gophercloud.ServiceClient, names []string, build func(s
 	var created []string
 	for _, n := range names {
 		shared.Debugf("[servercreate] creating server %q", n)
-		srv, err := compute.CreateServerWithOpts(context.Background(), client, build(n, 1))
+		ctx, cancel := shared.RequestCtx()
+		srv, err := compute.CreateServerWithOpts(ctx, client, build(n, 1))
+		cancel()
 		if err != nil {
 			shared.Debugf("[servercreate] error creating server %q: %v", n, err)
 			if len(created) == 0 {
@@ -1218,7 +1221,9 @@ matchNetwork:
 func (m Model) fetchImages() tea.Cmd {
 	client := m.imageClient
 	return func() tea.Msg {
-		images, err := img.ListImages(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		images, err := img.ListImages(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -1229,7 +1234,9 @@ func (m Model) fetchImages() tea.Cmd {
 func (m Model) fetchFlavors() tea.Cmd {
 	client := m.computeClient
 	return func() tea.Msg {
-		flavors, err := compute.ListFlavors(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		flavors, err := compute.ListFlavors(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -1240,7 +1247,9 @@ func (m Model) fetchFlavors() tea.Cmd {
 func (m Model) fetchNetworks() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
-		nets, err := network.ListNetworks(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		nets, err := network.ListNetworks(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -1251,7 +1260,9 @@ func (m Model) fetchNetworks() tea.Cmd {
 func (m Model) fetchKeypairs() tea.Cmd {
 	client := m.computeClient
 	return func() tea.Msg {
-		kps, err := compute.ListKeyPairs(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		kps, err := compute.ListKeyPairs(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}
@@ -1262,7 +1273,9 @@ func (m Model) fetchKeypairs() tea.Cmd {
 func (m Model) fetchSecGroups() tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
-		sgs, err := network.ListSecurityGroups(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		sgs, err := network.ListSecurityGroups(ctx, client)
 		if err != nil {
 			return fetchErrMsg{err: err}
 		}

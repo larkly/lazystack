@@ -2,11 +2,14 @@ package volumedetail
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/testutil"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
@@ -108,5 +111,35 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	}
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")
+	}
+}
+
+// A server that sends headers and then stops mid-body must not hang the
+// fetch: the command's deadline cuts it off and reports an error.
+func TestStalledFetchIsCutOffByDeadline(t *testing.T) {
+	orig := shared.RequestTimeout
+	shared.RequestTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { shared.RequestTimeout = orig })
+
+	client, cleanup := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "4096")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"volume":{"id":"vol-1",`))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done() // stall until the client gives up
+	}))
+	defer cleanup()
+
+	m := New(client, nil, "vol-1")
+	done := make(chan tea.Msg, 1)
+	go func() { done <- m.fetchVolume(0)() }()
+	select {
+	case msg := <-done:
+		if _, ok := msg.(volumeDetailErrMsg); !ok {
+			t.Fatalf("got %T, want volumeDetailErrMsg", msg)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("stalled fetch was never cut off")
 	}
 }

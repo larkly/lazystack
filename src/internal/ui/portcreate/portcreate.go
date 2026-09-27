@@ -1,7 +1,6 @@
 package portcreate
 
 import (
-	"context"
 	"fmt"
 	"net/netip"
 	"sort"
@@ -115,7 +114,9 @@ func New(client *gophercloud.ServiceClient, networkID, networkName string, subne
 func (m Model) Init() tea.Cmd {
 	client := m.client
 	return tea.Batch(textinput.Blink, m.spinner.Tick, func() tea.Msg {
-		sgs, err := network.ListSecurityGroups(context.Background(), client)
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		sgs, err := network.ListSecurityGroups(ctx, client)
 		if err != nil {
 			return sgLoadErrMsg{err: err}
 		}
@@ -430,8 +431,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		shared.Debugf("[portcreate] creating port on network %s", m.networkID)
-		_, err := network.CreatePortFull(context.Background(), client, opts)
+		_, err := network.CreatePortFull(ctx, client, opts)
 		if err != nil {
 			shared.Debugf("[portcreate] error: %v", err)
 			return portCreateErrMsg{err: err}
