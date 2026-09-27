@@ -166,8 +166,11 @@ func DefaultKeybindings() map[string]string {
 		"jump_networks":   "N",
 		"ssh":             "x",
 		"copy_ssh":        "y",
+		"copy":            "Y",
 		"console_url":     "V",
 		"config":          "ctrl+k",
+		"hypervisors":     "H",
+		"user_management": "U",
 		"column_pick":     "ctrl+shift+c",
 	}
 }
