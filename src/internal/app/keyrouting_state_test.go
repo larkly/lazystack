@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -239,6 +241,70 @@ func TestCreateFormsReceiveUppercaseRAndY(t *testing.T) {
 	m.serverList = serverlist.New(nil, nil, time.Hour)
 	if _, cmd := m.Update(press("R")); cmd == nil {
 		t.Fatal("R on the server list should refresh")
+	}
+}
+
+func serverListWithServers(t *testing.T) Model {
+	t.Helper()
+	m, _ := actionFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/servers/detail":
+			fmt.Fprint(w, `{"servers":[{"id":"a","name":"alpha","status":"ACTIVE"},{"id":"b","name":"beta","status":"ACTIVE"},{"id":"c","name":"gamma","status":"ACTIVE"}]}`)
+		default:
+			fmt.Fprint(w, `{}`)
+		}
+	})
+	m.view = viewServerList
+	m.serverList = serverlist.New(m.client.Compute, m.client.Image, time.Hour)
+	m.serverList.SetConfig(m.configView.Cfg())
+	m.serverList.SetSize(m.width, m.height)
+	for _, msg := range commandMessages(m.serverList.Init()) {
+		m.serverList, _ = m.serverList.Update(msg)
+	}
+	if m.serverList.SelectedServer() == nil {
+		t.Fatal("setup: no servers loaded")
+	}
+	return m
+}
+
+func TestServerListEscClearsSelection(t *testing.T) {
+	m := serverListWithServers(t)
+	m.returnToView = viewServerDetail
+	m.serverDetail = testServerDetailWithServer("srv-1", "srv-1")
+	m, _ = typeKeys(t, m, " ", " ")
+	if m.serverList.SelectionCount() != 2 || !strings.Contains(m.statusBar.Hint, "esc clear") {
+		t.Fatalf("setup: selection=%d hint=%q", m.serverList.SelectionCount(), m.statusBar.Hint)
+	}
+	m, quit := typeKeys(t, m, "esc")
+	if quit || m.view != viewServerList || m.activeModal != modalNone {
+		t.Fatalf("esc with a selection navigated or acted: view=%v modal=%v quit=%v", m.view, m.activeModal, quit)
+	}
+	if m.serverList.SelectionCount() != 0 {
+		t.Fatalf("selection = %d after esc, want 0", m.serverList.SelectionCount())
+	}
+	if strings.Contains(m.statusBar.Hint, "selected") {
+		t.Fatalf("hint still advertises a selection: %q", m.statusBar.Hint)
+	}
+	// With nothing selected, esc keeps its back-navigation meaning.
+	m, _ = typeKeys(t, m, "esc")
+	if m.view != viewServerDetail {
+		t.Fatalf("second esc should return to detail, got view %v", m.view)
+	}
+}
+
+func TestServerListEscInFilterClearsFilterNotSelection(t *testing.T) {
+	m := serverListWithServers(t)
+	m, _ = typeKeys(t, m, " ", "/", "a")
+	m, _ = typeKeys(t, m, "esc")
+	if m.serverList.IsFiltering() {
+		t.Fatal("esc should leave filter mode")
+	}
+	if m.serverList.SelectionCount() != 1 {
+		t.Fatalf("filter esc must not clear the selection, got %d", m.serverList.SelectionCount())
 	}
 }
 

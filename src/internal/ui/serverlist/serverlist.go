@@ -287,6 +287,10 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.cursor = 0
 		}
 		m.ensureVisible()
+	case key.Matches(msg, shared.Keys.Back):
+		if len(m.selected) > 0 {
+			m.ClearSelection()
+		}
 	case key.Matches(msg, shared.Keys.Filter):
 		m.filtering = true
 		m.filter.Focus()

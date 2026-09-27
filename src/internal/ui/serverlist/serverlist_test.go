@@ -43,6 +43,25 @@ func TestEscClearsFilterAndExitsFiltering(t *testing.T) {
 	}
 }
 
+func TestEscClearsSelectionAsAdvertised(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.servers = []compute.Server{
+		{ID: "s-1", Name: "alpha"},
+		{ID: "s-2", Name: "beta"},
+	}
+	m.applyFilter()
+	for i := 0; i < 2; i++ {
+		m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	}
+	if m.SelectionCount() != 2 || !strings.Contains(m.Hints(), "esc clear") {
+		t.Fatalf("setup: selection=%d hints=%q", m.SelectionCount(), m.Hints())
+	}
+	m, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	if m.SelectionCount() != 0 || cmd != nil {
+		t.Fatalf("esc: selection=%d cmd=%v, want cleared with no command", m.SelectionCount(), cmd != nil)
+	}
+}
+
 func TestRenderServerRow_IPv6SuffixTruncation(t *testing.T) {
 	m := New(nil, nil, 5*time.Second)
 	m.columns = []Column{
