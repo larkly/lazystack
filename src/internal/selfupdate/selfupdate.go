@@ -175,6 +175,9 @@ func verifyChecksum(ctx context.Context, checksumsURL, gotHash string) error {
 	if err != nil {
 		return fmt.Errorf("downloading checksums: %w", err)
 	}
+	if err := verifyChecksumsSignature(ctx, checksumsURL, body); err != nil {
+		return err
+	}
 
 	assetName := fmt.Sprintf("lazystack-%s-%s", runtime.GOOS, runtime.GOARCH)
 	for _, line := range strings.Split(string(body), "\n") {

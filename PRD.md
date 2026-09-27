@@ -591,6 +591,7 @@ src/
 - `--update` flag downloads latest release from GitHub
 - `--no-check-update` skips automatic version check on startup
 - Downloads binary for current OS/architecture with SHA256 checksum verification
+- Trusts `SHA256SUMS` only with a valid Ed25519 signature (`SHA256SUMS.sig`) from the release key embedded in the binary; a missing or invalid signature aborts the update (see SECURITY.md)
 
 ### CLI Flags
 

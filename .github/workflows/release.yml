@@ -178,6 +178,17 @@ jobs:
     env:
       VERSION: ${{ needs.validate.outputs.version }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ needs.validate.outputs.version }}
+          path: source
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: source/src/go.mod
+          cache-dependency-path: source/src/go.sum
+
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -201,6 +212,22 @@ jobs:
             exit 1
           fi
           sha256sum -c --strict --quiet SHA256SUMS
+
+      # The self-updater only trusts SHA256SUMS with a valid Ed25519
+      # signature from the key embedded in the client, so a release is never
+      # published without SHA256SUMS.sig. releasesign also refuses a key that
+      # does not match selfupdate.ReleaseSigningPublicKey at this tag.
+      - name: Sign checksums
+        working-directory: source/src
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::RELEASE_SIGNING_KEY secret is not set; refusing to publish an unsigned release"
+            exit 1
+          fi
+          go run ./internal/selfupdate/cmd/releasesign sign "$GITHUB_WORKSPACE/dist/SHA256SUMS"
+          test -s "$GITHUB_WORKSPACE/dist/SHA256SUMS.sig"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
