@@ -20,7 +20,7 @@ func bodyRecorder(resource string, bodies *[]string) http.HandlerFunc {
 
 func TestUpdatePortNilSecurityGroupsSendsEmptyArray(t *testing.T) {
 	var bodies []string
-	client := fakeNeutronClient(bodyRecorder("port", &bodies))
+	client := fakeNeutronClient(t, bodyRecorder("port", &bodies))
 	var none []string
 	if err := UpdatePort(context.Background(), client, "p", PortUpdateOpts{SecurityGroups: &none}); err != nil {
 		t.Fatalf("UpdatePort: %v", err)
@@ -38,7 +38,7 @@ func TestUpdatePortNilSecurityGroupsSendsEmptyArray(t *testing.T) {
 
 func TestUpdateSubnetEmptyListsSerialiseAsArrays(t *testing.T) {
 	var bodies []string
-	client := fakeNeutronClient(bodyRecorder("subnet", &bodies))
+	client := fakeNeutronClient(t, bodyRecorder("subnet", &bodies))
 	var noDNS []string
 	noPools := []AllocationPool{}
 	if err := UpdateSubnet(context.Background(), client, "s", SubnetUpdateOpts{DNSNameservers: &noDNS, AllocationPools: &noPools}); err != nil {

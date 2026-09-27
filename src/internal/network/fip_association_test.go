@@ -25,7 +25,7 @@ func fipUpdateRecorder(t *testing.T, bodies *[]string) http.HandlerFunc {
 
 func TestAssociateFloatingIPRejectsEmptyPort(t *testing.T) {
 	var bodies []string
-	client := fakeNeutronClient(fipUpdateRecorder(t, &bodies))
+	client := fakeNeutronClient(t, fipUpdateRecorder(t, &bodies))
 	for _, port := range []string{"", "   "} {
 		if err := AssociateFloatingIP(context.Background(), client, "fip-1", port); err == nil {
 			t.Errorf("AssociateFloatingIP(%q) succeeded, want error", port)
@@ -38,7 +38,7 @@ func TestAssociateFloatingIPRejectsEmptyPort(t *testing.T) {
 
 func TestAssociateFloatingIPKeepsValidPortAndDisassociateSendsNull(t *testing.T) {
 	var bodies []string
-	client := fakeNeutronClient(fipUpdateRecorder(t, &bodies))
+	client := fakeNeutronClient(t, fipUpdateRecorder(t, &bodies))
 	if err := AssociateFloatingIP(context.Background(), client, "fip-1", "port-9"); err != nil {
 		t.Fatalf("AssociateFloatingIP: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestListFloatingIPTargetsAnnotatesRoutedIPv4Addresses(t *testing.T) {
 		{"id":"r1","external_gateway_info":{"network_id":"ext-1"}},
 		{"id":"r2","external_gateway_info":{"network_id":"ext-2"}},
 		{"id":"r3"}]}`
-	client := fakeNeutronClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := fakeNeutronClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/routers") {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(routersJSON))
@@ -109,7 +109,7 @@ func TestListFloatingIPTargetsAnnotatesRoutedIPv4Addresses(t *testing.T) {
 
 func TestAssociateFloatingIPToAddressSendsChosenPortAndAddress(t *testing.T) {
 	var bodies []string
-	client := fakeNeutronClient(fipUpdateRecorder(t, &bodies))
+	client := fakeNeutronClient(t, fipUpdateRecorder(t, &bodies))
 	if err := AssociateFloatingIPToAddress(context.Background(), client, "fip-1", "port-a", "10.0.0.5"); err != nil {
 		t.Fatalf("AssociateFloatingIPToAddress: %v", err)
 	}
