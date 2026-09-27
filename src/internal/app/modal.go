@@ -7,46 +7,6 @@ import (
 	"github.com/larkly/lazystack/internal/ui/imagedownload"
 )
 
-// isAnyModalActive checks all overlay/modals in priority order and returns
-// true if any of them is active. This replaces the ~25 if-blocks duplicated
-// between Update() and View().
-func (m *Model) isAnyModalActive() bool {
-	return m.activeModal != modalNone ||
-		m.cloneProgress.Active ||
-		m.serverRename.Active ||
-		m.serverRebuild.Active ||
-		m.serverSnapshot.Active ||
-		m.serverResize.Active ||
-		m.serverAdminAct.Active ||
-		m.serverMetadata.Active ||
-		m.sshPrompt.Active ||
-		m.copyPicker.Active ||
-		m.consoleURL.Active ||
-		m.vmPassword.Active ||
-		m.fipPicker.Active ||
-		m.serverPicker.Active ||
-		m.volumePicker.Active ||
-		m.routerCreate.Active ||
-		m.subnetPicker.Active ||
-		m.networkCreate.Active ||
-		m.subnetCreate.Active ||
-		m.subnetEdit.Active ||
-		m.portCreate.Active ||
-		m.portEdit.Active ||
-		m.sgCreate.Active ||
-		m.sgRuleCreate.Active ||
-		m.imageEdit.Active ||
-		m.imageCreate.Active ||
-		m.imageDownload.Active ||
-		m.lbCreate.Active ||
-		m.lbListenerCreate.Active ||
-		m.lbPoolCreate.Active ||
-		m.lbMemberCreate.Active ||
-		m.lbMonitorCreate.Active ||
-		m.projectPicker.Active ||
-		m.columnPicker.Active
-}
-
 // activeModalView returns the view string of whichever modal/overlay is active.
 // Returns ("", false) if no modal is active.
 func (m *Model) activeModalView() (string, bool) {
@@ -418,6 +378,10 @@ func (m *Model) updateAnyModalBackground(msg tea.Msg) tea.Cmd {
 		var cmd tea.Cmd
 		m.projectPicker, cmd = m.projectPicker.Update(msg)
 		return cmd
+	case m.serverMetadata.Active:
+		var cmd tea.Cmd
+		m.serverMetadata, cmd = m.serverMetadata.Update(msg)
+		return cmd
 	case m.cloneProgress.Running():
 		var cmd tea.Cmd
 		m.cloneProgress, cmd = m.cloneProgress.Update(msg)
@@ -434,6 +398,8 @@ func (m *Model) setSizeAllModals(w, h int) {
 	m.serverRebuild.SetSize(w, h)
 	m.serverSnapshot.SetSize(w, h)
 	m.serverResize.SetSize(w, h)
+	m.serverAdminAct.SetSize(w, h)
+	m.serverMetadata.SetSize(w, h)
 	m.sshPrompt.SetSize(w, h)
 	m.copyPicker.SetSize(w, h)
 	m.consoleURL.SetSize(w, h)
