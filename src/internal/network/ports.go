@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/portsecurity"
@@ -160,25 +161,73 @@ func FindRouterPortOnNetwork(ctx context.Context, client *gophercloud.ServiceCli
 	return result, nil
 }
 
-// AddFixedIPToPort adds a fixed IP to an existing port.
-func AddFixedIPToPort(ctx context.Context, client *gophercloud.ServiceClient, portID string, existing []FixedIP, subnetID, ipAddress string) error {
-	shared.Debugf("[network] adding fixed IP to port %s (subnet: %s, ip: %s)", portID, subnetID, ipAddress)
-	fixedIPs := make([]ports.IP, 0, len(existing)+1)
-	for _, ip := range existing {
-		fixedIPs = append(fixedIPs, ports.IP{
-			SubnetID:  ip.SubnetID,
-			IPAddress: ip.IPAddress,
-		})
-	}
-	newIP := ports.IP{SubnetID: subnetID}
-	if ipAddress != "" {
-		newIP.IPAddress = ipAddress
-	}
-	fixedIPs = append(fixedIPs, newIP)
+// fixedIPUpdateAttempts bounds how often a fixed-IP read-modify-write is
+// retried when Neutron reports that the port changed underneath it.
+const fixedIPUpdateAttempts = 3
 
-	_, err := ports.Update(ctx, client, portID, ports.UpdateOpts{
-		FixedIPs: fixedIPs,
-	}).Extract()
+// updatePortFixedIPs performs a read-modify-write of a port's fixed_ips. The
+// port is re-read before every attempt and, when Neutron exposes revision
+// numbers, the PUT carries an If-Match precondition so a concurrent change
+// fails with 412 and is retried against fresh state instead of being
+// silently overwritten. mutate returns the full new list and whether anything
+// changed; an unchanged list is not written.
+func updatePortFixedIPs(ctx context.Context, client *gophercloud.ServiceClient, portID string, mutate func(current []ports.IP) ([]ports.IP, bool, error)) error {
+	for attempt := 1; ; attempt++ {
+		p, err := ports.Get(ctx, client, portID).Extract()
+		if err != nil {
+			return fmt.Errorf("getting port %s: %w", portID, err)
+		}
+		next, changed, err := mutate(p.FixedIPs)
+		if err != nil || !changed {
+			return err
+		}
+		if next == nil {
+			// fixed_ips:null is rejected; removing the last address is [].
+			next = []ports.IP{}
+		}
+		opts := ports.UpdateOpts{FixedIPs: next}
+		if p.RevisionNumber > 0 {
+			rev := p.RevisionNumber
+			opts.RevisionNumber = &rev
+		}
+		_, err = ports.Update(ctx, client, portID, opts).Extract()
+		if err == nil {
+			return nil
+		}
+		if !gophercloud.ResponseCodeIs(err, http.StatusPreconditionFailed) {
+			return err
+		}
+		if attempt >= fixedIPUpdateAttempts {
+			return fmt.Errorf("port %s kept changing concurrently, giving up after %d attempts: %w", portID, attempt, err)
+		}
+		shared.Debugf("[network] port %s changed concurrently (revision %d), retrying", portID, p.RevisionNumber)
+	}
+}
+
+// copyFixedIPs returns the subnet/address pairs of ips as update values.
+func copyFixedIPs(ips []ports.IP) []ports.IP {
+	out := make([]ports.IP, 0, len(ips)+1)
+	for _, ip := range ips {
+		out = append(out, ports.IP{SubnetID: ip.SubnetID, IPAddress: ip.IPAddress})
+	}
+	return out
+}
+
+// AddFixedIPToPort adds a fixed IP to an existing port. The port's current
+// addresses are re-read so concurrent changes are preserved; adding an
+// address the port already has is a no-op. An empty ipAddress lets Neutron
+// allocate one from the subnet.
+func AddFixedIPToPort(ctx context.Context, client *gophercloud.ServiceClient, portID string, subnetID, ipAddress string) error {
+	shared.Debugf("[network] adding fixed IP to port %s (subnet: %s, ip: %s)", portID, subnetID, ipAddress)
+	err := updatePortFixedIPs(ctx, client, portID, func(current []ports.IP) ([]ports.IP, bool, error) {
+		for _, ip := range current {
+			if ipAddress != "" && ip.SubnetID == subnetID && ip.IPAddress == ipAddress {
+				shared.Debugf("[network] port %s already has %s on subnet %s", portID, ipAddress, subnetID)
+				return nil, false, nil
+			}
+		}
+		return append(copyFixedIPs(current), ports.IP{SubnetID: subnetID, IPAddress: ipAddress}), true, nil
+	})
 	if err != nil {
 		shared.Debugf("[network] add fixed IP to port %s: %v", portID, err)
 		return fmt.Errorf("adding fixed IP to port %s: %w", portID, err)
@@ -188,28 +237,22 @@ func AddFixedIPToPort(ctx context.Context, client *gophercloud.ServiceClient, po
 }
 
 // RemoveFixedIPFromPort removes a single fixed IP (by subnet ID) from a port,
-// keeping all other fixed IPs intact.
+// keeping all other fixed IPs intact. It fails without writing when the port
+// has no address on the subnet.
 func RemoveFixedIPFromPort(ctx context.Context, client *gophercloud.ServiceClient, portID, subnetID string) error {
 	shared.Debugf("[network] removing fixed IP from port %s (subnet: %s)", portID, subnetID)
-	p, err := ports.Get(ctx, client, portID).Extract()
-	if err != nil {
-		shared.Debugf("[network] remove fixed IP from port %s: get port: %v", portID, err)
-		return fmt.Errorf("getting port %s: %w", portID, err)
-	}
-
-	var remaining []ports.IP
-	for _, ip := range p.FixedIPs {
-		if ip.SubnetID != subnetID {
-			remaining = append(remaining, ports.IP{
-				SubnetID:  ip.SubnetID,
-				IPAddress: ip.IPAddress,
-			})
+	err := updatePortFixedIPs(ctx, client, portID, func(current []ports.IP) ([]ports.IP, bool, error) {
+		remaining := make([]ports.IP, 0, len(current))
+		for _, ip := range current {
+			if ip.SubnetID != subnetID {
+				remaining = append(remaining, ports.IP{SubnetID: ip.SubnetID, IPAddress: ip.IPAddress})
+			}
 		}
-	}
-
-	_, err = ports.Update(ctx, client, portID, ports.UpdateOpts{
-		FixedIPs: remaining,
-	}).Extract()
+		if len(remaining) == len(current) {
+			return nil, false, fmt.Errorf("port %s has no fixed IP on subnet %s", portID, subnetID)
+		}
+		return remaining, true, nil
+	})
 	if err != nil {
 		shared.Debugf("[network] remove fixed IP from port %s: %v", portID, err)
 		return fmt.Errorf("removing fixed IP from port %s: %w", portID, err)

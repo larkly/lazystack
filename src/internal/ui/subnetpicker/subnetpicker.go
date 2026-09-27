@@ -293,7 +293,7 @@ func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, rout
 
 		if existing != nil {
 			shared.Debugf("[subnetpicker] router %s already has port %s on network %s, adding fixed IP", routerID, existing.ID, sub.NetworkID)
-			err = network.AddFixedIPToPort(ctx, client, existing.ID, existing.FixedIPs, sub.ID, ipStr)
+			err = network.AddFixedIPToPort(ctx, client, existing.ID, sub.ID, ipStr)
 			if err != nil {
 				shared.Debugf("[subnetpicker] error adding fixed IP to port %s: %v", existing.ID, err)
 				return interfaceAddErrMsg{err: err}
