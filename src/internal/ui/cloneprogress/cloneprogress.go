@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -30,46 +31,90 @@ type VolumeOp struct {
 }
 
 // AllCompleteMsg is sent when all volume operations finish successfully.
-type AllCompleteMsg struct{}
+type AllCompleteMsg struct {
+	Op         uint64 // ID of the clone operation that completed
+	ServerName string
+}
 
 // RollbackCompleteMsg is sent after rollback finishes.
 type RollbackCompleteMsg struct {
+	Op     uint64  // ID of the clone operation that was rolled back
 	Cause  error   // the original error that triggered rollback
 	Errors []error // errors during cleanup
 }
 
+// Every internal message carries the ID of the clone operation that issued
+// it, so a late reply from a dismissed clone can never mutate another one.
+
 type volumeCreatedMsg struct {
+	op    uint64
 	idx   int
 	volID string
 	err   error
 }
 
 type volumeStatusMsg struct {
+	op     uint64
 	idx    int
 	status string
 	err    error
 }
 
 type volumeAttachedMsg struct {
+	op  uint64
 	idx int
 	err error
 }
 
 type rollbackDoneMsg struct {
+	op     uint64
 	cause  error
 	errors []error
 }
 
 type serverReadyMsg struct {
+	op    uint64
 	ready bool
 	err   error
 }
 
-type pollTickMsg struct{}
+type pollTickMsg struct {
+	op uint64
+}
+
+// lastOpID hands out a unique ID to every clone operation.
+var lastOpID atomic.Uint64
+
+// OpID returns the clone operation ID carried by msg, and false when msg
+// is not a clone progress message.
+func OpID(msg tea.Msg) (uint64, bool) {
+	switch msg := msg.(type) {
+	case AllCompleteMsg:
+		return msg.Op, true
+	case RollbackCompleteMsg:
+		return msg.Op, true
+	case volumeCreatedMsg:
+		return msg.op, true
+	case volumeStatusMsg:
+		return msg.op, true
+	case volumeAttachedMsg:
+		return msg.op, true
+	case rollbackDoneMsg:
+		return msg.op, true
+	case serverReadyMsg:
+		return msg.op, true
+	case pollTickMsg:
+		return msg.op, true
+	case volumeNamesResolvedMsg:
+		return msg.op, true
+	}
+	return 0, false
+}
 
 // Model is the clone progress modal.
 type Model struct {
 	Active        bool
+	op            uint64
 	computeClient *gophercloud.ServiceClient
 	volumeClient  *gophercloud.ServiceClient
 	serverID      string
@@ -92,6 +137,7 @@ func New(computeClient, volumeClient *gophercloud.ServiceClient, serverID, serve
 	s.Spinner = spinner.Dot
 	return Model{
 		Active:        true,
+		op:            lastOpID.Add(1),
 		computeClient: computeClient,
 		volumeClient:  volumeClient,
 		serverID:      serverID,
@@ -103,6 +149,7 @@ func New(computeClient, volumeClient *gophercloud.ServiceClient, serverID, serve
 }
 
 type volumeNamesResolvedMsg struct {
+	op  uint64
 	ops []VolumeOp
 }
 
@@ -111,6 +158,7 @@ func (m Model) Init() tea.Cmd {
 	shared.Debugf("[cloneprogress] clone start server=%q volumes=%d", m.serverName, len(m.volumes))
 	client := m.volumeClient
 	ops := m.volumes
+	op := m.op
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
 		// Fetch existing volume names for display and dedup
 		existingNames := make(map[string]bool)
@@ -136,8 +184,18 @@ func (m Model) Init() tea.Cmd {
 			}
 			existingNames[resolved[i].CloneName] = true
 		}
-		return volumeNamesResolvedMsg{ops: resolved}
+		return volumeNamesResolvedMsg{op: op, ops: resolved}
 	})
+}
+
+// ID returns the unique ID of this clone operation.
+func (m Model) ID() uint64 {
+	return m.op
+}
+
+// validIdx reports whether idx addresses one of this clone's volumes.
+func (m Model) validIdx(idx int) bool {
+	return idx >= 0 && idx < len(m.volumes)
 }
 
 // Running returns true if operations are still in progress.
@@ -152,6 +210,10 @@ func (m Model) ServerName() string {
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if op, ok := OpID(msg); ok && op != m.op {
+		shared.Debugf("[cloneprogress] ignoring message for clone op %d (this is %d)", op, m.op)
+		return m, nil
+	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if key.Matches(msg, shared.Keys.Back) && m.Active {
@@ -174,6 +236,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case volumeNamesResolvedMsg:
+		if !m.running || len(msg.ops) != len(m.volumes) {
+			return m, nil
+		}
 		m.volumes = msg.ops
 		cmds := make([]tea.Cmd, len(m.volumes))
 		for i, op := range m.volumes {
@@ -182,6 +247,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case volumeCreatedMsg:
+		if !m.validIdx(msg.idx) || !m.running {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.volumes[msg.idx].Status = "error"
 			m.volumes[msg.idx].Err = msg.err
@@ -218,6 +286,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case volumeStatusMsg:
+		if !m.validIdx(msg.idx) || !m.running || m.failed {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.volumes[msg.idx].Status = "error"
 			m.volumes[msg.idx].Err = msg.err
@@ -240,6 +311,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case serverReadyMsg:
+		if !m.running || m.failed {
+			return m, nil
+		}
 		if msg.err != nil {
 			// Non-fatal — retry on next poll
 			return m, m.schedulePoll()
@@ -249,6 +323,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Attach all volumes that were waiting
 			var cmds []tea.Cmd
 			for _, idx := range m.pendingAttach {
+				if !m.validIdx(idx) {
+					continue
+				}
 				m.volumes[idx].Status = "attaching"
 				cmds = append(cmds, m.attachVolume(idx))
 			}
@@ -260,11 +337,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 		// Not ready yet — poll again
-		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg {
-			return pollTickMsg{}
-		})
+		return m, m.schedulePoll()
 
 	case volumeAttachedMsg:
+		if !m.validIdx(msg.idx) || !m.running || m.failed {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.volumes[msg.idx].Status = "error"
 			m.volumes[msg.idx].Err = msg.err
@@ -276,15 +354,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.allDone() {
 			m.running = false
 			shared.Debugf("[cloneprogress] all volumes cloned and attached successfully")
-			return m, func() tea.Msg { return AllCompleteMsg{} }
+			op, name := m.op, m.serverName
+			return m, func() tea.Msg { return AllCompleteMsg{Op: op, ServerName: name} }
 		}
 		return m, nil
 
 	case rollbackDoneMsg:
+		if !m.rollingBack {
+			return m, nil
+		}
 		m.running = false
 		m.rollingBack = false
+		op := m.op
 		return m, func() tea.Msg {
-			return RollbackCompleteMsg{Cause: msg.cause, Errors: msg.errors}
+			return RollbackCompleteMsg{Op: op, Cause: msg.cause, Errors: msg.errors}
 		}
 	}
 	return m, nil
@@ -357,11 +440,12 @@ func (m *Model) SetSize(w, h int) {
 
 func (m Model) createVolume(idx int, op VolumeOp) tea.Cmd {
 	client := m.volumeClient
+	opID := m.op
 	return func() tea.Msg {
 		// Get source volume to determine size
 		src, err := volume.GetVolume(context.Background(), client, op.SourceVolID)
 		if err != nil {
-			return volumeCreatedMsg{idx: idx, err: fmt.Errorf("fetching source volume: %w", err)}
+			return volumeCreatedMsg{op: opID, idx: idx, err: fmt.Errorf("fetching source volume: %w", err)}
 		}
 		opts := bsvolumes.CreateOpts{
 			Name:        op.CloneName,
@@ -371,15 +455,16 @@ func (m Model) createVolume(idx int, op VolumeOp) tea.Cmd {
 		}
 		vol, err := volume.CreateVolume(context.Background(), client, opts)
 		if err != nil {
-			return volumeCreatedMsg{idx: idx, err: err}
+			return volumeCreatedMsg{op: opID, idx: idx, err: err}
 		}
-		return volumeCreatedMsg{idx: idx, volID: vol.ID}
+		return volumeCreatedMsg{op: opID, idx: idx, volID: vol.ID}
 	}
 }
 
 func (m Model) schedulePoll() tea.Cmd {
+	op := m.op
 	return tea.Tick(pollInterval, func(time.Time) tea.Msg {
-		return pollTickMsg{}
+		return pollTickMsg{op: op}
 	})
 }
 
@@ -391,12 +476,13 @@ func (m Model) pollVolumes() tea.Cmd {
 			idx := i
 			volID := op.CloneVolID
 			client := m.volumeClient
+			op := m.op
 			cmds = append(cmds, func() tea.Msg {
 				vol, err := volume.GetVolume(context.Background(), client, volID)
 				if err != nil {
-					return volumeStatusMsg{idx: idx, err: err}
+					return volumeStatusMsg{op: op, idx: idx, err: err}
 				}
-				return volumeStatusMsg{idx: idx, status: vol.Status}
+				return volumeStatusMsg{op: op, idx: idx, status: vol.Status}
 			})
 		}
 	}
@@ -446,12 +532,13 @@ func (m Model) tryAttach(idx int) (Model, tea.Cmd) {
 func (m Model) checkServerReady() tea.Cmd {
 	client := m.computeClient
 	id := m.serverID
+	op := m.op
 	return func() tea.Msg {
 		srv, err := compute.GetServer(context.Background(), client, id)
 		if err != nil {
-			return serverReadyMsg{err: err}
+			return serverReadyMsg{op: op, err: err}
 		}
-		return serverReadyMsg{ready: srv.Status == "ACTIVE"}
+		return serverReadyMsg{op: op, ready: srv.Status == "ACTIVE"}
 	}
 }
 
@@ -459,9 +546,10 @@ func (m Model) attachVolume(idx int) tea.Cmd {
 	volID := m.volumes[idx].CloneVolID
 	serverID := m.serverID
 	computeClient := m.computeClient
+	op := m.op
 	return func() tea.Msg {
 		_, err := volume.AttachVolume(context.Background(), computeClient, serverID, volID)
-		return volumeAttachedMsg{idx: idx, err: err}
+		return volumeAttachedMsg{op: op, idx: idx, err: err}
 	}
 }
 
@@ -474,8 +562,10 @@ func (m Model) allDone() bool {
 	return true
 }
 
+// startRollback cleans up the resources owned by this clone operation. It
+// runs at most once per operation.
 func (m Model) startRollback() (Model, tea.Cmd) {
-	if m.rollingBack {
+	if m.failed || m.rollingBack {
 		return m, nil
 	}
 	m.failed = true
@@ -501,6 +591,7 @@ func (m Model) startRollback() (Model, tea.Cmd) {
 	volumeClient := m.volumeClient
 	computeClient := m.computeClient
 	serverID := m.serverID
+	op := m.op
 
 	return m, func() tea.Msg {
 		var errs []error
@@ -514,6 +605,6 @@ func (m Model) startRollback() (Model, tea.Cmd) {
 		if err := compute.DeleteServer(context.Background(), computeClient, serverID); err != nil {
 			errs = append(errs, fmt.Errorf("delete server %s: %w", serverID, err))
 		}
-		return rollbackDoneMsg{cause: cause, errors: errs}
+		return rollbackDoneMsg{op: op, cause: cause, errors: errs}
 	}
 }

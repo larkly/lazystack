@@ -428,3 +428,36 @@ func (m *Model) setSizeAllModals(w, h int) {
 	m.columnPicker.SetSize(w, h)
 	m.cloneProgress.SetSize(w, h)
 }
+
+// updateClone routes a clone progress message to the clone operation with
+// the given ID. Messages for unknown operations are dropped.
+func (m *Model) updateClone(op uint64, msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	if m.cloneProgress.ID() == op {
+		m.cloneProgress, cmd = m.cloneProgress.Update(msg)
+		return cmd
+	}
+	for i := range m.cloneBackground {
+		if m.cloneBackground[i].ID() == op {
+			m.cloneBackground[i], cmd = m.cloneBackground[i].Update(msg)
+			return cmd
+		}
+	}
+	return nil
+}
+
+// finishClone stops tracking a finished clone operation. It reports false
+// when no tracked clone has that ID (for example a duplicate completion).
+func (m *Model) finishClone(op uint64) bool {
+	if m.cloneProgress.ID() == op {
+		m.cloneProgress.Active = false
+		return true
+	}
+	for i := range m.cloneBackground {
+		if m.cloneBackground[i].ID() == op {
+			m.cloneBackground = append(m.cloneBackground[:i], m.cloneBackground[i+1:]...)
+			return true
+		}
+	}
+	return false
+}

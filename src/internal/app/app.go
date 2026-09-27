@@ -189,6 +189,7 @@ type Model struct {
 	lbMemberCreate      lbmembercreate.Model
 	lbMonitorCreate     lbmonitorcreate.Model
 	cloneProgress       cloneprogress.Model
+	cloneBackground     []cloneprogress.Model // dismissed clones still running
 	statusBar           statusbar.Model
 	tabs                []TabDef
 	activeTab           int
@@ -1310,6 +1311,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 
+		// A clone still running in the background keeps being tracked so
+		// its remaining steps, completion or rollback are not lost.
+		if m.cloneProgress.Running() {
+			m.cloneProgress.Active = false
+			m.cloneBackground = append(m.cloneBackground, m.cloneProgress)
+		}
 		m.cloneProgress = cloneprogress.New(m.client.Compute, m.client.BlockStorage, msg.Server.ID, msg.Server.Name, ops)
 		m.cloneProgress.SetSize(m.width, m.height)
 		return m, tea.Batch(
@@ -1318,12 +1325,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case cloneprogress.AllCompleteMsg:
-		m.cloneProgress.Active = false
-		m.statusBar.StickyHint = fmt.Sprintf("✓ Clone complete — all volumes attached to %s", m.cloneProgress.ServerName())
+		if !m.finishClone(msg.Op) {
+			return m, nil
+		}
+		m.statusBar.StickyHint = fmt.Sprintf("✓ Clone complete — all volumes attached to %s", msg.ServerName)
 		return m, nil
 
 	case cloneprogress.RollbackCompleteMsg:
-		m.cloneProgress.Active = false
+		if !m.finishClone(msg.Op) {
+			return m, nil
+		}
 		m.errModal = modal.NewError("Clone Failed", msg.Cause)
 		m.errModal.SetSize(m.width, m.height)
 		m.activeModal = modalError
@@ -1352,6 +1363,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	default:
+		// Clone progress messages go to the clone operation that issued
+		// them, whether it is on screen or running in the background.
+		if op, ok := cloneprogress.OpID(msg); ok {
+			return m, m.updateClone(op, msg)
+		}
 		// Idle timeout: swallow ticks when paused, or pause if idle too long
 		if _, ok := msg.(shared.TickMsg); ok {
 			if m.idlePaused {
