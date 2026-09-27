@@ -327,8 +327,10 @@ func TestListCloudNames_DetailedCloudsYaml(t *testing.T) {
 // Tests added for #37 Phase 4 — cloud config & discovery
 // ---------------------------------------------------------------------------
 
-func fakeProviderClient(handler http.Handler) *gophercloud.ProviderClient {
+func fakeProviderClient(t testing.TB, handler http.Handler) *gophercloud.ProviderClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ProviderClient{
 		HTTPClient:       *srv.Client(),
 		IdentityBase:     srv.URL + "/",
@@ -356,7 +358,7 @@ func TestListAccessibleProjects(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	pc := fakeProviderClient(handler)
+	pc := fakeProviderClient(t, handler)
 	srvURL = pc.IdentityEndpoint // capture after creation
 	// Provide an EndpointLocator so NewIdentityV3 can resolve the endpoint.
 	// The locator must return a valid URL; we return the test server base.

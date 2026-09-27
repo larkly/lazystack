@@ -11,8 +11,10 @@ import (
 )
 
 // fakeIdentityClient creates a test ProviderClient wired to a Keystone API handler.
-func fakeIdentityClient(handler http.Handler) *gophercloud.ProviderClient {
+func fakeIdentityClient(t testing.TB, handler http.Handler) *gophercloud.ProviderClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	pc := &gophercloud.ProviderClient{
 		HTTPClient:       *srv.Client(),
 		IdentityBase:     srv.URL + "/",
@@ -37,7 +39,7 @@ func TestListAccessibleProjects_Empty(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	pc := fakeIdentityClient(handler)
+	pc := fakeIdentityClient(t, handler)
 	eo := gophercloud.EndpointOpts{}
 	ctx := context.Background()
 
@@ -69,7 +71,7 @@ func TestListAccessibleProjects_AllDisabled(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	pc := fakeIdentityClient(handler)
+	pc := fakeIdentityClient(t, handler)
 	eo := gophercloud.EndpointOpts{}
 	ctx := context.Background()
 
@@ -94,5 +96,21 @@ func TestListAccessibleProjects_IdentityError(t *testing.T) {
 	_, err := ListAccessibleProjects(ctx, pc, eo)
 	if err == nil {
 		t.Error("expected error for unreachable identity endpoint, got nil")
+	}
+}
+
+// Fake clients must shut their test server down when the test that created
+// them finishes, so repeated tests do not accumulate listeners.
+func TestFakeClientsCloseWithTest(t *testing.T) {
+	var endpoints []string
+	t.Run("use", func(t *testing.T) {
+		endpoints = append(endpoints, fakeIdentityClient(t, http.NotFoundHandler()).IdentityEndpoint)
+		endpoints = append(endpoints, fakeProviderClient(t, http.NotFoundHandler()).IdentityEndpoint)
+	})
+	for _, ep := range endpoints {
+		if resp, err := http.Get(ep); err == nil {
+			resp.Body.Close()
+			t.Errorf("test server %s still running after its test finished", ep)
+		}
 	}
 }

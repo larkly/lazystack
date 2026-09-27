@@ -69,8 +69,10 @@ const subnetsFixture = `{
   ]
 }`
 
-func fakeNeutronClientNetworks(handler http.Handler) *gophercloud.ServiceClient {
+func fakeNeutronClientNetworks(t testing.TB, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -90,7 +92,7 @@ func TestListNetworks(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNeutronClientNetworks(handler)
+	client := fakeNeutronClientNetworks(t, handler)
 	ctx := context.Background()
 
 	nets, err := ListNetworks(ctx, client)
@@ -147,7 +149,7 @@ func TestListSubnets(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNeutronClientNetworks(handler)
+	client := fakeNeutronClientNetworks(t, handler)
 	ctx := context.Background()
 
 	subs, err := ListSubnets(ctx, client)

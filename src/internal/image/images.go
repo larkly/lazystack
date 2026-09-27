@@ -114,7 +114,13 @@ func UpdateImage(ctx context.Context, client *gophercloud.ServiceClient, id stri
 		patches = append(patches, images.ReplaceImageMinRam{NewMinRam: *opts.MinRAM})
 	}
 	if opts.Tags != nil {
-		patches = append(patches, images.ReplaceImageTags{NewTags: *opts.Tags})
+		// A nil slice would encode as JSON null, which Glance rejects; an
+		// explicit clear must be sent as an empty array.
+		tags := *opts.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		patches = append(patches, images.ReplaceImageTags{NewTags: tags})
 	}
 	if opts.Protected != nil {
 		patches = append(patches, images.ReplaceImageProtected{NewProtected: *opts.Protected})
