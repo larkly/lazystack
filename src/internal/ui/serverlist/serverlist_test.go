@@ -9,6 +9,38 @@ import (
 	"github.com/larkly/lazystack/internal/compute"
 )
 
+func TestDescendingSortKeepsTiesStable(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.filtered = []compute.Server{
+		{ID: "s-1", Name: "a", Status: "SHUTOFF"},
+		{ID: "s-2", Name: "b", Status: "ACTIVE"},
+		{ID: "s-3", Name: "c", Status: "SHUTOFF"},
+		{ID: "s-4", Name: "d", Status: "SHUTOFF"},
+	}
+	m.sortCol = -1
+	for i := 0; m.visibleColKey(i) != ""; i++ {
+		if m.visibleColKey(i) == "status" {
+			m.sortCol = i
+		}
+	}
+	if m.sortCol < 0 {
+		t.Fatal("status column not visible by default")
+	}
+	m.sortAsc = false
+	m.sortServers()
+
+	want := []string{"s-1", "s-3", "s-4", "s-2"}
+	for i, s := range m.filtered {
+		if s.ID != want[i] {
+			var got []string
+			for _, g := range m.filtered {
+				got = append(got, g.ID)
+			}
+			t.Fatalf("descending by status = %v, want %v (ties must keep input order)", got, want)
+		}
+	}
+}
+
 func TestEscClearsFilterAndExitsFiltering(t *testing.T) {
 	m := New(nil, nil, 5*time.Second)
 	m.servers = []compute.Server{
