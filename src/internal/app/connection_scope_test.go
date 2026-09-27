@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -72,7 +73,10 @@ func isRefreshTick(msg tea.Msg) bool {
 	return strings.HasSuffix(name, "TickMsg") && !strings.Contains(name, "spinner")
 }
 
-func deliver(m Model, msgs []tea.Msg) (Model, []tea.Msg) {
+// errTest is a generic error for result messages in tests.
+var errTest = errors.New("test error")
+
+func deliverMsgs(m Model, msgs []tea.Msg) (Model, []tea.Msg) {
 	var out []tea.Msg
 	for _, msg := range msgs {
 		next, cmd := m.Update(msg)
@@ -92,8 +96,8 @@ func TestOldConnectionListResultIsDiscarded(t *testing.T) {
 	heldOld := quickMessages(cmdOld) // old project's list response, held back
 	next, cmdNew := m.Update(newCloud.connected())
 	m = next.(Model)
-	m, _ = deliver(m, quickMessages(cmdNew))
-	m, _ = deliver(m, heldOld)
+	m, _ = deliverMsgs(m, quickMessages(cmdNew))
+	m, _ = deliverMsgs(m, heldOld)
 	if s := m.serverList.SelectedServer(); s != nil {
 		t.Fatalf("old project's server %q leaked into the new connection", s.Name)
 	}
@@ -117,11 +121,11 @@ func TestOldTicksDoNotChainAfterReconnectOrResume(t *testing.T) {
 		t.Fatalf("setup: reconnect scheduled %d ticks", len(liveTicks))
 	}
 
-	m, out := deliver(m, oldTicks)
+	m, out := deliverMsgs(m, oldTicks)
 	if n := len(filterTicks(out)); n != 0 {
 		t.Fatalf("old connection's tick chained %d more ticks", n)
 	}
-	m, out = deliver(m, liveTicks)
+	m, out = deliverMsgs(m, liveTicks)
 	if n := len(filterTicks(out)); n != 1 {
 		t.Fatalf("live tick chained %d ticks, want 1", n)
 	}
@@ -135,7 +139,7 @@ func TestOldTicksDoNotChainAfterReconnectOrResume(t *testing.T) {
 	if n := len(filterTicks(quickMessages(cmd))); n != 1 {
 		t.Fatalf("resume started %d chains", n)
 	}
-	_, out = deliver(m, staleAfterResume)
+	_, out = deliverMsgs(m, staleAfterResume)
 	if n := len(filterTicks(out)); n != 0 {
 		t.Fatalf("pre-pause tick chained %d ticks after resume", n)
 	}
@@ -166,7 +170,7 @@ func TestCloudSwitchResetsProjectIdentityFromToken(t *testing.T) {
 		t.Fatalf("old project list survived the switch: %v", m.projects)
 	}
 	// The project list fails: surface it without losing the token scope.
-	m, _ = deliver(m, quickMessages(cmd))
+	m, _ = deliverMsgs(m, quickMessages(cmd))
 	if m.currentProjectID != "new-id" {
 		t.Fatalf("project list failure changed scope to %q", m.currentProjectID)
 	}
@@ -203,8 +207,8 @@ func TestStaleProjectListIsDiscarded(t *testing.T) {
 	heldA := quickMessages(cmdA)
 	next, cmdB := m.Update(b.connected())
 	m = next.(Model)
-	m, _ = deliver(m, quickMessages(cmdB))
-	m, _ = deliver(m, heldA)
+	m, _ = deliverMsgs(m, quickMessages(cmdB))
+	m, _ = deliverMsgs(m, heldA)
 	for _, p := range m.projects {
 		if strings.HasPrefix(p.ID, "a") {
 			t.Fatalf("stale project list from the previous cloud applied: %v", m.projects)

@@ -53,17 +53,17 @@ func loadedModel(t *testing.T, w, h int, srv *compute.Server) Model {
 	t.Helper()
 	m := New(nil, nil, nil, "srv-1", 0)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	m, _ = m.Update(serverDetailLoadedMsg{server: srv})
+	m, _ = m.Update(serverDetailLoadedMsg{inst: m.inst, server: srv})
 	var console []string
 	for i := 1; i <= 100; i++ {
 		console = append(console, fmt.Sprintf("LINE-%03d", i))
 	}
-	m, _ = m.Update(consoleLoadedMsg{output: strings.Join(console, "\n")})
+	m, _ = m.Update(consoleLoadedMsg{inst: m.inst, output: strings.Join(console, "\n")})
 	var actions []compute.Action
 	for i := 0; i < 40; i++ {
 		actions = append(actions, compute.Action{Action: fmt.Sprintf("act-%02d", i)})
 	}
-	m, _ = m.Update(actionsLoadedMsg{actions: actions})
+	m, _ = m.Update(actionsLoadedMsg{inst: m.inst, actions: actions})
 	var ports []network.Port
 	for i := 0; i < 15; i++ {
 		ports = append(ports, network.Port{
@@ -73,7 +73,7 @@ func loadedModel(t *testing.T, w, h int, srv *compute.Server) Model {
 			NetworkID:  fmt.Sprintf("net-id-%02d", i),
 		})
 	}
-	m, _ = m.Update(interfacesLoadedMsg{ports: ports})
+	m, _ = m.Update(interfacesLoadedMsg{inst: m.inst, ports: ports})
 	return m
 }
 
@@ -110,7 +110,7 @@ func TestViewFitsViewport(t *testing.T) {
 
 			resize := bigServer(20)
 			resize.Status = "VERIFY_RESIZE"
-			m, _ = m.Update(serverDetailLoadedMsg{server: resize})
+			m, _ = m.Update(serverDetailLoadedMsg{inst: m.inst, server: resize})
 			assertFitsViewport(t, m, sz.w, sz.h)
 		})
 	}
@@ -240,7 +240,7 @@ func TestVolumeCursorStaysVisible(t *testing.T) {
 	}
 
 	// Shrinking the attachment list reclamps cursor and scroll.
-	m, _ = m.Update(serverDetailLoadedMsg{server: bigServer(3)})
+	m, _ = m.Update(serverDetailLoadedMsg{inst: m.inst, server: bigServer(3)})
 	if m.volumeCursor != 2 || m.volumeScroll != 0 {
 		t.Fatalf("after shrink cursor=%d scroll=%d", m.volumeCursor, m.volumeScroll)
 	}
