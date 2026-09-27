@@ -2,8 +2,10 @@ package subnetedit
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -128,5 +130,52 @@ func TestUnnamedSubnetWithShortIDSubmits(t *testing.T) {
 		if !ok || !utf8.ValidString(msg.name) {
 			t.Fatalf("id %q: result %#v", id, msg)
 		}
+	}
+}
+
+// Long list fields must survive the pre-fill: textinput truncates SetValue
+// to CharLimit, which would drop entries (or cut one mid-address) on a save
+// that only touched the name.
+func TestLongListFieldsNotTruncatedOnPrefill(t *testing.T) {
+	var bodies []map[string]any
+	client, cleanup := testutil.FakeServiceClient(subnetPutRecorder(t, &bodies))
+	t.Cleanup(cleanup)
+	sub := network.Subnet{ID: "sub-1", Name: "app", CIDR: "10.0.0.0/16", GatewayIP: "10.0.0.1"}
+	for i := range 40 {
+		sub.HostRoutes = append(sub.HostRoutes, network.HostRoute{
+			DestinationCIDR: fmt.Sprintf("172.16.%d.0/24", i), NextHop: fmt.Sprintf("10.0.0.%d", 100+i),
+		})
+		sub.AllocationPools = append(sub.AllocationPools, network.AllocationPool{
+			Start: fmt.Sprintf("10.0.%d.10", i+1), End: fmt.Sprintf("10.0.%d.200", i+1),
+		})
+	}
+	for i := range 10 {
+		sub.DNSNameservers = append(sub.DNSNameservers, fmt.Sprintf("2001:db8:ffff:ffff:ffff:ffff:ffff:%04x", i))
+	}
+	m := New(client, sub)
+	m.nameInput.SetValue("app-renamed")
+	m, cmd := m.submit()
+	if _, ok := runSubmit(cmd).(subnetUpdatedMsg); !ok {
+		t.Fatalf("submit failed: err=%q bodies=%v", m.err, bodies)
+	}
+	if len(bodies) != 1 {
+		t.Fatalf("PUTs = %v", bodies)
+	}
+	for _, field := range []string{"dns_nameservers", "allocation_pools", "host_routes"} {
+		if v, present := bodies[0][field]; present {
+			t.Errorf("unchanged %s sent (truncated pre-fill?): %v", field, v)
+		}
+	}
+}
+
+func TestLongNameAndGatewayNotTruncatedOnPrefill(t *testing.T) {
+	name := strings.Repeat("n", 300)
+	gw := "0000:0000:0000:0000:0000:ffff:192.168.100.200"
+	m := New(nil, network.Subnet{ID: "sub-1", Name: name, GatewayIP: gw})
+	if got := m.nameInput.Value(); got != name {
+		t.Errorf("name truncated to %d chars", len(got))
+	}
+	if got := m.gatewayInput.Value(); got != gw {
+		t.Errorf("gateway = %q, want %q", got, gw)
 	}
 }
