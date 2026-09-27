@@ -10,8 +10,10 @@ on:
         description: "Tag to build and release (e.g. v0.0.5)"
         required: true
 
+# Read-only by default; only the release job can write (to create the
+# GitHub release). The dispatch job gets no GITHUB_TOKEN permissions at all.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # Every other job depends on validate, so nothing is tested, built or
@@ -36,7 +38,7 @@ jobs:
           fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -54,11 +56,11 @@ jobs:
     needs: [validate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ needs.validate.outputs.version }}
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
@@ -83,11 +85,11 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ needs.validate.outputs.version }}
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: src/go.mod
           cache-dependency-path: src/go.sum
@@ -101,7 +103,7 @@ jobs:
           bin="lazystack-${GOOS}-${GOARCH}"
           go build -ldflags "-s -w -X main.version=${VERSION}" -o "../${bin}" ./cmd/lazystack
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: lazystack-${{ matrix.goos }}-${{ matrix.goarch }}
           path: lazystack-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -121,12 +123,12 @@ jobs:
             deb_arch: arm64
             rpm_arch: aarch64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ needs.validate.outputs.version }}
 
       - name: Download linux binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: lazystack-linux-${{ matrix.goarch }}
 
@@ -176,7 +178,7 @@ jobs:
           nfpm package --packager archlinux --target "lazystack-${VERSION}-1-${NFPM_ARCH}.pkg.tar.zst"
 
       - name: Upload packages
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: packages-${{ matrix.goarch }}
           path: |
@@ -187,21 +189,28 @@ jobs:
   release:
     needs: [validate, build, package]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       VERSION: ${{ needs.validate.outputs.version }}
+    outputs:
+      darwin_arm64: ${{ steps.shas.outputs.darwin_arm64 }}
+      darwin_amd64: ${{ steps.shas.outputs.darwin_amd64 }}
+      linux_arm64: ${{ steps.shas.outputs.linux_arm64 }}
+      linux_amd64: ${{ steps.shas.outputs.linux_amd64 }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ needs.validate.outputs.version }}
           path: source
           persist-credentials: false
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: source/src/go.mod
           cache-dependency-path: source/src/go.sum
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
           merge-multiple: true
@@ -241,13 +250,6 @@ jobs:
           go run ./internal/selfupdate/cmd/releasesign sign "$GITHUB_WORKSPACE/dist/SHA256SUMS"
           test -s "$GITHUB_WORKSPACE/dist/SHA256SUMS.sig"
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.validate.outputs.version }}
-          generate_release_notes: true
-          files: dist/*
-
       - name: Parse checksums
         id: shas
         working-directory: dist
@@ -262,6 +264,24 @@ jobs:
             echo "${platform}=${hash}" >> "$GITHUB_OUTPUT"
           done
 
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ needs.validate.outputs.version }}
+          generate_release_notes: true
+          files: dist/*
+
+  # Notifies the Homebrew tap and AUR repositories. Each token is exposed
+  # only to the one step that uses it, and only to first-party tooling (gh).
+  # Use fine-grained tokens limited to the single target repository with
+  # Contents: read and write, which is what repository_dispatch requires.
+  dispatch:
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
       - name: Compute source tarball checksum
         id: src_sha
         run: |
@@ -274,10 +294,10 @@ jobs:
       - name: Update Homebrew tap
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          SHA_DARWIN_ARM64: ${{ steps.shas.outputs.darwin_arm64 }}
-          SHA_DARWIN_AMD64: ${{ steps.shas.outputs.darwin_amd64 }}
-          SHA_LINUX_ARM64: ${{ steps.shas.outputs.linux_arm64 }}
-          SHA_LINUX_AMD64: ${{ steps.shas.outputs.linux_amd64 }}
+          SHA_DARWIN_ARM64: ${{ needs.release.outputs.darwin_arm64 }}
+          SHA_DARWIN_AMD64: ${{ needs.release.outputs.darwin_amd64 }}
+          SHA_LINUX_ARM64: ${{ needs.release.outputs.linux_arm64 }}
+          SHA_LINUX_AMD64: ${{ needs.release.outputs.linux_amd64 }}
         run: |
           jq -n \
             --arg version "$VERSION" \
