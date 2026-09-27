@@ -3,16 +3,44 @@ package app
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/ui/modal"
 )
 
 // actionState is session-wide bookkeeping for mutations started from the
-// root model. inflight and seq are only touched from Update.
+// root model. inflight and seq are only touched from Update; the audit
+// failure fields are written from command goroutines and guarded by mu.
 type actionState struct {
 	inflight map[string]string // lock key -> display name of the resource
 	seq      uint64
+
+	mu            sync.Mutex
+	auditErr      error // first unreported audit write failure
+	auditReported bool  // a failure was already shown this session
+}
+
+// recordAuditErr remembers an audit write failure for the next result to
+// report. Only the first failure of the session is ever shown.
+func (s *actionState) recordAuditErr(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.auditReported && s.auditErr == nil {
+		s.auditErr = err
+	}
+}
+
+// takeAuditErr returns a pending audit failure once per session.
+func (s *actionState) takeAuditErr() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.auditErr
+	if err != nil {
+		s.auditErr = nil
+		s.auditReported = true
+	}
+	return err
 }
 
 func newActionState() *actionState {
@@ -37,9 +65,10 @@ type actionLock struct {
 // so it can release the resource locks that mutation held and correlate
 // optimistic UI state with the operation (seq) that set it.
 type actionResultMsg struct {
-	seq   uint64
-	locks []string
-	msg   tea.Msg
+	seq      uint64
+	locks    []string
+	msg      tea.Msg
+	auditErr error // audit write failure to surface (once per session)
 }
 
 // lock scopes a resource lock to the current connection (the client is
@@ -160,7 +189,8 @@ func (m Model) trackAction(locks []actionLock, cmd tea.Cmd) (Model, tea.Cmd, uin
 		keys = append(keys, l.key)
 	}
 	return m, func() tea.Msg {
-		return actionResultMsg{seq: seq, locks: keys, msg: cmd()}
+		msg := cmd()
+		return actionResultMsg{seq: seq, locks: keys, msg: msg, auditErr: st.takeAuditErr()}
 	}, seq
 }
 
@@ -184,9 +214,19 @@ func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
 			delete(m.actions.inflight, k)
 		}
 	}
-	if msg.msg == nil {
-		return m, nil
+	var cmd tea.Cmd
+	if msg.msg != nil {
+		var next tea.Model
+		next, cmd = m.Update(msg.msg)
+		m = next.(Model)
 	}
-	next, cmd := m.Update(msg.msg)
-	return next.(Model), cmd
+	if msg.auditErr != nil {
+		// Shown alongside, never instead of, the cloud action result.
+		warning := fmt.Sprintf("⚠ audit log not written: %v", msg.auditErr)
+		if m.statusBar.StickyHint != "" {
+			warning = m.statusBar.StickyHint + "  " + warning
+		}
+		m.statusBar.StickyHint = warning
+	}
+	return m, cmd
 }

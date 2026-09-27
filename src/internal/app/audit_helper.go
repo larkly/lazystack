@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/larkly/lazystack/internal/audit"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // logAudit records an action to the audit logger.
@@ -22,5 +23,12 @@ func (m Model) logAudit(action audit.ActionType, resourceType, resourceID, resou
 		Result:       result,
 		Error:        errMsg,
 	}
-	_ = m.auditLogger.Log(entry)
+	if err := m.auditLogger.Log(entry); err != nil {
+		// Called from command goroutines: never touch the model here. The
+		// failure is handed to Update with the action's result instead.
+		shared.Debugf("[audit] write failed: %v", err)
+		if m.actions != nil {
+			m.actions.recordAuditErr(err)
+		}
+	}
 }
