@@ -226,6 +226,15 @@ const (
 	kindICMP
 )
 
+// currentProtocol returns the selected protocol, or "any" when the
+// protocol list is not populated.
+func (m Model) currentProtocol() string {
+	if m.selectedProtocol < 0 || m.selectedProtocol >= len(m.protocols) {
+		return "any"
+	}
+	return m.protocols[m.selectedProtocol]
+}
+
 func protocolKind(proto string) protoKind {
 	p := strings.ToLower(proto)
 	switch {
@@ -495,7 +504,7 @@ func (m Model) buildSpec() (network.SecurityRuleSpec, error) {
 	if m.original != nil {
 		spec.Description = m.original.Description
 	}
-	proto := m.protocols[m.selectedProtocol]
+	proto := m.currentProtocol()
 	if proto != "any" {
 		spec.Protocol = proto
 	}
@@ -670,7 +679,7 @@ func (m Model) View() string {
 
 	minLabel, maxLabel := "Port Min", "Port Max"
 	minInput, maxInput := m.portMinInput, m.portMaxInput
-	if protocolKind(m.protocols[m.selectedProtocol]) == kindICMP {
+	if protocolKind(m.currentProtocol()) == kindICMP {
 		minLabel, maxLabel = "ICMP Type", "ICMP Code"
 		minInput.Placeholder, maxInput.Placeholder = "any", "any"
 	}

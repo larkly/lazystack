@@ -357,3 +357,11 @@ func TestCreateRuleSendsExplicitBounds(t *testing.T) {
 		t.Fatalf("invalid input submitted: posts=%v errs=%q %q", f.posts, m.err, n.err)
 	}
 }
+
+// An overlay can be drawn before its protocol list is populated; rendering
+// must not index an empty list.
+func TestZeroModelViewDoesNotPanic(t *testing.T) {
+	var m Model
+	m.Active = true
+	_ = m.View()
+}
