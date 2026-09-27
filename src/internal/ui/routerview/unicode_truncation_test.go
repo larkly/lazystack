@@ -22,7 +22,7 @@ func TestRouterViewTruncatesUnicodeSafely(t *testing.T) {
 			networkNames: map[string]string{"n1": testutil.UnicodeName},
 			subnetToNet:  map[string]string{"s1": "n1"},
 		})
-		m, _ = m.Update(detailLoadedMsg{routerID: "r", interfaces: []network.RouterInterface{
+		m, _ = m.Update(detailLoadedMsg{seq: m.detailRefresh.Seq(), routerID: "r", interfaces: []network.RouterInterface{
 			{SubnetID: "s1", PortID: "p1", IPAddress: "2001:db8:1234:5678:9abc:def0:1234:5678"},
 			{SubnetID: "s", PortID: "p", IPAddress: "10.0.0.1"},
 		}})

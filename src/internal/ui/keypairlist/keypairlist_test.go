@@ -1,13 +1,16 @@
 package keypairlist
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 func pairs(n int) []compute.KeyPair {
@@ -73,4 +76,33 @@ func TestKeypairListViewportAndNavigation(t *testing.T) {
 		t.Fatalf("after refresh cursor=%d scroll=%d", m.cursor, m.scrollOff)
 	}
 	checkViewport(t, m, "refresh")
+}
+
+// Background ticks must not stack list fetches, and a slow older response
+// must never overwrite the result of a newer fetch.
+func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
+	m := New(nil, time.Second)
+	m.loading = false
+
+	m, first := m.Update(shared.TickMsg{})
+	if first == nil {
+		t.Fatal("tick did not fetch")
+	}
+	staleSeq := m.refresh.Seq()
+	if _, again := m.Update(shared.TickMsg{}); again != nil {
+		t.Fatal("tick started a second fetch while one was in flight")
+	}
+
+	// A manual refresh supersedes the slow tick fetch.
+	m.ForceRefresh()
+	newSeq := m.refresh.Seq()
+	m, _ = m.Update(keypairsLoadedMsg{seq: newSeq, keypairs: []compute.KeyPair{{Name: "new"}}})
+	m, _ = m.Update(keypairsLoadedMsg{seq: staleSeq, keypairs: []compute.KeyPair{{Name: "old"}}})
+	m, _ = m.Update(keypairsErrMsg{seq: staleSeq, err: errors.New("stale failure")})
+	if len(m.pairs) != 1 || m.pairs[0].Name != "new" || m.err != "" {
+		t.Fatalf("stale response applied: %v err=%q", m.pairs, m.err)
+	}
+	if _, next := m.Update(shared.TickMsg{}); next == nil {
+		t.Fatal("tick blocked after the newest fetch completed")
+	}
 }

@@ -22,10 +22,12 @@ import (
 )
 
 type serversLoadedMsg struct {
+	seq     uint64
 	servers []compute.Server
 }
 
 type serversErrMsg struct {
+	seq uint64
 	err error
 }
 
@@ -44,6 +46,7 @@ type Model struct {
 	width           int
 	height          int
 	loading         bool
+	refresh         shared.RefreshGate
 	spinner         spinner.Model
 	filter          textinput.Model
 	filtering       bool
@@ -92,7 +95,7 @@ func (m Model) Init() tea.Cmd {
 	shared.Debugf("[serverlist] Init()")
 	return tea.Batch(
 		m.spinner.Tick,
-		m.fetchServers(),
+		m.fetchServers(m.refresh.Seq()),
 	)
 }
 
@@ -133,6 +136,10 @@ func (m Model) CopyEntries() (string, []copypicker.Entry) {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case serversLoadedMsg:
+		if !m.refresh.Accept(msg.seq) {
+			shared.Debugf("[serverlist] dropping stale server list")
+			return m, nil
+		}
 		shared.Debugf("[serverlist] serversLoadedMsg: %d servers", len(msg.servers))
 		m.loading = false
 		m.servers = msg.servers
@@ -166,22 +173,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case serversErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[serverlist] serversErrMsg: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case shared.TickMsg:
-		if m.loading {
-			shared.Debugf("[serverlist] tick skipped (loading)")
+		if m.loading || m.refresh.Busy() {
+			shared.Debugf("[serverlist] tick skipped (fetch in flight)")
 			return m, nil
 		}
 		shared.Debugf("[serverlist] tick fetching")
-		return m, m.fetchServers()
+		seq := m.refresh.Start()
+		return m, m.fetchServers(seq)
 
 	case shared.RefreshServersMsg:
 		m.loading = true
-		return m, tea.Batch(m.spinner.Tick, m.fetchServers())
+		seq := m.refresh.Start()
+		return m, tea.Batch(m.spinner.Tick, m.fetchServers(seq))
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -769,17 +781,17 @@ func formatAge(created time.Time) string {
 	}
 }
 
-func (m Model) fetchServers() tea.Cmd {
+func (m Model) fetchServers(seq uint64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		shared.Debugf("[serverlist] fetchServers start")
 		servers, err := compute.ListServers(context.Background(), client)
 		if err != nil {
 			shared.Debugf("[serverlist] fetchServers error: %v", err)
-			return serversErrMsg{err: err}
+			return serversErrMsg{seq: seq, err: err}
 		}
 		shared.Debugf("[serverlist] fetchServers done: %d servers", len(servers))
-		return serversLoadedMsg{servers: servers}
+		return serversLoadedMsg{seq: seq, servers: servers}
 	}
 }
 
@@ -973,7 +985,8 @@ func (m Model) ServerNames() map[string]bool {
 func (m *Model) ForceRefresh() tea.Cmd {
 	shared.Debugf("[serverlist] ForceRefresh()")
 	m.loading = true
-	return tea.Batch(m.spinner.Tick, m.fetchServers())
+	seq := m.refresh.Start()
+	return tea.Batch(m.spinner.Tick, m.fetchServers(seq))
 }
 
 // SetClient updates the compute client.

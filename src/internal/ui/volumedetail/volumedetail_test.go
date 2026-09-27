@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
@@ -81,5 +82,31 @@ func TestReloadWithLessContentReclampsScroll(t *testing.T) {
 	m, _ = m.Update(volumeDetailLoadedMsg{vol: &volume.Volume{ID: "vol-1", Name: "data"}})
 	if m.scroll != 0 {
 		t.Fatalf("scroll=%d after reload with short content, want 0", m.scroll)
+	}
+}
+
+// Background ticks must not stack volume fetches, and a slow older response
+// must never overwrite the result of a newer fetch.
+func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
+	m := loadedModel(t, 0, 40)
+
+	m, first := m.Update(shared.TickMsg{})
+	if first == nil {
+		t.Fatal("tick did not fetch")
+	}
+	staleSeq := m.refresh.Seq()
+	if _, again := m.Update(shared.TickMsg{}); again != nil {
+		t.Fatal("tick started a second fetch while one was in flight")
+	}
+
+	m.ForceRefresh()
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: m.refresh.Seq(), vol: &volume.Volume{ID: "vol-1", Status: "in-use"}})
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: staleSeq, vol: &volume.Volume{ID: "vol-1", Status: "available"}})
+	m, _ = m.Update(volumeDetailErrMsg{seq: staleSeq, err: fmt.Errorf("stale")})
+	if m.volume.Status != "in-use" || m.err != "" {
+		t.Fatalf("stale response applied: status=%q err=%q", m.volume.Status, m.err)
+	}
+	if _, next := m.Update(shared.TickMsg{}); next == nil {
+		t.Fatal("tick blocked after the newest fetch completed")
 	}
 }

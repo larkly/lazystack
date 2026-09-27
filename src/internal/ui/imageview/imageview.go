@@ -133,9 +133,16 @@ func fitsWidth(columns []Column, totalWidth int) bool {
 }
 
 // Messages
-type imagesLoadedMsg struct{ images []img.Image }
-type imagesErrMsg struct{ err error }
+type imagesLoadedMsg struct {
+	seq    uint64
+	images []img.Image
+}
+type imagesErrMsg struct {
+	seq uint64
+	err error
+}
 type serversLoadedMsg struct {
+	seq     uint64
 	servers []compute.Server
 	err     error
 }
@@ -175,6 +182,8 @@ type Model struct {
 	width           int
 	height          int
 	loading         bool
+	refresh         shared.RefreshGate // image list fetches
+	serversRefresh  shared.RefreshGate // server list (usage) fetches
 	spinner         spinner.Model
 	err             string
 	refreshInterval time.Duration
@@ -206,7 +215,11 @@ func New(imageClient, computeClient *gophercloud.ServiceClient, refreshInterval 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
 	shared.Debugf("[imageview] Init()")
-	return tea.Batch(m.spinner.Tick, m.fetchImages(), m.fetchServers())
+	var servers tea.Cmd
+	if m.computeClient != nil {
+		servers = m.fetchServers(m.serversRefresh.Seq())
+	}
+	return tea.Batch(m.spinner.Tick, m.fetchImages(m.refresh.Seq()), servers)
 }
 
 // --- Public accessors ---
@@ -366,6 +379,9 @@ func (m Model) CopyEntries() (string, []copypicker.Entry) {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case imagesLoadedMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[imageview] loaded %d images", len(msg.images))
 		var cursorID string
 		if i := m.SelectedImage(); i != nil {
@@ -391,12 +407,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case imagesErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[imageview] error: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case serversLoadedMsg:
+		if !m.serversRefresh.Accept(msg.seq) {
+			return m, nil
+		}
 		if msg.err != nil {
 			// Usage is unknown: drop the old list rather than presenting
 			// stale (or no) servers as the current answer.
@@ -410,10 +432,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case shared.TickMsg:
-		if m.loading {
+		if m.loading || m.refresh.Busy() {
 			return m, nil
 		}
-		return m, tea.Batch(m.fetchImages(), m.fetchServers())
+		cmds := []tea.Cmd{m.fetchImages(m.refresh.Start())}
+		if !m.serversRefresh.Busy() {
+			cmds = append(cmds, m.startServersFetch())
+		}
+		return m, tea.Batch(cmds...)
 
 	case sortClearMsg:
 		m.sortHighlight = false
@@ -1523,11 +1549,11 @@ func imageStatusStyleFn(status string) lipgloss.Style {
 
 // --- Data fetching ---
 
-func (m Model) fetchImages() tea.Cmd {
+func (m Model) fetchImages(seq uint64) tea.Cmd {
 	client := m.imageClient
 	if client == nil {
 		return func() tea.Msg {
-			return imagesErrMsg{err: fmt.Errorf("image service not available")}
+			return imagesErrMsg{seq: seq, err: fmt.Errorf("image service not available")}
 		}
 	}
 	return func() tea.Msg {
@@ -1535,27 +1561,33 @@ func (m Model) fetchImages() tea.Cmd {
 		imgs, err := img.ListImages(context.Background(), client)
 		if err != nil {
 			shared.Debugf("[imageview] fetch images error: %v", err)
-			return imagesErrMsg{err: err}
+			return imagesErrMsg{seq: seq, err: err}
 		}
 		shared.Debugf("[imageview] fetch images done, count=%d", len(imgs))
-		return imagesLoadedMsg{images: imgs}
+		return imagesLoadedMsg{seq: seq, images: imgs}
 	}
 }
 
-func (m Model) fetchServers() tea.Cmd {
-	client := m.computeClient
-	if client == nil {
+// startServersFetch starts a tracked server list fetch, if there is a
+// compute client to fetch from.
+func (m *Model) startServersFetch() tea.Cmd {
+	if m.computeClient == nil {
 		return nil
 	}
+	return m.fetchServers(m.serversRefresh.Start())
+}
+
+func (m Model) fetchServers(seq uint64) tea.Cmd {
+	client := m.computeClient
 	return func() tea.Msg {
 		shared.Debugf("[imageview] fetch servers start")
 		srvs, err := compute.ListServers(context.Background(), client)
 		if err != nil {
 			shared.Debugf("[imageview] fetch servers error (non-fatal): %v", err)
-			return serversLoadedMsg{err: err}
+			return serversLoadedMsg{seq: seq, err: err}
 		}
 		shared.Debugf("[imageview] fetch servers done, count=%d", len(srvs))
-		return serversLoadedMsg{servers: srvs}
+		return serversLoadedMsg{seq: seq, servers: srvs}
 	}
 }
 
@@ -1563,7 +1595,7 @@ func (m Model) fetchServers() tea.Cmd {
 func (m *Model) ForceRefresh() tea.Cmd {
 	shared.Debugf("[imageview] ForceRefresh()")
 	m.loading = true
-	return tea.Batch(m.spinner.Tick, m.fetchImages(), m.fetchServers())
+	return tea.Batch(m.spinner.Tick, m.fetchImages(m.refresh.Start()), m.startServersFetch())
 }
 
 // SetSize updates the dimensions.

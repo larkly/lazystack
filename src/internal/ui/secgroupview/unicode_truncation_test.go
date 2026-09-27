@@ -19,7 +19,7 @@ func TestSecGroupViewTruncatesUnicodeSafely(t *testing.T) {
 				{ID: "r3", Direction: "egress", EtherType: "IPv4", RemoteGroupID: testutil.UnicodeName},
 			},
 		}, {ID: "h", Name: "短"}}})
-		m, _ = m.Update(detailLoadedMsg{sgID: "g",
+		m, _ = m.Update(detailLoadedMsg{seq: m.detailRefresh.Seq(), sgID: "g",
 			servers:     []serverRef{{ID: "s", Name: testutil.UnicodeName, Status: "ACTIVE"}},
 			ports:       []network.Port{{ID: "p", DeviceID: "s", FixedIPs: []network.FixedIP{{IPAddress: "2001:db8:1234:5678:9abc:def0:1234:5678"}}}},
 			serverNames: map[string]string{"s": testutil.UnicodeName},
