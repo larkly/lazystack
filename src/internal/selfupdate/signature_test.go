@@ -28,6 +28,19 @@ func encodeSig(priv ed25519.PrivateKey, msg []byte) []byte {
 	return []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(priv, msg)) + "\n")
 }
 
+// signRelease returns SHA256SUMS.sig contents for sums published as tag.
+func signRelease(priv ed25519.PrivateKey, tag string, sums []byte) []byte {
+	return encodeSig(priv, ReleaseSignatureMessage(tag, sums))
+}
+
+func TestReleaseSignatureMessage(t *testing.T) {
+	got := string(ReleaseSignatureMessage("v0.12.0", []byte("abc  lazystack-linux-amd64\n")))
+	want := "lazystack-release-v1\nv0.12.0\nabc  lazystack-linux-amd64\n"
+	if got != want {
+		t.Fatalf("ReleaseSignatureMessage = %q, want %q", got, want)
+	}
+}
+
 // useReleaseKey swaps the trusted release key for the duration of a test.
 func useReleaseKey(t *testing.T, pub ed25519.PublicKey) {
 	t.Helper()
@@ -40,25 +53,35 @@ func TestVerifyReleaseSignature(t *testing.T) {
 	pub, priv := testKey(1)
 	_, otherPriv := testKey(2)
 	sums := []byte("abc123  lazystack-linux-amd64\n")
-	good := encodeSig(priv, sums)
+	const tag = "v0.13.0"
+	good := signRelease(priv, tag, sums)
+	key := base64.StdEncoding.EncodeToString(pub)
 
 	tests := []struct {
 		name    string
 		key     string
+		tag     string
 		sums    []byte
 		sig     []byte
 		wantErr string
 	}{
-		{"valid", base64.StdEncoding.EncodeToString(pub), sums, good, ""},
-		{"valid without trailing newline", base64.StdEncoding.EncodeToString(pub), sums, []byte(strings.TrimSpace(string(good))), ""},
-		{"modified checksums", base64.StdEncoding.EncodeToString(pub), []byte("def456  lazystack-linux-amd64\n"), good, "signature verification failed"},
-		{"signed by unexpected key", base64.StdEncoding.EncodeToString(pub), sums, encodeSig(otherPriv, sums), "signature verification failed"},
-		{"missing signature", base64.StdEncoding.EncodeToString(pub), sums, nil, "empty signature"},
-		{"malformed signature", base64.StdEncoding.EncodeToString(pub), sums, []byte("not base64!"), "decoding signature"},
-		{"truncated signature", base64.StdEncoding.EncodeToString(pub), sums, []byte(base64.StdEncoding.EncodeToString([]byte("short"))), "signature length"},
-		{"no trusted key configured", "", sums, good, "no release signing key"},
-		{"malformed trusted key", "@@@", sums, good, "decoding release public key"},
-		{"wrong-size trusted key", base64.StdEncoding.EncodeToString([]byte("tiny")), sums, good, "release public key length"},
+		{"valid", key, tag, sums, good, ""},
+		{"valid without trailing newline", key, tag, sums, []byte(strings.TrimSpace(string(good))), ""},
+		{"valid pre-release tag", key, "v0.13.0-rc.1", sums, signRelease(priv, "v0.13.0-rc.1", sums), ""},
+		{"modified checksums", key, tag, []byte("def456  lazystack-linux-amd64\n"), good, "signature verification failed"},
+		{"signed by unexpected key", key, tag, sums, signRelease(otherPriv, tag, sums), "signature verification failed"},
+		// An older signed release re-published under a newer tag.
+		{"signed for another tag", key, "v0.14.0", sums, good, "signature verification failed"},
+		{"signed for a pre-release of the tag", key, tag, sums, signRelease(priv, tag+"-rc1", sums), "signature verification failed"},
+		{"signed without the tag binding", key, tag, sums, encodeSig(priv, sums), "signature verification failed"},
+		{"malformed tag", key, "v0.13.0\nx", sums, good, "malformed release tag"},
+		{"empty tag", key, "", sums, good, "malformed release tag"},
+		{"missing signature", key, tag, sums, nil, "empty signature"},
+		{"malformed signature", key, tag, sums, []byte("not base64!"), "decoding signature"},
+		{"truncated signature", key, tag, sums, []byte(base64.StdEncoding.EncodeToString([]byte("short"))), "signature length"},
+		{"no trusted key configured", "", tag, sums, good, "no release signing key"},
+		{"malformed trusted key", "@@@", tag, sums, good, "decoding release public key"},
+		{"wrong-size trusted key", base64.StdEncoding.EncodeToString([]byte("tiny")), tag, sums, good, "release public key length"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,7 +89,7 @@ func TestVerifyReleaseSignature(t *testing.T) {
 			releasePublicKey = tc.key
 			defer func() { releasePublicKey = prev }()
 
-			err := VerifyReleaseSignature(tc.sums, tc.sig)
+			err := VerifyReleaseSignature(tc.tag, tc.sums, tc.sig)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -116,6 +139,7 @@ func TestVerifyChecksum_RequiresValidSignature(t *testing.T) {
 	asset := fmt.Sprintf("lazystack-%s-%s", runtime.GOOS, runtime.GOARCH)
 	sums := []byte(hash + "  " + asset + "\n")
 	tampered := []byte(strings.Repeat("0", 64) + "  " + asset + "\n")
+	const tag = "v0.20.0"
 
 	tests := []struct {
 		name    string
@@ -124,16 +148,17 @@ func TestVerifyChecksum_RequiresValidSignature(t *testing.T) {
 		hash    string
 		wantErr string
 	}{
-		{"signed and matching", sums, encodeSig(priv, sums), hash, ""},
+		{"signed and matching", sums, signRelease(priv, tag, sums), hash, ""},
 		{"signature missing", sums, nil, hash, "SHA256SUMS.sig"},
-		{"checksums replaced after signing", tampered, encodeSig(priv, sums), strings.Repeat("0", 64), "signature verification failed"},
-		{"signed by unexpected key", sums, encodeSig(otherPriv, sums), hash, "signature verification failed"},
-		{"signed but binary modified", sums, encodeSig(priv, sums), strings.Repeat("f", 64), "checksum mismatch"},
+		{"checksums replaced after signing", tampered, signRelease(priv, tag, sums), strings.Repeat("0", 64), "signature verification failed"},
+		{"signed by unexpected key", sums, signRelease(otherPriv, tag, sums), hash, "signature verification failed"},
+		{"signed for another tag", sums, signRelease(priv, "v0.19.0", sums), hash, "signature verification failed"},
+		{"signed but binary modified", sums, signRelease(priv, tag, sums), strings.Repeat("f", 64), "checksum mismatch"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			url := releaseServer(t, tc.sums, tc.sig)
-			_, err := verifyChecksum(context.Background(), url, tc.hash, true)
+			_, err := verifyChecksum(context.Background(), url, tag, tc.hash, true)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)

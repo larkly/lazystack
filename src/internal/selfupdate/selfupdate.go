@@ -128,18 +128,20 @@ func CheckLatest(ctx context.Context, currentVersion string) (latest, downloadUR
 //
 // current and target are the running and the new release version. They
 // decide whether the release must carry a valid SHA256SUMS signature (from
-// SignatureRequiredFrom on) or may fall back to SHA256SUMS alone. Apply
+// SignatureRequiredFrom on) or may fall back to SHA256SUMS alone. target must
+// be the exact tag returned by CheckLatest: the signature covers it, so a
+// signed SHA256SUMS re-published under another tag is rejected. Apply
 // reports whether the installed binary was signature-verified.
 func Apply(ctx context.Context, current, target, downloadURL, checksumsURL string) (signed bool, err error) {
 	required := signatureRequired(current, target)
 	shared.Debugf("[selfupdate] Apply: %s -> %s, signature required=%v", current, target, required)
-	if err := apply(ctx, downloadURL, checksumsURL, required, &signed); err != nil {
+	if err := apply(ctx, target, downloadURL, checksumsURL, required, &signed); err != nil {
 		return false, err
 	}
 	return signed, nil
 }
 
-func apply(ctx context.Context, downloadURL, checksumsURL string, signatureRequired bool, signed *bool) error {
+func apply(ctx context.Context, tag, downloadURL, checksumsURL string, signatureRequired bool, signed *bool) error {
 	shared.Debugf("[selfupdate] Apply: start downloadURL=%s", downloadURL)
 	if checksumsURL == "" {
 		shared.Debugf("[selfupdate] Apply: refusing to install without checksums")
@@ -228,7 +230,7 @@ func apply(ctx context.Context, downloadURL, checksumsURL string, signatureRequi
 	got := hex.EncodeToString(hasher.Sum(nil))
 
 	shared.Debugf("[selfupdate] Apply: verifying checksum")
-	verified, err := verifyChecksum(ctx, checksumsURL, got, signatureRequired)
+	verified, err := verifyChecksum(ctx, checksumsURL, tag, got, signatureRequired)
 	if err != nil {
 		shared.Debugf("[selfupdate] Apply: error checksum verification: %v", err)
 		return err
@@ -379,15 +381,16 @@ func httpsOnlyRedirects(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-// verifyChecksum checks gotHash against the release's SHA256SUMS after
-// verifying the SHA256SUMS signature (see verifyChecksumsSignature). It
-// reports whether the checksums were signature-verified.
-func verifyChecksum(ctx context.Context, checksumsURL, gotHash string, signatureRequired bool) (bool, error) {
+// verifyChecksum checks gotHash against the SHA256SUMS of the release tagged
+// tag after verifying the SHA256SUMS signature (see
+// verifyChecksumsSignature). It reports whether the checksums were
+// signature-verified.
+func verifyChecksum(ctx context.Context, checksumsURL, tag, gotHash string, signatureRequired bool) (bool, error) {
 	body, err := httpGet(ctx, checksumsURL, maxChecksumsSize)
 	if err != nil {
 		return false, fmt.Errorf("downloading checksums: %w", err)
 	}
-	signed, err := verifyChecksumsSignature(ctx, checksumsURL, body, signatureRequired)
+	signed, err := verifyChecksumsSignature(ctx, checksumsURL, tag, body, signatureRequired)
 	if err != nil {
 		return false, err
 	}

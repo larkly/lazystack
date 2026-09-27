@@ -245,7 +245,9 @@ jobs:
 
       # The self-updater only trusts SHA256SUMS with a valid Ed25519
       # signature from the key embedded in the client, so a release is never
-      # published without SHA256SUMS.sig. releasesign also refuses a key that
+      # published without SHA256SUMS.sig. The signature binds SHA256SUMS to
+      # this release's tag ($VERSION, from the job env), so it cannot be
+      # re-published under another tag. releasesign also refuses a key that
       # does not match selfupdate.ReleaseSigningPublicKey at this tag.
       - name: Sign checksums
         working-directory: source/src
@@ -256,7 +258,7 @@ jobs:
             echo "::error::RELEASE_SIGNING_KEY secret is not set; refusing to publish an unsigned release"
             exit 1
           fi
-          go run ./internal/selfupdate/cmd/releasesign sign "$GITHUB_WORKSPACE/dist/SHA256SUMS"
+          go run ./internal/selfupdate/cmd/releasesign sign "$GITHUB_WORKSPACE/dist/SHA256SUMS" "$VERSION"
           test -s "$GITHUB_WORKSPACE/dist/SHA256SUMS.sig"
 
       - name: Parse checksums

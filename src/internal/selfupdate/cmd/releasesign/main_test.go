@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/larkly/lazystack/internal/selfupdate"
 )
 
 func seedB64(b byte) string {
@@ -32,7 +34,7 @@ func TestSign_WritesVerifiableSignature(t *testing.T) {
 	path := writeSums(t)
 	var stdout, stderr bytes.Buffer
 	env := map[string]string{"RELEASE_SIGNING_KEY": seedB64(7)}
-	code := run([]string{"sign", path}, func(k string) string { return env[k] }, pubB64(7), &stdout, &stderr)
+	code := run([]string{"sign", path, "v1.2.3-rc.1"}, func(k string) string { return env[k] }, pubB64(7), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr: %s", code, stderr.String())
 	}
@@ -46,8 +48,15 @@ func TestSign_WritesVerifiableSignature(t *testing.T) {
 	}
 	sums, _ := os.ReadFile(path)
 	pub, _ := base64.StdEncoding.DecodeString(pubB64(7))
-	if !ed25519.Verify(pub, sums, raw) {
-		t.Fatal("signature does not verify")
+	if !ed25519.Verify(pub, selfupdate.ReleaseSignatureMessage("v1.2.3-rc.1", sums), raw) {
+		t.Fatal("signature does not verify for the tag it was made for")
+	}
+	// The signature covers the tag, not the bare checksums.
+	if ed25519.Verify(pub, selfupdate.ReleaseSignatureMessage("v1.2.4", sums), raw) {
+		t.Fatal("signature verifies for another tag")
+	}
+	if ed25519.Verify(pub, sums, raw) {
+		t.Fatal("signature verifies over SHA256SUMS without the tag")
 	}
 }
 
@@ -56,20 +65,25 @@ func TestSign_FailsClosed(t *testing.T) {
 		name    string
 		key     string
 		trusted string
+		tag     string
 		wantErr string
 	}{
-		{"secret missing", "", pubB64(7), "RELEASE_SIGNING_KEY is not set"},
-		{"secret not base64", "!!", pubB64(7), "decoding RELEASE_SIGNING_KEY"},
-		{"secret wrong size", base64.StdEncoding.EncodeToString([]byte("short")), pubB64(7), "RELEASE_SIGNING_KEY"},
-		{"key does not match embedded public key", seedB64(8), pubB64(7), "does not match"},
-		{"embedded public key not configured", seedB64(7), "", "does not match"},
+		{"secret missing", "", pubB64(7), "v1.2.3", "RELEASE_SIGNING_KEY is not set"},
+		{"secret not base64", "!!", pubB64(7), "v1.2.3", "decoding RELEASE_SIGNING_KEY"},
+		{"secret wrong size", base64.StdEncoding.EncodeToString([]byte("short")), pubB64(7), "v1.2.3", "RELEASE_SIGNING_KEY"},
+		{"key does not match embedded public key", seedB64(8), pubB64(7), "v1.2.3", "does not match"},
+		{"embedded public key not configured", seedB64(7), "", "v1.2.3", "does not match"},
+		{"empty tag", seedB64(7), pubB64(7), "", "release tag"},
+		{"tag without v", seedB64(7), pubB64(7), "1.2.3", "release tag"},
+		{"incomplete tag", seedB64(7), pubB64(7), "v1.2", "release tag"},
+		{"tag with newline", seedB64(7), pubB64(7), "v1.2.3\nv9.9.9", "release tag"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeSums(t)
 			var stdout, stderr bytes.Buffer
 			env := map[string]string{"RELEASE_SIGNING_KEY": tc.key}
-			code := run([]string{"sign", path}, func(k string) string { return env[k] }, tc.trusted, &stdout, &stderr)
+			code := run([]string{"sign", path, tc.tag}, func(k string) string { return env[k] }, tc.trusted, &stdout, &stderr)
 			if code == 0 {
 				t.Fatal("expected non-zero exit")
 			}
@@ -113,7 +127,9 @@ func TestUsage(t *testing.T) {
 	if code := run(nil, func(string) string { return "" }, "", &stdout, &stderr); code != 2 {
 		t.Fatalf("exit %d, want 2", code)
 	}
-	if code := run([]string{"sign"}, func(string) string { return "" }, "", &stdout, &stderr); code != 2 {
-		t.Fatalf("exit %d, want 2", code)
+	for _, args := range [][]string{{"sign"}, {"sign", "SHA256SUMS"}, {"sign", "SHA256SUMS", "v1.2.3", "extra"}} {
+		if code := run(args, func(string) string { return "" }, "", &stdout, &stderr); code != 2 {
+			t.Fatalf("run(%q) exit %d, want 2", args, code)
+		}
 	}
 }

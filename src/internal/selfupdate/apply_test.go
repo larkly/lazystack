@@ -45,6 +45,7 @@ type release struct {
 	hits     atomic.Int32
 	bin      []byte
 	sums     string
+	sigTag   string // tag the signature is made for (default SignatureRequiredFrom)
 	truncate bool
 	unsigned bool // serve no SHA256SUMS.sig
 	extra    http.HandlerFunc
@@ -54,7 +55,7 @@ type release struct {
 // so the handler never races with test setup.
 func newRelease(t *testing.T, bin []byte, configure func(*release)) *release {
 	t.Helper()
-	r := &release{bin: bin, sums: sumLine(bin)}
+	r := &release{bin: bin, sums: sumLine(bin), sigTag: SignatureRequiredFrom}
 	if configure != nil {
 		configure(r)
 	}
@@ -77,7 +78,7 @@ func newRelease(t *testing.T, bin []byte, configure func(*release)) *release {
 				http.NotFound(w, req)
 				return
 			}
-			w.Write(encodeSig(priv, []byte(r.sums)))
+			w.Write(signRelease(priv, r.sigTag, []byte(r.sums)))
 		default:
 			if r.extra != nil {
 				r.extra(w, req)
@@ -174,6 +175,7 @@ func TestApplyFailuresPreserveOriginal(t *testing.T) {
 			renameFile = func(string, string) error { return boom }
 			t.Cleanup(func() { renameFile = prev })
 		}},
+		{"signature for another tag", func(t *testing.T, r *release) { r.sigTag = "v0.19.0" }},
 		{"invalid staged binary with matching checksum", func(t *testing.T, r *release) {
 			r.bin = []byte("<html>502 Bad Gateway</html>")
 			r.sums = sumLine(r.bin)
@@ -381,5 +383,22 @@ func TestCheckLatestEnforcesResponseLimit(t *testing.T) {
 	setLimit(t, &maxReleaseJSONSize, int64(len(body)))
 	if latest, _, _, err := CheckLatest(context.Background(), "v0.0.1"); err != nil || latest != "v9.9.9" {
 		t.Fatalf("CheckLatest = %q, %v", latest, err)
+	}
+}
+
+// A signed older release re-published under a newer tag must not install:
+// the signature names the tag it was made for.
+func TestApplyRejectsReleaseRepublishedUnderAnotherTag(t *testing.T) {
+	bin := validBinary(t)
+	for _, target := range []string{"v0.13.0", "v0.21.0"} {
+		t.Run(target, func(t *testing.T) {
+			r := newRelease(t, bin, func(r *release) { r.sigTag = "v0.12.0" })
+			exe := installed(t)
+			_, err := Apply(context.Background(), "v0.12.0", target, r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS")
+			if err == nil || !strings.Contains(err.Error(), "signature verification failed") {
+				t.Fatalf("Apply = %v, want a signature error", err)
+			}
+			assertOriginal(t, exe)
+		})
 	}
 }
