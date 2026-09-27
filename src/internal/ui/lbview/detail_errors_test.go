@@ -9,8 +9,57 @@ import (
 	"time"
 
 	"github.com/larkly/lazystack/internal/loadbalancer"
+	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/testutil"
 )
+
+// On a slow Octavia, the lookups for the first pools must not use up the
+// deadline of the later ones: each call gets its own RequestTimeout.
+func TestSlowDetailLookupsGetTheirOwnDeadlines(t *testing.T) {
+	orig := shared.RequestTimeout
+	shared.RequestTimeout = 250 * time.Millisecond
+	t.Cleanup(func() { shared.RequestTimeout = orig })
+
+	const pools = 3
+	delay := 80 * time.Millisecond // 2 slow calls per pool exceed one deadline
+	client, cleanup := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		p := r.URL.Path
+		switch {
+		case strings.HasSuffix(p, "/loadbalancers/lb-1"):
+			fmt.Fprint(w, `{"loadbalancer":{"id":"lb-1","name":"edge"}}`)
+		case strings.HasSuffix(p, "/listeners"):
+			fmt.Fprint(w, `{"listeners":[]}`)
+		case strings.HasSuffix(p, "/members"):
+			time.Sleep(delay)
+			fmt.Fprint(w, `{"members":[]}`)
+		case strings.HasSuffix(p, "/pools"):
+			var list []string
+			for i := range pools {
+				list = append(list, fmt.Sprintf(`{"id":"pool-%d","healthmonitor_id":"hm-%d"}`, i, i))
+			}
+			fmt.Fprintf(w, `{"pools":[%s]}`, strings.Join(list, ","))
+		case strings.Contains(p, "/healthmonitors/"):
+			time.Sleep(delay)
+			id := p[strings.LastIndex(p, "/")+1:]
+			fmt.Fprintf(w, `{"healthmonitor":{"id":%q,"type":"TCP"}}`, id)
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+p, http.StatusNotFound)
+		}
+	}))
+	defer cleanup()
+
+	msg, ok := New(client, time.Minute).fetchDetail("lb-1")().(detailLoadedMsg)
+	if !ok {
+		t.Fatalf("got %T, want detailLoadedMsg", msg)
+	}
+	if len(msg.memberErrs) != 0 || len(msg.monitorErrs) != 0 {
+		t.Fatalf("later lookups starved: memberErrs=%v monitorErrs=%v", msg.memberErrs, msg.monitorErrs)
+	}
+	if len(msg.members) != pools || len(msg.monitors) != pools {
+		t.Fatalf("members=%d monitors=%d, want %d each", len(msg.members), len(msg.monitors), pools)
+	}
+}
 
 // fakeOctavia serves one load balancer with one pool that has a health
 // monitor; member and monitor lookups fail while failLookups is set.
