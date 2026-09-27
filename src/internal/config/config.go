@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/larkly/lazystack/internal/shared"
@@ -270,8 +271,35 @@ func LoadFrom(path string) (Config, error) {
 		file.General.UpdateCheckInterval = defaults.General.UpdateCheckInterval
 	}
 
+	dropLegacyDefaultKeybindings(file.Keybindings)
 	file.Warnings = dropReservedKeybindings(file.Keybindings, defaults.Keybindings)
 	return mergeWithDefaults(file, defaults), nil
+}
+
+// legacyDefaultKeybindings lists former defaults of actions whose default has
+// since changed. Save writes the whole merged keybinding map, so a config
+// saved by v0.11.0 or earlier pins the old default as if the user had chosen
+// it: ctrl+a is reserved for screen and ctrl+shift+c is swallowed by
+// most terminals, which would leave attach warning on every launch and the
+// column picker unreachable. A saved value equal to its legacy default is
+// treated as unset so the current default applies; the next Save persists
+// that, so the migration is one-off. Only add an entry when a default
+// changes, with the value released versions shipped.
+var legacyDefaultKeybindings = map[string]string{
+	"attach":      "ctrl+a",       // v0.5.0–v0.11.0; now "i"
+	"column_pick": "ctrl+shift+c", // v0.10.0–v0.11.0; now "O"
+}
+
+// dropLegacyDefaultKeybindings removes bindings still set to a former
+// default (see legacyDefaultKeybindings) so the current default is used,
+// without a warning.
+func dropLegacyDefaultKeybindings(kb map[string]string) {
+	for name, legacy := range legacyDefaultKeybindings {
+		if v, ok := kb[name]; ok && strings.TrimSpace(v) == legacy {
+			shared.Debugf("[config] LoadFrom: migrating legacy default keybinding %s=%q", name, v)
+			delete(kb, name)
+		}
+	}
 }
 
 // dropReservedKeybindings removes bindings that use a reserved key (Ctrl+A,

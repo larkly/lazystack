@@ -33,7 +33,7 @@ func TestLoadAuditAndSavedFilters(t *testing.T) {
 
 func TestLoadRejectsReservedKeybindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	data := "keybindings:\n  attach: ctrl+a\n  detach: \"x, ctrl+b\"\n  refresh: F5\n"
+	data := "keybindings:\n  attach: \"i, ctrl+a\"\n  detach: \"x, ctrl+b\"\n  refresh: F5\n"
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +58,75 @@ func TestLoadRejectsReservedKeybindings(t *testing.T) {
 		if !strings.Contains(w, "reserved") {
 			t.Errorf("warning %q does not explain the rejection", w)
 		}
+	}
+}
+
+// A v0.11.0 config holds the whole keybinding map as it was then, including
+// defaults that have since changed. Those stale defaults must give way to the
+// current ones silently, and saving must make the migration stick.
+func TestLoadMigratesLegacyDefaultKeybindings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := "keybindings:\n  attach: ctrl+a\n  column_pick: ctrl+shift+c\n  refresh: F5\n  quit: \"q,ctrl+c\"\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	d := DefaultKeybindings()
+	for _, name := range []string{"attach", "column_pick"} {
+		if cfg.Keybindings[name] != d[name] {
+			t.Errorf("%s = %q, want current default %q", name, cfg.Keybindings[name], d[name])
+		}
+	}
+	if cfg.Keybindings["refresh"] != "F5" {
+		t.Errorf("refresh = %q, want F5 (user choice kept)", cfg.Keybindings["refresh"])
+	}
+	if len(cfg.Warnings) != 0 {
+		t.Errorf("Warnings = %q, want none for a migrated legacy default", cfg.Warnings)
+	}
+
+	if err := cfg.SaveTo(path); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, legacy := range []string{"ctrl+a", "ctrl+shift+c"} {
+		if strings.Contains(string(saved), legacy) {
+			t.Errorf("saved config still contains legacy %q:\n%s", legacy, saved)
+		}
+	}
+	again, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("second LoadFrom: %v", err)
+	}
+	if !reflect.DeepEqual(again.Keybindings, cfg.Keybindings) || len(again.Warnings) != 0 {
+		t.Errorf("reload after save: keybindings %v warnings %q, want %v and none", again.Keybindings, again.Warnings, cfg.Keybindings)
+	}
+}
+
+// Only the exact legacy default is migrated; any other value is the user's.
+func TestLoadKeepsNonLegacyKeybindings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := "keybindings:\n  column_pick: \"ctrl+shift+c, K\"\n  attach: I\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if got := cfg.Keybindings["column_pick"]; got != "ctrl+shift+c, K" {
+		t.Errorf("column_pick = %q, want the user's value", got)
+	}
+	if got := cfg.Keybindings["attach"]; got != "I" {
+		t.Errorf("attach = %q, want the user's value", got)
+	}
+	if len(cfg.Warnings) != 0 {
+		t.Errorf("Warnings = %q, want none", cfg.Warnings)
 	}
 }
 
