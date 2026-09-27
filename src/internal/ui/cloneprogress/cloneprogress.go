@@ -3,6 +3,7 @@ package cloneprogress
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,17 @@ import (
 // variable so tests can shorten it.
 var pollInterval = 3 * time.Second
 
+// maxPollErrors is how many consecutive failed status polls of one volume
+// (or of the server) are tolerated before the clone is treated as failed.
+const maxPollErrors = 5
+
+// Rollback waits for the deleted server to disappear and for each cloned
+// volume to become deletable. Variables so tests can shorten them.
+var (
+	rollbackPollInterval = 2 * time.Second
+	rollbackWaitTimeout  = 3 * time.Minute
+)
+
 // VolumeOp tracks the state of a single volume clone+attach operation.
 type VolumeOp struct {
 	SourceVolID string
@@ -30,6 +42,7 @@ type VolumeOp struct {
 	CloneVolID  string // set after creation
 	Status      string // pending, creating, available, attaching, done, error
 	Err         error
+	pollErrs    int // consecutive failed status polls
 }
 
 // AllCompleteMsg is sent when all volume operations finish successfully.
@@ -40,9 +53,10 @@ type AllCompleteMsg struct {
 
 // RollbackCompleteMsg is sent after rollback finishes.
 type RollbackCompleteMsg struct {
-	Op     uint64  // ID of the clone operation that was rolled back
-	Cause  error   // the original error that triggered rollback
-	Errors []error // errors during cleanup
+	Op       uint64   // ID of the clone operation that was rolled back
+	Cause    error    // the original error that triggered rollback
+	Errors   []error  // errors during cleanup
+	Leftover []string // resources that could not be removed
 }
 
 // Every internal message carries the ID of the clone operation that issued
@@ -69,15 +83,16 @@ type volumeAttachedMsg struct {
 }
 
 type rollbackDoneMsg struct {
-	op     uint64
-	cause  error
-	errors []error
+	op       uint64
+	cause    error
+	errors   []error
+	leftover []string
 }
 
 type serverReadyMsg struct {
-	op    uint64
-	ready bool
-	err   error
+	op     uint64
+	status string
+	err    error
 }
 
 type pollTickMsg struct {
@@ -128,9 +143,14 @@ type Model struct {
 	polling       bool // poll tick is scheduled
 	failed        bool
 	rollingBack   bool
+	cause         error // what made the clone fail, if not a volume error
 	width         int
 	height        int
 	pendingAttach []int // volume indices waiting for server to be ready
+	serverErrs    int   // consecutive failed server status polls
+
+	createsIssued    bool // volume create requests have been sent
+	rollbackLaunched bool // cleanup command has been started
 }
 
 // New creates a clone progress model.
@@ -238,10 +258,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case volumeNamesResolvedMsg:
-		if !m.running || len(msg.ops) != len(m.volumes) {
+		if !m.running || m.failed || m.createsIssued || len(msg.ops) != len(m.volumes) {
 			return m, nil
 		}
 		m.volumes = msg.ops
+		m.createsIssued = true
 		cmds := make([]tea.Cmd, len(m.volumes))
 		for i, op := range m.volumes {
 			cmds[i] = m.createVolume(i, op)
@@ -249,18 +270,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case volumeCreatedMsg:
-		if !m.validIdx(msg.idx) || !m.running {
+		if !m.validIdx(msg.idx) || !m.running || m.volumes[msg.idx].Status != "pending" {
 			return m, nil
 		}
 		if msg.err != nil {
 			m.volumes[msg.idx].Status = "error"
 			m.volumes[msg.idx].Err = msg.err
 			shared.Debugf("[cloneprogress] error creating volume idx=%d: %v", msg.idx, msg.err)
-			return m.startRollback()
+			if m.failed {
+				return m.launchRollback()
+			}
+			return m.startRollback(nil)
 		}
 		m.volumes[msg.idx].CloneVolID = msg.volID
 		m.volumes[msg.idx].Status = "creating"
 		shared.Debugf("[cloneprogress] volume created idx=%d volID=%s", msg.idx, msg.volID)
+		if m.failed {
+			// A create that was in flight when the clone failed: the new
+			// volume is ours, so rollback must wait for it and remove it.
+			return m.launchRollback()
+		}
 		return m, m.ensurePolling()
 
 	case pollTickMsg:
@@ -288,10 +317,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
+			// Tolerate transient API errors; the poll chain retries.
+			m.volumes[msg.idx].pollErrs++
+			if m.volumes[msg.idx].pollErrs < maxPollErrors {
+				shared.Debugf("[cloneprogress] volume poll idx=%d failed (%d/%d): %v", msg.idx, m.volumes[msg.idx].pollErrs, maxPollErrors, msg.err)
+				return m, nil
+			}
 			m.volumes[msg.idx].Status = "error"
 			m.volumes[msg.idx].Err = msg.err
-			return m.startRollback()
+			return m.startRollback(nil)
 		}
+		m.volumes[msg.idx].pollErrs = 0
 		if msg.status == "available" {
 			m.volumes[msg.idx].Status = "available"
 			return m.tryAttach(msg.idx)
@@ -299,7 +335,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.status == "error" {
 			m.volumes[msg.idx].Status = "error"
 			m.volumes[msg.idx].Err = fmt.Errorf("volume entered error state")
-			return m.startRollback()
+			return m.startRollback(nil)
 		}
 		// Still creating — the running poll chain checks it again.
 		return m, nil
@@ -309,10 +345,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			// Non-fatal — the running poll chain retries.
-			return m, nil
+			// Tolerate transient API errors; the running poll chain retries.
+			m.serverErrs++
+			if m.serverErrs < maxPollErrors {
+				return m, nil
+			}
+			return m.startRollback(fmt.Errorf("checking cloned server %s: %w", m.serverName, msg.err))
 		}
-		if msg.ready {
+		m.serverErrs = 0
+		if msg.status == "ERROR" {
+			return m.startRollback(fmt.Errorf("cloned server %s entered ERROR state", m.serverName))
+		}
+		if msg.status == "ACTIVE" {
 			m.serverReady = true
 			// Attach all volumes that were waiting
 			var cmds []tea.Cmd
@@ -338,7 +382,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.volumes[msg.idx].Status = "error"
 			m.volumes[msg.idx].Err = msg.err
 			shared.Debugf("[cloneprogress] error attaching volume idx=%d: %v", msg.idx, msg.err)
-			return m.startRollback()
+			return m.startRollback(nil)
 		}
 		m.volumes[msg.idx].Status = "done"
 		shared.Debugf("[cloneprogress] volume attached idx=%d", msg.idx)
@@ -358,7 +402,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.rollingBack = false
 		op := m.op
 		return m, func() tea.Msg {
-			return RollbackCompleteMsg{Op: op, Cause: msg.cause, Errors: msg.errors}
+			return RollbackCompleteMsg{Op: op, Cause: msg.cause, Errors: msg.errors, Leftover: msg.leftover}
 		}
 	}
 	return m, nil
@@ -529,7 +573,7 @@ func (m Model) checkServerReady() tea.Cmd {
 		if err != nil {
 			return serverReadyMsg{op: op, err: err}
 		}
-		return serverReadyMsg{op: op, ready: srv.Status == "ACTIVE"}
+		return serverReadyMsg{op: op, status: srv.Status}
 	}
 }
 
@@ -553,49 +597,155 @@ func (m Model) allDone() bool {
 	return true
 }
 
-// startRollback cleans up the resources owned by this clone operation. It
-// runs at most once per operation.
-func (m Model) startRollback() (Model, tea.Cmd) {
+// startRollback marks the clone failed and cleans up the resources it owns.
+// It runs at most once per operation. cause overrides the volume error
+// reported as the reason, when the failure did not come from a volume.
+func (m Model) startRollback(cause error) (Model, tea.Cmd) {
 	if m.failed || m.rollingBack {
 		return m, nil
 	}
 	m.failed = true
 	m.rollingBack = true
+	m.cause = cause
+	return m.launchRollback()
+}
 
-	// Find the original error that triggered rollback
-	var cause error
+// createsInFlight reports whether a volume create request has not
+// answered yet; its volume would be missed by a cleanup started now.
+func (m Model) createsInFlight() bool {
+	if !m.createsIssued {
+		return false
+	}
 	for _, op := range m.volumes {
-		if op.Err != nil {
-			cause = op.Err
-			break
+		if op.Status == "pending" {
+			return true
 		}
 	}
+	return false
+}
 
-	// Collect volume IDs to delete and server to delete
-	var volIDs []string
+// ownedVolumeIDs returns the IDs of the volumes this clone created.
+func (m Model) ownedVolumeIDs() []string {
+	var ids []string
 	for _, op := range m.volumes {
 		if op.CloneVolID != "" {
-			volIDs = append(volIDs, op.CloneVolID)
+			ids = append(ids, op.CloneVolID)
 		}
 	}
+	return ids
+}
 
+// launchRollback starts the cleanup command once no create request is in
+// flight, so every volume this clone created is known.
+func (m Model) launchRollback() (Model, tea.Cmd) {
+	if !m.rollingBack || m.rollbackLaunched || m.createsInFlight() {
+		return m, nil
+	}
+	m.rollbackLaunched = true
+
+	cause := m.cause
+	if cause == nil {
+		for _, op := range m.volumes {
+			if op.Err != nil {
+				cause = op.Err
+				break
+			}
+		}
+	}
+	volIDs := m.ownedVolumeIDs()
 	volumeClient := m.volumeClient
 	computeClient := m.computeClient
 	serverID := m.serverID
 	op := m.op
 
 	return m, func() tea.Msg {
-		var errs []error
-		// Delete cloned volumes
-		for _, vid := range volIDs {
-			if err := volume.DeleteVolume(context.Background(), volumeClient, vid); err != nil {
-				errs = append(errs, fmt.Errorf("delete volume %s: %w", vid, err))
-			}
-		}
-		// Delete the cloned server
-		if err := compute.DeleteServer(context.Background(), computeClient, serverID); err != nil {
-			errs = append(errs, fmt.Errorf("delete server %s: %w", serverID, err))
-		}
-		return rollbackDoneMsg{op: op, cause: cause, errors: errs}
+		errs, leftover := rollbackResources(computeClient, volumeClient, serverID, volIDs)
+		return rollbackDoneMsg{op: op, cause: cause, errors: errs, leftover: leftover}
 	}
+}
+
+// rollbackResources deletes the cloned server, waits for it to be gone,
+// then deletes each cloned volume once Cinder allows it. Volumes attached
+// to the server cannot be deleted before the server is removed. It returns
+// the cleanup errors and the resources left behind.
+func rollbackResources(computeClient, volumeClient *gophercloud.ServiceClient, serverID string, volIDs []string) ([]error, []string) {
+	ctx, cancel := context.WithTimeout(context.Background(), rollbackWaitTimeout)
+	defer cancel()
+	var errs []error
+	var leftover []string
+
+	serverGone := false
+	if err := compute.DeleteServer(ctx, computeClient, serverID); err != nil && !isNotFound(err) {
+		errs = append(errs, fmt.Errorf("delete server %s: %w", serverID, err))
+	} else {
+		serverGone = waitUntil(ctx, func() bool {
+			_, err := compute.GetServer(ctx, computeClient, serverID)
+			return isNotFound(err)
+		})
+		if !serverGone {
+			errs = append(errs, fmt.Errorf("server %s still present after delete", serverID))
+		}
+	}
+	if !serverGone {
+		leftover = append(leftover, "server "+serverID)
+	}
+
+	for _, vid := range volIDs {
+		if err := deleteVolumeWhenFree(ctx, volumeClient, vid); err != nil {
+			errs = append(errs, err)
+			leftover = append(leftover, "volume "+vid)
+		}
+	}
+	return errs, leftover
+}
+
+// deleteVolumeWhenFree waits until the volume is in a deletable state and
+// deletes it. A volume that is already gone counts as deleted.
+func deleteVolumeWhenFree(ctx context.Context, client *gophercloud.ServiceClient, id string) error {
+	var last string
+	done := waitUntil(ctx, func() bool {
+		v, err := volume.GetVolume(ctx, client, id)
+		switch {
+		case isNotFound(err):
+			last = "deleted"
+			return true
+		case err != nil:
+			last = err.Error()
+			return false
+		}
+		last = v.Status
+		switch v.Status {
+		case "available", "error", "error_restoring", "error_extending", "error_managing":
+			return true
+		}
+		return false
+	})
+	if !done {
+		return fmt.Errorf("delete volume %s: not deletable before timeout (last: %s)", id, last)
+	}
+	if last == "deleted" {
+		return nil
+	}
+	if err := volume.DeleteVolume(ctx, client, id); err != nil && !isNotFound(err) {
+		return fmt.Errorf("delete volume %s: %w", id, err)
+	}
+	return nil
+}
+
+// waitUntil polls cond until it returns true or ctx expires.
+func waitUntil(ctx context.Context, cond func() bool) bool {
+	for {
+		if cond() {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(rollbackPollInterval):
+		}
+	}
+}
+
+func isNotFound(err error) bool {
+	return err != nil && gophercloud.ResponseCodeIs(err, http.StatusNotFound)
 }

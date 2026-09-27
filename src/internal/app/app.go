@@ -1335,7 +1335,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.finishClone(msg.Op) {
 			return m, nil
 		}
-		m.errModal = modal.NewError("Clone Failed", msg.Cause)
+		cause := msg.Cause
+		if cause == nil {
+			cause = fmt.Errorf("clone failed")
+		}
+		if len(msg.Leftover) > 0 {
+			cause = fmt.Errorf("%w; cleanup left behind: %s", cause, strings.Join(msg.Leftover, ", "))
+		}
+		m.errModal = modal.NewError("Clone Failed", cause)
 		m.errModal.SetSize(m.width, m.height)
 		m.activeModal = modalError
 		return m, nil

@@ -304,3 +304,159 @@ func TestPollChainStopsOnceClonesAreAttached(t *testing.T) {
 		t.Fatal("poll chain kept running after completion")
 	}
 }
+
+func creatingClone(t *testing.T, rec *recorder) Model {
+	t.Helper()
+	client, cleanup := testutil.FakeServiceClient(rec)
+	t.Cleanup(cleanup)
+	return New(client, client, "B-server", "b", []VolumeOp{
+		{CloneName: "b-0", CloneVolID: "v0", Status: "creating"},
+	})
+}
+
+func TestTransientPollErrorsAreRetriedBeforeRollback(t *testing.T) {
+	m := creatingClone(t, &recorder{})
+	for i := 0; i < maxPollErrors-1; i++ {
+		var cmd tea.Cmd
+		m, cmd = m.Update(volumeStatusMsg{op: m.op, idx: 0, err: errBoom})
+		if cmd != nil || m.failed {
+			t.Fatalf("transient volume poll error %d triggered rollback", i+1)
+		}
+		m, cmd = m.Update(serverReadyMsg{op: m.op, err: errBoom})
+		if cmd != nil || m.failed {
+			t.Fatalf("transient server poll error %d triggered rollback", i+1)
+		}
+	}
+	// A successful poll resets the count.
+	m, _ = m.Update(volumeStatusMsg{op: m.op, idx: 0, status: "creating"})
+	for i := 0; i < maxPollErrors-1; i++ {
+		m, _ = m.Update(volumeStatusMsg{op: m.op, idx: 0, err: errBoom})
+	}
+	if m.failed {
+		t.Fatal("error count was not reset by a successful poll")
+	}
+	m, cmd := m.Update(volumeStatusMsg{op: m.op, idx: 0, err: errBoom})
+	if cmd == nil || !m.failed {
+		t.Fatal("persistent poll errors should fail the clone")
+	}
+}
+
+func TestServerErrorStateFailsTheClone(t *testing.T) {
+	m := creatingClone(t, &recorder{})
+	m.volumes[0].Status = "available"
+	m.pendingAttach = []int{0}
+	m, cmd := m.Update(serverReadyMsg{op: m.op, status: "ERROR"})
+	if cmd == nil || !m.failed || !m.rollingBack {
+		t.Fatal("server ERROR state must be terminal and start rollback")
+	}
+}
+
+func TestRollbackWaitsForInFlightCreates(t *testing.T) {
+	client, cleanup := testutil.FakeServiceClient(&recorder{})
+	t.Cleanup(cleanup)
+	m := New(client, client, "B-server", "b", []VolumeOp{
+		{CloneName: "b-0", Status: "pending"},
+		{CloneName: "b-1", Status: "pending"},
+	})
+	m.createsIssued = true
+	m, cmd := m.Update(volumeCreatedMsg{op: m.op, idx: 0, err: errBoom})
+	if cmd != nil || !m.failed {
+		t.Fatal("rollback must wait while another create is in flight")
+	}
+	m, cmd = m.Update(volumeCreatedMsg{op: m.op, idx: 1, volID: "late-vol"})
+	if cmd == nil || !m.rollbackLaunched {
+		t.Fatal("rollback should start once the last create returned")
+	}
+	if ids := m.ownedVolumeIDs(); len(ids) != 1 || ids[0] != "late-vol" {
+		t.Fatalf("rollback volumes = %v, want the late-created volume", ids)
+	}
+}
+
+func withFastRollback(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	oldPoll, oldTimeout := rollbackPollInterval, rollbackWaitTimeout
+	rollbackPollInterval, rollbackWaitTimeout = time.Millisecond, timeout
+	t.Cleanup(func() { rollbackPollInterval, rollbackWaitTimeout = oldPoll, oldTimeout })
+}
+
+func TestRollbackDeletesServerFirstThenFreedVolumes(t *testing.T) {
+	withFastRollback(t, time.Minute)
+	var mu sync.Mutex
+	serverGets, volumeGets := 0, 0
+	serverDeleted := false
+	rec := &recorder{handle: func(w http.ResponseWriter, r *http.Request) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/servers/B-server":
+			serverDeleted = true
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/servers/B-server":
+			serverGets++
+			if serverGets < 3 {
+				fmt.Fprint(w, `{"server":{"id":"B-server","status":"ACTIVE","flavor":{"id":"f"}}}`)
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		case r.Method == http.MethodGet && r.URL.Path == "/volumes/v0":
+			volumeGets++
+			status := "in-use"
+			if volumeGets > 2 {
+				status = "available"
+			}
+			fmt.Fprintf(w, `{"volume":{"id":"v0","status":%q}}`, status)
+		case r.Method == http.MethodDelete && r.URL.Path == "/volumes/v0":
+			if !serverDeleted {
+				t.Error("volume deleted before the server")
+			}
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			return false
+		}
+		return true
+	}}
+	m := creatingClone(t, rec)
+	m, cmd := m.Update(volumeStatusMsg{op: m.op, idx: 0, status: "error"})
+	m, out := m.Update(cmd())
+	done := out().(RollbackCompleteMsg)
+	if m.Running() || done.Op != m.ID() {
+		t.Fatal("rollback did not finish this clone")
+	}
+	if len(done.Leftover) != 0 || len(done.Errors) != 0 {
+		t.Fatalf("clean rollback reported leftovers %v / errors %v", done.Leftover, done.Errors)
+	}
+	want := []string{"DELETE /servers/B-server", "DELETE /volumes/v0"}
+	if got := rec.deletes(); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("deletes = %v, want %v", got, want)
+	}
+}
+
+func TestRollbackReportsLeftoversWhenVolumeNeverFrees(t *testing.T) {
+	withFastRollback(t, 30*time.Millisecond)
+	rec := &recorder{handle: func(w http.ResponseWriter, r *http.Request) bool {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/servers/B-server":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/servers/B-server":
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == "/volumes/v0":
+			fmt.Fprint(w, `{"volume":{"id":"v0","status":"in-use"}}`)
+		default:
+			return false
+		}
+		return true
+	}}
+	m := creatingClone(t, rec)
+	_, cmd := m.Update(volumeStatusMsg{op: m.op, idx: 0, status: "error"})
+	done := cmd().(rollbackDoneMsg)
+	if len(done.leftover) != 1 || !strings.Contains(done.leftover[0], "v0") {
+		t.Fatalf("leftover = %v, want the stuck volume", done.leftover)
+	}
+	for _, d := range rec.deletes() {
+		if strings.Contains(d, "/volumes/") {
+			t.Fatalf("in-use volume deleted: %s", d)
+		}
+	}
+}

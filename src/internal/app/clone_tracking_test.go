@@ -81,9 +81,12 @@ func TestDismissedCloneKeepsTrackingWhileAnotherStarts(t *testing.T) {
 		t.Fatalf("finished clone A still tracked: %d", len(m.cloneBackground))
 	}
 
-	next, _ = m.Update(cloneprogress.RollbackCompleteMsg{Op: b.ID(), Cause: errTest})
+	next, _ = m.Update(cloneprogress.RollbackCompleteMsg{Op: b.ID(), Cause: errTest, Leftover: []string{"volume beta-vol"}})
 	m = next.(Model)
 	if m.cloneProgress.Active || m.activeModal != modalError {
 		t.Fatal("B's rollback should close its overlay and show the error")
+	}
+	if !strings.Contains(m.errModal.View(), "beta-vol") {
+		t.Fatal("rollback error does not report the resources left behind")
 	}
 }
