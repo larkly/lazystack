@@ -137,10 +137,22 @@ jobs:
           chmod +x "lazystack-linux-${GOARCH}"
           cp "lazystack-linux-${GOARCH}" lazystack
 
+      # Pinned version and archive checksum (from the release's checksums.txt).
+      # The archive is verified before it is extracted, and nFPM is installed
+      # into a runner-owned directory without sudo. Bump both values together.
       - name: Install nFPM
+        env:
+          NFPM_VERSION: "2.47.0"
+          NFPM_SHA256: "0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783"
         run: |
-          NFPM_VERSION=$(curl -sI https://github.com/goreleaser/nfpm/releases/latest | grep -i location | sed 's|.*/v||;s/\r//')
-          curl -sL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" | sudo tar -xz -C /usr/local/bin nfpm
+          archive="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSL --proto '=https' -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/${archive}"
+          echo "${NFPM_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c --strict -
+          mkdir -p "$RUNNER_TEMP/nfpm"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/nfpm" nfpm
+          echo "$RUNNER_TEMP/nfpm" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/nfpm/nfpm" --version
 
       - name: Build deb
         env:
