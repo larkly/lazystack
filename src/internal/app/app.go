@@ -1204,30 +1204,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
 
 	case shared.ResourceActionMsg:
-		m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
-		m.statusBar.Error = ""
-		// Navigate back to list view if we were on a detail view
-		m.returnToView = 0
-		if m.view == viewVolumeDetail {
-			m.view = viewVolumeList
-			m.statusBar.CurrentView = "volumelist"
-		}
-		if m.view == viewKeypairDetail {
-			m.view = viewKeypairList
-			m.statusBar.CurrentView = "keypairlist"
-		}
-		if m.view == viewLBView {
-			m.statusBar.CurrentView = "lbview"
-			return m, m.lbView.ForceRefresh()
-		}
-		if m.view == viewImageView {
-			m.statusBar.CurrentView = "imageview"
-			return m, m.imageView.ForceRefresh()
-		}
-		if m.view == viewSecGroupView {
-			return m, m.secGroupView.ForceRefresh()
-		}
-		return m, nil
+		return m.handleResourceActionMsg(msg)
 
 	case shared.ResourceActionErrMsg:
 		m.errModal = modal.NewError(
