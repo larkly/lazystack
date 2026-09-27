@@ -94,9 +94,22 @@ func (m Model) handleResourceActionMsg(msg shared.ResourceActionMsg) (Model, tea
 	m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
 	m.statusBar.Error = ""
 	// Navigate back to list view if we were on a detail view
+	returnTo := m.returnToView
 	m.returnToView = 0
 	switch m.view {
 	case viewVolumeDetail:
+		// A volume opened from another view (server detail's volumes pane)
+		// returns there, keeping that view's own origin: the volume list is
+		// not the active tab, so it would never receive its refresh reply
+		// and would stay loading forever.
+		if m.nav != nil {
+			if top, ok := m.nav.Peek(); ok && top.View != viewVolumeList {
+				entry, _ := m.popNav()
+				m.returnToView = returnTo
+				m, _ = m.restoreNavEntry(entry)
+				return m.forceRefreshActiveView()
+			}
+		}
 		m.popNavIfTop(viewVolumeList)
 		m.view = viewVolumeList
 		m.statusBar.CurrentView = "volumelist"
