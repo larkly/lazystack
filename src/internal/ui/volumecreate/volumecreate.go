@@ -30,6 +30,10 @@ const (
 
 type volumeTypesLoadedMsg struct{ types []volume.VolumeType }
 type fetchErrMsg struct{ err error }
+type azsLoadedMsg struct {
+	azs []string
+	err error
+}
 type volumeCreatedMsg struct{ vol *volume.Volume }
 type volumeCreateErrMsg struct{ err error }
 
@@ -43,8 +47,14 @@ type Model struct {
 
 	volumeTypes []volume.VolumeType
 
+	// Availability zones reported by Cinder; azErr is set when the lookup
+	// failed. Without a selection Cinder picks its default zone.
+	azs      []string
+	azsReady bool
+	azErr    string
+
 	selectedType int
-	selectedAZ   int
+	selectedAZ   int // index into azs, -1 = server default
 
 	// Inline picker state
 	pickerOpen   bool
@@ -98,7 +108,7 @@ func New(bsClient *gophercloud.ServiceClient) Model {
 		descInput:    di,
 		pickerFilter: pf,
 		spinner:      s,
-		loading:      1,
+		loading:      2,
 		selectedType: -1,
 		selectedAZ:   -1,
 	}
@@ -109,6 +119,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		m.fetchVolumeTypes(),
+		m.fetchAZs(),
 	)
 }
 
@@ -122,6 +133,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case fetchErrMsg:
 		m.loading--
 		m.err = msg.err.Error()
+		return m, nil
+	case azsLoadedMsg:
+		// A failed zone lookup is not fatal: the volume can still be
+		// created in Cinder's default zone.
+		m.loading--
+		m.azsReady = true
+		m.azs = msg.azs
+		m.azErr = ""
+		if msg.err != nil {
+			m.azErr = msg.err.Error()
+		}
+		if m.selectedAZ >= len(m.azs) {
+			m.selectedAZ = -1
+		}
 		return m, nil
 
 	case volumeCreatedMsg:
@@ -296,12 +321,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focusField = (m.focusField + 1) % numFields
 		m.updateFocus()
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		filtered := m.filteredPickerItems(items)
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
@@ -326,14 +351,13 @@ func (m Model) pickerItems() []pickerItem {
 	case fieldType:
 		items := make([]pickerItem, len(m.volumeTypes))
 		for i, vt := range m.volumeTypes {
-			items[i] = pickerItem{id: i, name: vt.Name, desc: vt.ID[:8]}
+			items[i] = pickerItem{id: i, name: vt.Name, desc: shared.ShortID(vt.ID)}
 		}
 		return items
 	case fieldAZ:
-		azs := []string{"nova", "az1", "az2"}
-		items := make([]pickerItem, len(azs))
-		for i, az := range azs {
-			items[i] = pickerItem{id: i, name: az}
+		items := []pickerItem{{id: -1, name: "(server default)"}}
+		for i, az := range m.azs {
+			items = append(items, pickerItem{id: i, name: az})
 		}
 		return items
 	}
@@ -408,6 +432,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	if m.selectedType >= 0 && m.selectedType < len(m.volumeTypes) {
 		opts.VolumeType = m.volumeTypes[m.selectedType].Name
+	}
+	if m.selectedAZ >= 0 && m.selectedAZ < len(m.azs) {
+		opts.AvailabilityZone = m.azs[m.selectedAZ]
 	}
 
 	m.submitting = true
@@ -509,11 +536,14 @@ func (m Model) selectionDisplay(field int) string {
 			return m.volumeTypes[m.selectedType].Name
 		}
 	case fieldAZ:
-		if m.selectedAZ >= 0 {
-			azs := []string{"nova", "az1", "az2"}
-			if m.selectedAZ < len(azs) {
-				return azs[m.selectedAZ]
-			}
+		if m.selectedAZ >= 0 && m.selectedAZ < len(m.azs) {
+			return m.azs[m.selectedAZ]
+		}
+		switch {
+		case m.azErr != "":
+			return "<zones unavailable: " + m.azErr + "; server default>"
+		case m.azsReady && len(m.azs) == 0:
+			return "<no zones reported; server default>"
 		}
 	}
 	return "<press enter to select, optional>"
@@ -567,6 +597,14 @@ func (m Model) fetchVolumeTypes() tea.Cmd {
 			return fetchErrMsg{err: err}
 		}
 		return volumeTypesLoadedMsg{types: types}
+	}
+}
+
+func (m Model) fetchAZs() tea.Cmd {
+	client := m.bsClient
+	return func() tea.Msg {
+		azs, err := volume.ListAvailabilityZones(context.Background(), client)
+		return azsLoadedMsg{azs: azs, err: err}
 	}
 }
 

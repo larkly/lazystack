@@ -122,58 +122,43 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return shared.ViewChangeMsg{View: "serverlist"}
 			}
 		case key.Matches(msg, shared.Keys.Up):
-			if m.cursor > 0 {
-				m.cursor--
-				if m.cursor < m.scroll {
-					m.scroll = m.cursor
-				}
-			}
-			// Update selected zone
-			if m.cursor < len(m.zones) {
-				m.selectedZone = &m.zones[m.cursor]
-				m.loading = true
-				return m, tea.Batch(m.spinner.Tick, m.fetchRecordsets(m.zones[m.cursor].ID))
-			}
+			return m.moveCursor(m.cursor - 1)
 		case key.Matches(msg, shared.Keys.Down):
-			if m.cursor < len(m.zones)-1 {
-				m.cursor++
-				visible := m.visibleRows()
-				if m.cursor >= m.scroll+visible {
-					m.scroll = m.cursor - visible + 1
-				}
-				// Update selected zone
-				m.selectedZone = &m.zones[m.cursor]
-				m.loading = true
-				return m, tea.Batch(m.spinner.Tick, m.fetchRecordsets(m.zones[m.cursor].ID))
-			}
+			return m.moveCursor(m.cursor + 1)
 		case key.Matches(msg, shared.Keys.PageUp):
-			m.cursor -= m.visibleRows()
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
-			m.scroll = m.cursor
-			if m.cursor < len(m.zones) {
-				m.selectedZone = &m.zones[m.cursor]
-				m.loading = true
-				return m, tea.Batch(m.spinner.Tick, m.fetchRecordsets(m.zones[m.cursor].ID))
-			}
+			return m.moveCursor(m.cursor - m.visibleRows())
 		case key.Matches(msg, shared.Keys.PageDown):
-			m.cursor += m.visibleRows()
-			if m.cursor >= len(m.zones) {
-				m.cursor = len(m.zones) - 1
-			}
-			visible := m.visibleRows()
-			if m.cursor >= m.scroll+visible {
-				m.scroll = m.cursor - visible + 1
-			}
-			if m.cursor < len(m.zones) {
-				m.selectedZone = &m.zones[m.cursor]
-				m.loading = true
-				return m, tea.Batch(m.spinner.Tick, m.fetchRecordsets(m.zones[m.cursor].ID))
-			}
+			return m.moveCursor(m.cursor + m.visibleRows())
 		}
 	}
 	return m, nil
+}
+
+// moveCursor clamps target to the zone list, keeps it visible and fetches
+// the selected zone's records when the selection changes. Empty lists (not
+// yet loaded, empty, or failed) are a no-op.
+func (m Model) moveCursor(target int) (Model, tea.Cmd) {
+	if len(m.zones) == 0 {
+		m.cursor = 0
+		m.scroll = 0
+		return m, nil
+	}
+	target = max(0, min(target, len(m.zones)-1))
+	visible := m.visibleRows()
+	if target < m.scroll {
+		m.scroll = target
+	}
+	if target >= m.scroll+visible {
+		m.scroll = target - visible + 1
+	}
+	m.scroll = max(0, m.scroll)
+	if target == m.cursor && m.selectedZone != nil {
+		return m, nil
+	}
+	m.cursor = target
+	m.selectedZone = &m.zones[m.cursor]
+	m.loading = true
+	return m, tea.Batch(m.spinner.Tick, m.fetchRecordsets(m.zones[m.cursor].ID))
 }
 
 func (m Model) visibleRows() int {

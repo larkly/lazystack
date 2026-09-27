@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sync/atomic"
 	"time"
 
 	"github.com/larkly/lazystack/internal/shared"
@@ -114,7 +113,13 @@ func UpdateImage(ctx context.Context, client *gophercloud.ServiceClient, id stri
 		patches = append(patches, images.ReplaceImageMinRam{NewMinRam: *opts.MinRAM})
 	}
 	if opts.Tags != nil {
-		patches = append(patches, images.ReplaceImageTags{NewTags: *opts.Tags})
+		// A nil slice would encode as JSON null, which Glance rejects; an
+		// explicit clear must be sent as an empty array.
+		tags := *opts.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		patches = append(patches, images.ReplaceImageTags{NewTags: tags})
 	}
 	if opts.Protected != nil {
 		patches = append(patches, images.ReplaceImageProtected{NewProtected: *opts.Protected})
@@ -176,13 +181,24 @@ func CreateImage(ctx context.Context, client *gophercloud.ServiceClient, opts Cr
 	return &img, nil
 }
 
-// UploadImageData uploads image file data to an existing image.
-func UploadImageData(ctx context.Context, client *gophercloud.ServiceClient, imageID string, data io.Reader) error {
-	shared.Debugf("[image] UploadImageData: starting, imageID=%s", imageID)
+// UploadImageData uploads image file data to an existing image. The reader
+// enforces the exact byte count and can be rewound for a retried request;
+// after the upload the size stored by Glance is checked against it.
+func UploadImageData(ctx context.Context, client *gophercloud.ServiceClient, imageID string, data *UploadReader) error {
+	shared.Debugf("[image] UploadImageData: starting, imageID=%s size=%d", imageID, data.Size())
 	err := imagedata.Upload(ctx, client, imageID, data).ExtractErr()
 	if err != nil {
 		shared.Debugf("[image] UploadImageData: error: %v", err)
 		return fmt.Errorf("uploading image data %s: %w", imageID, err)
+	}
+	raw, err := images.Get(ctx, client, imageID).Extract()
+	if err != nil {
+		shared.Debugf("[image] UploadImageData: verify error: %v", err)
+		return fmt.Errorf("verifying uploaded image %s: %w", imageID, err)
+	}
+	if raw.SizeBytes != data.Size() {
+		shared.Debugf("[image] UploadImageData: size mismatch, imageID=%s stored=%d want=%d", imageID, raw.SizeBytes, data.Size())
+		return fmt.Errorf("uploading image data %s: stored size %d bytes does not match the %d bytes sent", imageID, raw.SizeBytes, data.Size())
 	}
 	shared.Debugf("[image] UploadImageData: success, imageID=%s", imageID)
 	return nil
@@ -219,24 +235,6 @@ func ImportImageURL(ctx context.Context, client *gophercloud.ServiceClient, imag
 	}
 	shared.Debugf("[image] ImportImageURL: success, imageID=%s", imageID)
 	return nil
-}
-
-// ProgressReader wraps an io.Reader to track bytes read atomically.
-type ProgressReader struct {
-	Reader    io.Reader
-	Total     int64
-	bytesRead atomic.Int64
-}
-
-func (pr *ProgressReader) Read(p []byte) (int, error) {
-	n, err := pr.Reader.Read(p)
-	pr.bytesRead.Add(int64(n))
-	return n, err
-}
-
-// BytesRead returns the current number of bytes read (safe for concurrent access).
-func (pr *ProgressReader) BytesRead() int64 {
-	return pr.bytesRead.Load()
 }
 
 // DeactivateImage deactivates an image (prevents downloads).

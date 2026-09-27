@@ -3,6 +3,8 @@ package network
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/security/groups"
@@ -29,6 +31,8 @@ type SecurityRule struct {
 	PortRangeMax   int
 	RemoteIPPrefix string
 	RemoteGroupID  string
+	// RemoteAddressGroupID restricts the rule to a Neutron address group.
+	RemoteAddressGroupID string
 }
 
 // ListSecurityGroups fetches all security groups with their rules.
@@ -56,6 +60,8 @@ func ListSecurityGroups(ctx context.Context, client *gophercloud.ServiceClient) 
 					PortRangeMax:   r.PortRangeMax,
 					RemoteIPPrefix: r.RemoteIPPrefix,
 					RemoteGroupID:  r.RemoteGroupID,
+
+					RemoteAddressGroupID: r.RemoteAddressGroupID,
 				})
 			}
 			result = append(result, group)
@@ -161,6 +167,8 @@ func GetSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, id
 			PortRangeMax:   r.PortRangeMax,
 			RemoteIPPrefix: r.RemoteIPPrefix,
 			RemoteGroupID:  r.RemoteGroupID,
+
+			RemoteAddressGroupID: r.RemoteAddressGroupID,
 		})
 	}
 	return group, nil
@@ -187,7 +195,35 @@ func UpdateSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient,
 	}, nil
 }
 
+// SecurityGroupCloneError is returned by CloneSecurityGroup when copying a
+// rule failed and the partially built clone could not be deleted, so it
+// remains. Err is the original failure (also reachable via Unwrap);
+// CleanupErr is why the rollback failed.
+type SecurityGroupCloneError struct {
+	NewGroupID  string
+	RulesCopied int
+	Err         error
+	CleanupErr  error
+}
+
+func (e *SecurityGroupCloneError) Error() string {
+	return fmt.Sprintf("%v (rollback failed: partial clone %s with %d copied rule(s) remains: %v)", e.Err, e.NewGroupID, e.RulesCopied, e.CleanupErr)
+}
+
+func (e *SecurityGroupCloneError) Unwrap() error { return e.Err }
+
 // CloneSecurityGroup creates a copy of a security group with all its rules.
+//
+// Rules keep their direction, ethertype, protocol, port range and remote
+// CIDR. A rule whose remote group is the source group itself ("members of
+// this group") is remapped to the new group, so the clone keeps the same
+// intra-group meaning instead of granting the source group's members access;
+// rules referencing any other group are copied verbatim.
+//
+// If copying a rule fails, the new group is deleted (best effort) so no
+// partial clone is left behind; when that rollback fails too, the returned
+// *SecurityGroupCloneError names the leftover group. The source group is
+// never modified.
 func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, srcID, newName, newDesc string) (*SecurityGroup, error) {
 	shared.Debugf("[network] cloning security group %s as %q", srcID, newName)
 	src, err := GetSecurityGroup(ctx, client, srcID)
@@ -200,10 +236,15 @@ func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, 
 		shared.Debugf("[network] clone security group %s: create target: %v", srcID, err)
 		return nil, fmt.Errorf("cloning: %w", err)
 	}
+	copied := 0
 	for _, r := range src.Rules {
 		// Skip default egress-allow-all rules — OpenStack creates these automatically
-		if r.Direction == "egress" && r.Protocol == "" && r.RemoteIPPrefix == "" && r.RemoteGroupID == "" && r.PortRangeMin == 0 && r.PortRangeMax == 0 {
+		if r.Direction == "egress" && r.Protocol == "" && r.RemoteIPPrefix == "" && r.RemoteGroupID == "" && r.RemoteAddressGroupID == "" && r.PortRangeMin == 0 && r.PortRangeMax == 0 {
 			continue
+		}
+		remoteGroupID := r.RemoteGroupID
+		if remoteGroupID == srcID {
+			remoteGroupID = newSG.ID
 		}
 		opts := rules.CreateOpts{
 			SecGroupID:     newSG.ID,
@@ -213,14 +254,36 @@ func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, 
 			PortRangeMin:   r.PortRangeMin,
 			PortRangeMax:   r.PortRangeMax,
 			RemoteIPPrefix: r.RemoteIPPrefix,
-			RemoteGroupID:  r.RemoteGroupID,
+			RemoteGroupID:  remoteGroupID,
+			// Keep address-group restrictions; dropping them would open
+			// the cloned rule to any source.
+			RemoteAddressGroupID: r.RemoteAddressGroupID,
 		}
 		_, err := CreateSecurityGroupRule(ctx, client, opts)
 		if err != nil {
 			shared.Debugf("[network] clone security group %s: clone rule: %v", srcID, err)
-			return nil, fmt.Errorf("cloning rule: %w", err)
+			origErr := fmt.Errorf("cloning rule: %w", err)
+			if cleanupErr := rollbackClone(ctx, client, newSG.ID); cleanupErr != nil {
+				return nil, &SecurityGroupCloneError{NewGroupID: newSG.ID, RulesCopied: copied, Err: origErr, CleanupErr: cleanupErr}
+			}
+			return nil, origErr
 		}
+		copied++
 	}
-	shared.Debugf("[network] cloned security group %s as %q (ID: %s, %d rules)", srcID, newName, newSG.ID, len(src.Rules))
+	shared.Debugf("[network] cloned security group %s as %q (ID: %s, %d rules)", srcID, newName, newSG.ID, copied)
 	return GetSecurityGroup(ctx, client, newSG.ID)
+}
+
+// rollbackClone deletes a partially built clone. It uses its own bounded
+// context so a cancelled caller context does not leave the clone behind; a
+// 404 means it is already gone.
+func rollbackClone(parent context.Context, client *gophercloud.ServiceClient, id string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 30*time.Second)
+	defer cancel()
+	if err := DeleteSecurityGroup(ctx, client, id); err != nil && !gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		shared.Debugf("[network] clone rollback: delete security group %s: %v", id, err)
+		return err
+	}
+	shared.Debugf("[network] clone rollback: removed partial security group %s", id)
+	return nil
 }

@@ -3,6 +3,7 @@ package portcreate
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sort"
 	"strings"
 
@@ -52,6 +53,7 @@ type Model struct {
 	focusField     int
 	submitting     bool
 	loadingSGs     bool
+	sgLoadErr      string // non-empty when security group discovery failed
 	spinner        spinner.Model
 	err            string
 	width          int
@@ -136,7 +138,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case sgLoadErrMsg:
 		m.loadingSGs = false
-		m.err = "Failed to load security groups: " + msg.err.Error()
+		m.sgLoadErr = msg.err.Error()
+		m.err = "Failed to load security groups: " + m.sgLoadErr + " (the server default will apply)"
 		return m, nil
 	case portCreatedMsg:
 		m.submitting = false
@@ -147,6 +150,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case portCreateErrMsg:
 		m.submitting = false
 		m.err = msg.err.Error()
+		if m.sgLoadErr != "" {
+			m.err += " (security groups could not be loaded; the server default was requested)"
+		}
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting || m.loadingSGs {
@@ -368,6 +374,10 @@ func (m Model) sgDisplayValue() string {
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
+	if m.loadingSGs {
+		m.err = "Security groups are still loading"
+		return m, nil
+	}
 	opts := network.PortCreateOpts{
 		NetworkID:    m.networkID,
 		Name:         strings.TrimSpace(m.nameInput.Value()),
@@ -388,13 +398,17 @@ func (m Model) submit() (Model, tea.Cmd) {
 		opts.FixedIPs = fips
 	}
 
-	// Collect selected security groups (empty slice = no SGs, nil = server default)
-	indices := m.sortedSGIndices()
-	sgIDs := make([]string, 0, len(indices))
-	for _, idx := range indices {
-		sgIDs = append(sgIDs, m.secGroups[idx].ID)
+	// Collect selected security groups (empty slice = no SGs, nil = server
+	// default). If discovery failed the empty selection is not a user
+	// choice, so leave the field out and let Neutron apply its default.
+	if m.sgLoadErr == "" {
+		indices := m.sortedSGIndices()
+		sgIDs := make([]string, 0, len(indices))
+		for _, idx := range indices {
+			sgIDs = append(sgIDs, m.secGroups[idx].ID)
+		}
+		opts.SecurityGroups = sgIDs
 	}
-	opts.SecurityGroups = sgIDs
 
 	// Parse allowed address pairs
 	apRaw := strings.TrimSpace(m.allowPairInput.Value())
@@ -427,6 +441,12 @@ func (m Model) submit() (Model, tea.Cmd) {
 	})
 }
 
+// parseFixedIPs parses a comma-separated list of fixed IP entries. Each
+// entry is either a bare address, or subnet:address where subnet is a
+// subnet name, ID or unambiguous ID prefix and the address may be empty to
+// let Neutron allocate one. A bare address is checked first, so IPv6
+// addresses need no subnet prefix; it goes to the network's only subnet, or
+// to the single subnet whose CIDR contains it.
 func (m Model) parseFixedIPs(raw string) ([]network.FixedIP, error) {
 	var result []network.FixedIP
 	for _, part := range strings.Split(raw, ",") {
@@ -434,34 +454,90 @@ func (m Model) parseFixedIPs(raw string) ([]network.FixedIP, error) {
 		if part == "" {
 			continue
 		}
-		if idx := strings.Index(part, ":"); idx >= 0 {
-			subnetName := strings.TrimSpace(part[:idx])
-			ip := strings.TrimSpace(part[idx+1:])
-			subnetID := m.resolveSubnet(subnetName)
-			if subnetID == "" {
-				return nil, fmt.Errorf("unknown subnet %q", subnetName)
+		if addr, err := netip.ParseAddr(part); err == nil {
+			subnetID, err := m.subnetForAddress(addr)
+			if err != nil {
+				return nil, err
 			}
-			result = append(result, network.FixedIP{SubnetID: subnetID, IPAddress: ip})
-		} else {
-			if len(m.subnets) == 0 {
-				return nil, fmt.Errorf("no subnets on network to assign IP %q", part)
-			}
-			if len(m.subnets) > 1 {
-				return nil, fmt.Errorf("multiple subnets on network, use subnet:ip format")
-			}
-			result = append(result, network.FixedIP{SubnetID: m.subnets[0].ID, IPAddress: part})
+			result = append(result, network.FixedIP{SubnetID: subnetID, IPAddress: part})
+			continue
 		}
+		idx := strings.Index(part, ":")
+		if idx < 0 {
+			return nil, fmt.Errorf("invalid IP address %q", part)
+		}
+		subnetName := strings.TrimSpace(part[:idx])
+		ip := strings.TrimSpace(part[idx+1:])
+		if subnetName == "" {
+			return nil, fmt.Errorf("missing subnet before %q", part[idx:])
+		}
+		if ip != "" {
+			if _, err := netip.ParseAddr(ip); err != nil {
+				return nil, fmt.Errorf("invalid IP address %q for subnet %q", ip, subnetName)
+			}
+		}
+		subnetID, err := m.resolveSubnet(subnetName)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, network.FixedIP{SubnetID: subnetID, IPAddress: ip})
 	}
 	return result, nil
 }
 
-func (m Model) resolveSubnet(name string) string {
+// subnetForAddress picks the subnet for a bare address.
+func (m Model) subnetForAddress(addr netip.Addr) (string, error) {
+	switch len(m.subnets) {
+	case 0:
+		return "", fmt.Errorf("no subnets on network to assign IP %q", addr)
+	case 1:
+		return m.subnets[0].ID, nil
+	}
+	var match string
 	for _, s := range m.subnets {
-		if s.Name == name || s.ID == name || (len(s.ID) >= len(name) && s.ID[:len(name)] == name) {
-			return s.ID
+		prefix, err := netip.ParsePrefix(s.CIDR)
+		if err != nil || !prefix.Contains(addr) {
+			continue
+		}
+		if match != "" {
+			return "", fmt.Errorf("several subnets contain %s, use subnet:ip format", addr)
+		}
+		match = s.ID
+	}
+	if match == "" {
+		return "", fmt.Errorf("no subnet on this network contains %s, use subnet:ip format", addr)
+	}
+	return match, nil
+}
+
+// resolveSubnet resolves a subnet by exact ID, exact name or unique ID
+// prefix. Ambiguous names or prefixes are rejected rather than guessed.
+func (m Model) resolveSubnet(name string) (string, error) {
+	for _, s := range m.subnets {
+		if s.ID == name {
+			return s.ID, nil
 		}
 	}
-	return ""
+	var byName, byPrefix []string
+	for _, s := range m.subnets {
+		if s.Name == name {
+			byName = append(byName, s.ID)
+		}
+		if strings.HasPrefix(s.ID, name) {
+			byPrefix = append(byPrefix, s.ID)
+		}
+	}
+	switch {
+	case len(byName) == 1:
+		return byName[0], nil
+	case len(byName) > 1:
+		return "", fmt.Errorf("subnet name %q is ambiguous, use the subnet ID", name)
+	case len(byPrefix) == 1:
+		return byPrefix[0], nil
+	case len(byPrefix) > 1:
+		return "", fmt.Errorf("subnet ID prefix %q is ambiguous", name)
+	}
+	return "", fmt.Errorf("unknown subnet %q", name)
 }
 
 func parseAddressPairs(raw string) ([]network.AddressPair, error) {
@@ -507,6 +583,8 @@ func (m Model) View() string {
 	sgValue := m.sgDisplayValue()
 	if m.loadingSGs {
 		sgValue = m.spinner.View() + " Loading..."
+	} else if m.sgLoadErr != "" {
+		sgValue = lipgloss.NewStyle().Foreground(shared.ColorWarning).Render("unavailable, server default")
 	}
 
 	fields := []field{

@@ -21,6 +21,9 @@ type CloudConnectedMsg struct {
 	ProviderClient     *gophercloud.ProviderClient
 	EndpointOpts       gophercloud.EndpointOpts
 	Region             string
+	// Warning is a non-secret capability degradation notice (e.g. an older
+	// Nova microversion) shown once after connecting. Empty when none.
+	Warning string
 }
 
 // CloudConnectErrMsg is sent when authentication fails.

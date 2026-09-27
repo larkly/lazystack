@@ -47,6 +47,7 @@ func (m Model) openVolumeDetail() (Model, tea.Cmd) {
 	}
 	m.volumeDetail = volumedetail.New(m.client.BlockStorage, m.client.Compute, v.ID)
 	m.volumeDetail.SetSize(m.width, m.height)
+	m.pushNav(m.view, m.activeTab)
 	m.view = viewVolumeDetail
 	m.statusBar.CurrentView = "volumedetail"
 	m.statusBar.Hint = m.volumeDetail.Hints()
@@ -481,7 +482,18 @@ func (m Model) openRouterDeleteConfirm() (Model, tea.Cmd) {
 	}
 	m.confirm = modal.NewConfirm("delete_router", id, name)
 	m.confirm.Title = "Delete Router"
-	m.confirm.Body = fmt.Sprintf("Are you sure you want to delete router %q?\nAll interfaces will be removed.", name)
+	// Deletion never detaches interfaces: Neutron refuses to delete a router
+	// that still has subnet interfaces, so say so instead of promising a
+	// cascade that does not happen.
+	body := fmt.Sprintf("Are you sure you want to delete router %q?", name)
+	n, known := m.routerView.InterfaceCount()
+	switch {
+	case known && n > 0:
+		body += fmt.Sprintf("\nIt has %d attached interface(s); deletion will fail until they are removed (Interfaces pane, %s).", n, shared.Keys.Detach.Help().Key)
+	case !known:
+		body += "\nA router with attached interfaces cannot be deleted; remove them first."
+	}
+	m.confirm.Body = body
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil
@@ -499,15 +511,20 @@ func (m Model) openAddRouterInterface() (Model, tea.Cmd) {
 }
 
 func (m Model) openRemoveRouterInterfaceConfirm() (Model, tea.Cmd) {
-	subnetID := m.routerView.SelectedInterfaceSubnetID()
-	if subnetID == "" {
+	iface := m.routerView.SelectedInterface()
+	if iface == nil || iface.SubnetID == "" {
 		return m, nil
 	}
 	routerID := m.routerView.SelectedRouterID()
 	routerName := m.routerView.SelectedRouterName()
-	m.confirm = modal.NewConfirm("remove_router_interface", routerID, routerName)
+	if routerID == "" {
+		return m, nil
+	}
+	// Capture the exact target now: the selection can change under the open
+	// dialog when the view refreshes.
+	m.confirm = modal.NewConfirm("remove_router_interface", encodeRouterInterfaceTarget(routerID, iface.SubnetID, iface.PortID), routerName)
 	m.confirm.Title = "Remove Interface"
-	m.confirm.Body = fmt.Sprintf("Remove subnet interface from router %q?", routerName)
+	m.confirm.Body = fmt.Sprintf("Remove interface %s (subnet %s, port %s) from router %q?", iface.IPAddress, iface.SubnetID, iface.PortID, routerName)
 	m.confirm.SetSize(m.width, m.height)
 	m.activeModal = modalConfirm
 	return m, nil
@@ -568,13 +585,13 @@ func (m Model) openLBListenerEdit() (Model, tea.Cmd) {
 	if l == nil {
 		return m, nil
 	}
-	m.lbListenerCreate = lblistenercreate.NewEdit(m.client.LoadBalancer, l.ID, l.Name, l.Description, l.ConnLimit, m.lbView.LBName())
+	m.lbListenerCreate = lblistenercreate.NewEdit(m.client.LoadBalancer, l.ID, l.Name, l.Description, l.ConnLimit, m.lbView.LBName(), l.Protocol, l.DefaultPoolID, m.lbView.Pools())
 	m.lbListenerCreate.SetSize(m.width, m.height)
 	return m, m.lbListenerCreate.Init()
 }
 
 func (m Model) openLBListenerCreate() (Model, tea.Cmd) {
-	m.lbListenerCreate = lblistenercreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName())
+	m.lbListenerCreate = lblistenercreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName(), m.lbView.Pools())
 	m.lbListenerCreate.SetSize(m.width, m.height)
 	return m, m.lbListenerCreate.Init()
 }
@@ -600,13 +617,13 @@ func (m Model) openLBPoolEdit() (Model, tea.Cmd) {
 	if p == nil {
 		return m, nil
 	}
-	m.lbPoolCreate = lbpoolcreate.NewEdit(m.client.LoadBalancer, p.ID, p.Name, p.LBMethod, m.lbView.LBName())
+	m.lbPoolCreate = lbpoolcreate.NewEdit(m.client.LoadBalancer, p.ID, p.Name, p.LBMethod, m.lbView.LBName(), m.lbView.Listeners())
 	m.lbPoolCreate.SetSize(m.width, m.height)
 	return m, m.lbPoolCreate.Init()
 }
 
 func (m Model) openLBPoolCreate() (Model, tea.Cmd) {
-	m.lbPoolCreate = lbpoolcreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName())
+	m.lbPoolCreate = lbpoolcreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName(), m.lbView.Listeners())
 	m.lbPoolCreate.SetSize(m.width, m.height)
 	return m, m.lbPoolCreate.Init()
 }
@@ -661,12 +678,7 @@ func (m Model) openLBMemberCreate() (Model, tea.Cmd) {
 	if lb := m.lbView.LB(); lb != nil {
 		lbVIPAddress = lb.VipAddress
 	}
-	existingMembers := m.lbView.SelectedPoolMembers()
-	existingMemberAddrs := make([]string, 0, len(existingMembers))
-	for _, member := range existingMembers {
-		existingMemberAddrs = append(existingMemberAddrs, member.Address)
-	}
-	m.lbMemberCreate = lbmembercreate.New(m.client.LoadBalancer, m.client.Compute, poolID, poolName, lbVIPAddress, existingMemberAddrs)
+	m.lbMemberCreate = lbmembercreate.New(m.client.LoadBalancer, m.client.Compute, poolID, poolName, lbVIPAddress, m.lbView.SelectedPoolMembers())
 	m.lbMemberCreate.SetSize(m.width, m.height)
 	return m, m.lbMemberCreate.Init()
 }
@@ -692,13 +704,24 @@ func (m Model) openLBMemberDeleteConfirm() (Model, tea.Cmd) {
 
 func (m Model) openLBBulkMemberDeleteConfirm() (Model, tea.Cmd) {
 	poolID := m.lbView.SelectedPoolID()
-	ids := m.lbView.SelectedMemberIDs()
-	if poolID == "" || len(ids) == 0 {
+	members := m.lbView.SelectedMembers()
+	if poolID == "" || len(members) == 0 {
 		return m, nil
 	}
-	count := len(ids)
-	// Encode poolID in ServerID for executeAction
-	c := modal.NewConfirm("delete_lb_members_bulk", poolID, fmt.Sprintf("%d members", count))
+	count := len(members)
+	// Capture every target now (pool, load balancer and members) so a
+	// refresh or cleared selection cannot change what gets deleted.
+	refs := make([]modal.ServerRef, len(members))
+	for i, mem := range members {
+		name := mem.Name
+		if name == "" {
+			name = mem.ID
+		}
+		refs[i] = modal.ServerRef{ID: mem.ID, Name: name}
+	}
+	c := modal.NewBulkConfirm("delete_lb_members_bulk", refs)
+	c.ServerID = encodeLBMembersTarget(poolID, m.lbView.LBID())
+	c.Name = fmt.Sprintf("%d members", count)
 	c.Title = "Bulk Delete Members"
 	c.Body = fmt.Sprintf("Delete %d selected members from this pool?", count)
 	c.SetSize(m.width, m.height)

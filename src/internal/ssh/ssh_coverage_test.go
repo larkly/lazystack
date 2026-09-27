@@ -15,8 +15,11 @@ func TestChooseIPPreservesFirstCandidate(t *testing.T) {
 	}{
 		{"first IPv6", []string{}, []string{"2001:db8::2", "2001:db8::1"}, []string{"192.0.2.1"}, "2001:db8::2"},
 		{"first IPv4", nil, []string{}, []string{"192.0.2.2", "192.0.2.1"}, "192.0.2.2"},
-		{"empty floating is not filtered", []string{"", "192.0.2.2"}, []string{"2001:db8::1"}, nil, ""},
-		{"empty IPv6 is not filtered", nil, []string{"", "2001:db8::1"}, []string{"192.0.2.1"}, ""},
+		{"empty first floating skipped", []string{"", "192.0.2.2"}, []string{"2001:db8::1"}, nil, "192.0.2.2"},
+		{"empty IPv6 skipped", nil, []string{"", "2001:db8::1"}, []string{"192.0.2.1"}, "2001:db8::1"},
+		{"all-empty floating falls to IPv4", []string{"", "  "}, nil, []string{"192.0.2.1"}, "192.0.2.1"},
+		{"all empty yields no target", []string{""}, []string{" "}, []string{""}, ""},
+		{"floating still beats IPv6", []string{"198.51.100.7"}, []string{"2001:db8::1"}, []string{"192.0.2.1"}, "198.51.100.7"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := ChooseIP(tc.floating, tc.ipv6, tc.ipv4); got != tc.want {

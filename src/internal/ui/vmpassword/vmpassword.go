@@ -1,6 +1,7 @@
 package vmpassword
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -22,6 +23,43 @@ type Model struct {
 	status     string
 	width      int
 	height     int
+
+	// Credentials mode (NewCredentials): transient secrets, masked until
+	// the user explicitly reveals them.
+	title      string
+	creds      []Credential
+	credCursor int
+	revealed   bool
+}
+
+// Credential is a transient secret for one server, such as the admin
+// password returned by a rescue or evacuation. Its String and GoString
+// never include the secret, so accidental formatting cannot leak it.
+type Credential struct {
+	Server string
+	Secret string
+}
+
+// String implements fmt.Stringer without revealing the secret.
+func (c Credential) String() string { return c.Server + ": " + masked }
+
+// GoString implements fmt.GoStringer without revealing the secret.
+func (c Credential) GoString() string {
+	return fmt.Sprintf("vmpassword.Credential{Server:%q, Secret:<redacted>}", c.Server)
+}
+
+const masked = "********"
+
+// NewCredentials creates a modal that lists transient per-server secrets.
+// Secrets stay masked until the user presses r; c copies the selected one.
+func NewCredentials(title, note string, creds []Credential) Model {
+	shared.Debugf("[vmpassword] credentials modal %q with %d entries", title, len(creds))
+	return Model{
+		Active: true,
+		title:  title,
+		note:   note,
+		creds:  creds,
+	}
 }
 
 // New creates a password modal. Plain is the decrypted password (may be
@@ -60,6 +98,23 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.creds != nil {
+		switch {
+		case key.Matches(msg, shared.Keys.Up):
+			if m.credCursor > 0 {
+				m.credCursor--
+			}
+			return m, nil
+		case key.Matches(msg, shared.Keys.Down):
+			if m.credCursor < len(m.creds)-1 {
+				m.credCursor++
+			}
+			return m, nil
+		case msg.String() == "r":
+			m.revealed = !m.revealed
+			return m, nil
+		}
+	}
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		m.Active = false
@@ -86,6 +141,13 @@ func (m Model) copyToClipboard() (Model, tea.Cmd) {
 }
 
 func (m Model) copyValue() (string, string) {
+	if m.creds != nil {
+		if m.credCursor >= 0 && m.credCursor < len(m.creds) {
+			c := m.creds[m.credCursor]
+			return c.Secret, "password for " + c.Server
+		}
+		return "", ""
+	}
 	if m.plain != "" {
 		return m.plain, "password"
 	}
@@ -97,6 +159,9 @@ func (m Model) copyValue() (string, string) {
 
 // View renders the password modal.
 func (m Model) View() string {
+	if m.creds != nil {
+		return m.credentialsView()
+	}
 	title := shared.StyleModalTitle.Render("Admin Password")
 
 	var body strings.Builder
@@ -140,6 +205,42 @@ func (m Model) View() string {
 
 	content := title + "\n\n" + body.String()
 	return m.renderModal(content)
+}
+
+func (m Model) credentialsView() string {
+	title := shared.StyleModalTitle.Render(m.title)
+	var body strings.Builder
+	label := lipgloss.NewStyle().Foreground(shared.ColorSecondary)
+	muted := lipgloss.NewStyle().Foreground(shared.ColorMuted)
+	value := lipgloss.NewStyle().Foreground(shared.ColorPrimary)
+	for i, c := range m.creds {
+		prefix := "  "
+		if i == m.credCursor {
+			prefix = "▸ "
+		}
+		secret := muted.Render(masked)
+		if m.revealed {
+			secret = value.Render(c.Secret)
+		}
+		body.WriteString(prefix + label.Render(c.Server) + "  " + secret + "\n")
+	}
+	body.WriteString("\n")
+	if m.note != "" {
+		body.WriteString("  " + muted.Render(m.note) + "\n\n")
+	}
+	if m.status != "" {
+		body.WriteString("  " + value.Render(m.status) + "\n\n")
+	}
+	reveal := "r: reveal"
+	if m.revealed {
+		reveal = "r: hide"
+	}
+	help := "  " + reveal + "  c: copy  esc: close"
+	if len(m.creds) > 1 {
+		help = "  ↑↓: select  " + reveal + "  c: copy  esc: close"
+	}
+	body.WriteString(shared.StyleHelp.Render(help))
+	return m.renderModal(title + "\n\n" + body.String())
 }
 
 func truncate(s string, max int) string {

@@ -76,26 +76,13 @@ func TestListCloudNames_Empty(t *testing.T) {
 // TestListCloudNames_EmptyFallsThrough verifies that an empty clouds.yaml in
 // an earlier search path does not shadow a real one further down (#200).
 func TestListCloudNames_EmptyFallsThrough(t *testing.T) {
-	dir := t.TempDir()
-	empty := filepath.Join(dir, "empty.yaml")
-	if err := os.WriteFile(empty, []byte("clouds: {}"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	homeConfig := filepath.Join(dir, ".config", "openstack", "clouds.yaml")
-	if err := os.MkdirAll(filepath.Dir(homeConfig), 0755); err != nil {
-		t.Fatal(err)
-	}
-	content := `clouds:
+	e := newCloudsEnv(t)
+	writeFile(t, filepath.Join(e.home, ".config", "openstack", "clouds.yaml"), "clouds: {}")
+	writeFile(t, filepath.Join(e.cwd, "clouds.yaml"), `clouds:
   real:
     auth:
       auth_url: https://real.example.com:5000
-`
-	if err := os.WriteFile(homeConfig, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv("OS_CLIENT_CONFIG_FILE", empty)
-	t.Setenv("HOME", dir)
+`)
 
 	names, err := ListCloudNames()
 	if err != nil {
@@ -107,13 +94,7 @@ func TestListCloudNames_EmptyFallsThrough(t *testing.T) {
 }
 
 func TestListCloudNames_NoFile(t *testing.T) {
-	// Point to nonexistent file, use empty temp dir as cwd
-	dir := t.TempDir()
-	t.Setenv("OS_CLIENT_CONFIG_FILE", filepath.Join(dir, "nonexistent.yaml"))
-	t.Setenv("HOME", dir) // prevent ~/.config/openstack/clouds.yaml
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	newCloudsEnv(t)
 
 	_, err := ListCloudNames()
 	if err == nil {
@@ -122,23 +103,19 @@ func TestListCloudNames_NoFile(t *testing.T) {
 }
 
 func TestCloudsYamlPaths_Order(t *testing.T) {
-	t.Setenv("OS_CLIENT_CONFIG_FILE", "/custom/path/clouds.yaml")
+	t.Setenv("OS_CLIENT_CONFIG_FILE", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "/testhome")
 	paths := CloudsYamlPaths()
 
-	// First path should be OS_CLIENT_CONFIG_FILE (when set)
-	if paths[0] != "/custom/path/clouds.yaml" {
-		t.Errorf("first path should be OS_CLIENT_CONFIG_FILE, got %s", paths[0])
-	}
-
-	// Then the per-user config
-	if paths[1] != filepath.Join("/testhome", ".config", "openstack", "clouds.yaml") {
-		t.Errorf("second path should be the home config, got %s", paths[1])
+	// First the per-user config
+	if paths[0] != filepath.Join("/testhome", ".config", "openstack", "clouds.yaml") {
+		t.Errorf("first path should be the home config, got %s", paths[0])
 	}
 
 	// Then the system-wide config
-	if paths[2] != "/etc/openstack/clouds.yaml" {
-		t.Errorf("third path should be /etc/openstack/clouds.yaml, got %s", paths[2])
+	if paths[1] != systemCloudsYaml {
+		t.Errorf("second path should be %s, got %s", systemCloudsYaml, paths[1])
 	}
 
 	// CWD must be searched LAST (credential-phishing surface, #200)
@@ -150,6 +127,7 @@ func TestCloudsYamlPaths_Order(t *testing.T) {
 func TestCloudsYamlPaths_WithoutEnv(t *testing.T) {
 	// Ensure OS_CLIENT_CONFIG_FILE is not set
 	t.Setenv("OS_CLIENT_CONFIG_FILE", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "/testhome")
 	paths := CloudsYamlPaths()
 
@@ -171,17 +149,9 @@ func TestCloudsYamlPaths_WithEnv(t *testing.T) {
 	t.Setenv("OS_CLIENT_CONFIG_FILE", "/my/custom/clouds.yaml")
 	paths := CloudsYamlPaths()
 
-	// Should have 4 paths: env, home, system, CWD
-	if len(paths) != 4 {
-		t.Errorf("expected 4 paths with env, got %d: %v", len(paths), paths)
-	}
-
-	if paths[0] != "/my/custom/clouds.yaml" {
-		t.Errorf("first path should be env path, got %s", paths[0])
-	}
-
-	if paths[len(paths)-1] != "clouds.yaml" {
-		t.Errorf("last path should be the CWD-relative clouds.yaml, got %s", paths[len(paths)-1])
+	// An explicit override is exclusive: no fallback locations.
+	if len(paths) != 1 || paths[0] != "/my/custom/clouds.yaml" {
+		t.Errorf("expected only the env path, got %v", paths)
 	}
 }
 
@@ -327,8 +297,10 @@ func TestListCloudNames_DetailedCloudsYaml(t *testing.T) {
 // Tests added for #37 Phase 4 — cloud config & discovery
 // ---------------------------------------------------------------------------
 
-func fakeProviderClient(handler http.Handler) *gophercloud.ProviderClient {
+func fakeProviderClient(t testing.TB, handler http.Handler) *gophercloud.ProviderClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ProviderClient{
 		HTTPClient:       *srv.Client(),
 		IdentityBase:     srv.URL + "/",
@@ -356,7 +328,7 @@ func TestListAccessibleProjects(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	pc := fakeProviderClient(handler)
+	pc := fakeProviderClient(t, handler)
 	srvURL = pc.IdentityEndpoint // capture after creation
 	// Provide an EndpointLocator so NewIdentityV3 can resolve the endpoint.
 	// The locator must return a valid URL; we return the test server base.

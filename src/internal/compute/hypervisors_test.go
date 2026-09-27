@@ -108,7 +108,7 @@ func TestListHypervisors(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNovaClient(handler)
+	client := fakeNovaClient(t, handler)
 	ctx := context.Background()
 
 	hypervisors, err := ListHypervisors(ctx, client)

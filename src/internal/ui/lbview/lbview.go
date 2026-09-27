@@ -47,6 +47,10 @@ type detailLoadedMsg struct {
 	pools     []loadbalancer.Pool
 	members   map[string][]loadbalancer.Member
 	monitors  map[string]*loadbalancer.HealthMonitor
+	// Per-pool member and per-monitor lookup failures; such pools have
+	// no entry in members/monitors.
+	memberErrs  map[string]string
+	monitorErrs map[string]string
 }
 type detailErrMsg struct {
 	lbID string
@@ -77,6 +81,8 @@ type Model struct {
 	pools        []loadbalancer.Pool
 	members      map[string][]loadbalancer.Member
 	monitors     map[string]*loadbalancer.HealthMonitor
+	memberErrs   map[string]string // pool ID -> member lookup error
+	monitorErrs  map[string]string // monitor ID -> lookup error
 	lastDetailID string
 	detailErr    string
 
@@ -142,6 +148,9 @@ func (m Model) FocusedPane() FocusPane { return m.focus }
 
 // InSelector returns true if the selector pane is focused.
 func (m Model) InSelector() bool { return m.focus == FocusSelector }
+
+// IsSearching reports whether the search input has focus.
+func (m Model) IsSearching() bool { return m.searchActive }
 
 // SelectedLB returns the load balancer under the selector cursor.
 func (m Model) SelectedLB() *loadbalancer.LoadBalancer {
@@ -314,6 +323,12 @@ func (m Model) SelectedPoolMonitor() *loadbalancer.HealthMonitor {
 	return m.selectedPoolMonitor()
 }
 
+// SelectedPoolMembersErr returns the error from the last member lookup of the
+// selected pool, or "" when its member list is current.
+func (m Model) SelectedPoolMembersErr() string {
+	return m.memberErrs[m.selectedPoolID()]
+}
+
 // SelectedPoolMembers returns the members of the currently selected pool.
 func (m Model) SelectedPoolMembers() []loadbalancer.Member {
 	members := m.selectedPoolMembers()
@@ -372,6 +387,17 @@ func (m Model) SelectedMemberIDs() []string {
 		}
 	}
 	return ids
+}
+
+// SelectedMembers returns the selected members of the current pool.
+func (m Model) SelectedMembers() []loadbalancer.Member {
+	var out []loadbalancer.Member
+	for _, mem := range m.selectedPoolMembers() {
+		if m.selectedMembers[mem.ID] {
+			out = append(out, mem)
+		}
+	}
+	return out
 }
 
 // SelectedMemberCount returns the number of selected members in the current pool.
@@ -434,6 +460,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.pools = msg.pools
 		m.members = msg.members
 		m.monitors = msg.monitors
+		m.memberErrs = msg.memberErrs
+		m.monitorErrs = msg.monitorErrs
 		m.detailErr = ""
 		m.clampDetailCursors()
 		return m, nil
@@ -716,6 +744,8 @@ func (m *Model) resetDetailState() {
 	m.pools = nil
 	m.members = make(map[string][]loadbalancer.Member)
 	m.monitors = make(map[string]*loadbalancer.HealthMonitor)
+	m.memberErrs = nil
+	m.monitorErrs = nil
 	m.detailErr = ""
 	m.listenerCursor = 0
 	m.listenerScroll = 0
@@ -934,6 +964,15 @@ func (m Model) selectedPoolMembers() []loadbalancer.Member {
 		return nil
 	}
 	return m.members[id]
+}
+
+func (m Model) selectedPoolMonitorErr() string {
+	if m.poolCursor >= 0 && m.poolCursor < len(m.pools) {
+		if id := m.pools[m.poolCursor].MonitorID; id != "" {
+			return m.monitorErrs[id]
+		}
+	}
+	return ""
 }
 
 func (m Model) selectedPoolMonitor() *loadbalancer.HealthMonitor {
@@ -1289,12 +1328,10 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		name := lb.Name
-		if name == "" && len(lb.ID) > 8 {
-			name = lb.ID[:8] + "..."
+		if name == "" {
+			name = shared.AbbrevID(lb.ID)
 		}
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		provIcon := shared.StatusIcon(lb.ProvisioningStatus)
 		operIcon := shared.StatusIcon(lb.OperatingStatus)
@@ -1401,9 +1438,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 		}
 		label := labelStyle.Render(p.label)
 		val := p.value
-		if lipgloss.Width(val) > valW {
-			val = val[:valW-1] + "\u2026"
-		}
+		val = shared.TruncateCells(val, valW)
 		var value string
 		if p.style != nil {
 			value = p.style(p.value).Render(shared.StatusIcon(p.value) + val)
@@ -1512,20 +1547,16 @@ func (m Model) renderListenersContent(maxWidth, maxHeight int) string {
 		if name == "" {
 			name = l.Protocol
 		}
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		pool := poolNames[l.DefaultPoolID]
 		if pool == "" && l.DefaultPoolID != "" {
-			pool = l.DefaultPoolID[:min(8, len(l.DefaultPoolID))] + "\u2026"
+			pool = shared.AbbrevID(l.DefaultPoolID)
 		}
 		if pool == "" {
 			pool = "\u2014"
 		}
-		if len(pool) > poolW {
-			pool = pool[:poolW-1] + "\u2026"
-		}
+		pool = shared.TruncateCells(pool, poolW)
 
 		line := fmt.Sprintf("%s%-*s%s%-*s%s%-*d%s%s",
 			prefix, nameW, name, sep, protoW, l.Protocol, sep, portW, l.ProtocolPort, sep, pool)
@@ -1608,17 +1639,15 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 		}
 
 		name := p.Name
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		method := p.LBMethod
-		if len(method) > methodW {
-			method = method[:methodW-1] + "\u2026"
-		}
+		method = shared.TruncateCells(method, methodW)
 
 		health := "\u2014"
-		if mon := m.monitors[p.MonitorID]; mon != nil {
+		if p.MonitorID != "" && m.monitorErrs[p.MonitorID] != "" {
+			health = "\u26a0 monitor unavailable"
+		} else if mon := m.monitors[p.MonitorID]; mon != nil {
 			health = mon.Type
 			if mon.Type == "HTTP" || mon.Type == "HTTPS" {
 				health = mon.Type + " " + mon.URLPath
@@ -1627,13 +1656,14 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 			if maxHW < 4 {
 				maxHW = 4
 			}
-			if len(health) > maxHW {
-				health = health[:maxHW-1] + "\u2026"
-			}
+			health = shared.TruncateCells(health, maxHW)
 		}
 
-		memberCount := len(m.members[p.ID])
-		countStr := lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(fmt.Sprintf(" [%d]", memberCount))
+		countText := fmt.Sprintf(" [%d]", len(m.members[p.ID]))
+		if m.memberErrs[p.ID] != "" {
+			countText = " [?]" // member lookup failed; the count is unknown
+		}
+		countStr := lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(countText)
 
 		line := fmt.Sprintf("%s%-*s  %-*s  %s",
 			prefix, nameW, name, methodW, method, health)
@@ -1646,7 +1676,10 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 	}
 
 	// Health monitor details
-	if mon := m.selectedPoolMonitor(); mon != nil {
+	if errText := m.selectedPoolMonitorErr(); errText != "" {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(shared.ColorError).Render("  ⚠ Health monitor unavailable: "+errText))
+	} else if mon := m.selectedPoolMonitor(); mon != nil {
 		lines = append(lines, "")
 		monStyle := lipgloss.NewStyle().Foreground(shared.ColorCyan)
 		labelStyle := lipgloss.NewStyle().Foreground(shared.ColorSecondary)
@@ -1692,6 +1725,9 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 	members := m.selectedPoolMembers()
 	if len(m.pools) == 0 {
 		return shared.StyleHelp.Render("No pools to show members for")
+	}
+	if errText := m.SelectedPoolMembersErr(); errText != "" {
+		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Members unavailable: " + errText)
 	}
 	if len(members) == 0 {
 		return shared.StyleHelp.Render("No members in this pool")
@@ -1763,14 +1799,10 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 		if name == "" {
 			name = "\u2014"
 		}
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		addr := fmt.Sprintf("%s:%d", mem.Address, mem.ProtocolPort)
-		if len(addr) > addrW {
-			addr = addr[:addrW-1] + "\u2026"
-		}
+		addr = shared.TruncateCells(addr, addrW)
 
 		var weight string
 		if mem.Weight == 0 {
@@ -2019,16 +2051,24 @@ func (m Model) fetchDetail(lbID string) tea.Cmd {
 
 		members := make(map[string][]loadbalancer.Member)
 		mons := make(map[string]*loadbalancer.HealthMonitor)
+		memberErrs := make(map[string]string)
+		monitorErrs := make(map[string]string)
 
 		for _, p := range pls {
 			mems, err := loadbalancer.ListMembers(ctx, client, p.ID)
-			if err == nil {
+			if err != nil {
+				shared.Debugf("[lbview] fetchDetail: members of pool %s: %v", p.ID, err)
+				memberErrs[p.ID] = err.Error()
+			} else {
 				members[p.ID] = mems
 			}
 
 			if p.MonitorID != "" {
 				mon, err := loadbalancer.GetHealthMonitor(ctx, client, p.MonitorID)
-				if err == nil {
+				if err != nil {
+					shared.Debugf("[lbview] fetchDetail: health monitor %s: %v", p.MonitorID, err)
+					monitorErrs[p.MonitorID] = err.Error()
+				} else {
 					mons[p.MonitorID] = mon
 				}
 			}
@@ -2036,11 +2076,13 @@ func (m Model) fetchDetail(lbID string) tea.Cmd {
 
 		shared.Debugf("[lbview] fetchDetail done: %d listeners, %d pools", len(lstnrs), len(pls))
 		return detailLoadedMsg{
-			lbID:      lbID,
-			listeners: lstnrs,
-			pools:     pls,
-			members:   members,
-			monitors:  mons,
+			lbID:        lbID,
+			listeners:   lstnrs,
+			pools:       pls,
+			members:     members,
+			monitors:    mons,
+			memberErrs:  memberErrs,
+			monitorErrs: monitorErrs,
 		}
 	}
 }

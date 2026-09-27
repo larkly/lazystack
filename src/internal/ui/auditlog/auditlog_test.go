@@ -85,3 +85,29 @@ func TestFilterEditingErrorAndEmpty(t *testing.T) {
 		t.Fatal("error state")
 	}
 }
+
+func TestNewViewerShowsLoadingUntilEntriesArrive(t *testing.T) {
+	for _, finish := range []func(*Model){
+		func(m *Model) { m.SetEntries([]audit.Entry{{Action: "create", ResourceName: "web"}}) },
+		func(m *Model) { m.SetError("read denied") },
+	} {
+		m := New()
+		m.SetSize(100, 20)
+		if !m.loading || !strings.Contains(m.View(), "loading") {
+			t.Fatalf("new viewer is not loading: %q", m.View())
+		}
+		tick := m.Init()()
+		var cmd tea.Cmd
+		m, cmd = m.Update(tick)
+		if cmd == nil {
+			t.Fatal("spinner tick did not advance while loading")
+		}
+		finish(&m)
+		if m.loading || strings.Contains(m.View(), "loading") {
+			t.Fatal("still loading after completion")
+		}
+		if _, cmd = m.Update(m.Init()()); cmd != nil {
+			t.Error("spinner kept ticking after completion")
+		}
+	}
+}

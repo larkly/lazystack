@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/larkly/lazystack/internal/compute"
+	"github.com/larkly/lazystack/internal/loadbalancer"
 )
 
 func TestAdvanceFocusSkipsManualAddressWhenServerSourceSelected(t *testing.T) {
@@ -136,17 +137,22 @@ func TestSelectServerKeepsExistingName(t *testing.T) {
 	}
 }
 
-func TestMakeAddressSetSkipsEmptyValues(t *testing.T) {
-	set := makeAddressSet([]string{"10.0.0.5", "", "  ", "2001:db8::5"})
+func TestMakeMemberSetSkipsEmptyValues(t *testing.T) {
+	set := makeMemberSet([]loadbalancer.Member{
+		{Address: "10.0.0.5", ProtocolPort: 80},
+		{Address: "", ProtocolPort: 80},
+		{Address: "  ", ProtocolPort: 80},
+		{Address: "2001:db8::5", ProtocolPort: 443},
+	})
 
 	if len(set) != 2 {
 		t.Fatalf("set len = %d, want 2", len(set))
 	}
-	if _, ok := set["10.0.0.5"]; !ok {
-		t.Fatal("expected 10.0.0.5 in set")
+	if _, ok := set[newMemberKey("10.0.0.5", 80)]; !ok {
+		t.Fatal("expected 10.0.0.5:80 in set")
 	}
-	if _, ok := set["2001:db8::5"]; !ok {
-		t.Fatal("expected 2001:db8::5 in set")
+	if _, ok := set[newMemberKey("2001:db8::5", 443)]; !ok {
+		t.Fatal("expected [2001:db8::5]:443 in set")
 	}
 }
 

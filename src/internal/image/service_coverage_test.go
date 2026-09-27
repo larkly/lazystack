@@ -54,6 +54,46 @@ func TestUpdateImagePatchHTTP(t *testing.T) {
 	}
 }
 
+func TestUpdateImageClearedTagsEncodeEmptyArray(t *testing.T) {
+	var nilTags []string
+	for _, tc := range []struct {
+		name string
+		tags *[]string
+		want any
+	}{
+		{"nil slice", &nilTags, []any{}},
+		{"empty slice", &[]string{}, []any{}},
+		{"values", &[]string{"a", "b"}, []any{"a", "b"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []map[string]any
+			client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+					t.Error(err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"id":"img"}`))
+			}))
+			defer close()
+			if err := UpdateImage(context.Background(), client, "img", UpdateImageOpts{Tags: tc.tags}); err != nil {
+				t.Fatal(err)
+			}
+			want := []map[string]any{{"op": "replace", "path": "/tags", "value": tc.want}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("patch=%#v want=%#v", got, want)
+			}
+		})
+	}
+	t.Run("nil pointer leaves tags unchanged", func(t *testing.T) {
+		calls := 0
+		client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ }))
+		defer close()
+		if err := UpdateImage(context.Background(), client, "img", UpdateImageOpts{}); err != nil || calls != 0 {
+			t.Fatalf("calls=%d err=%v", calls, err)
+		}
+	})
+}
+
 func TestDownloadImageDataHTTP(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

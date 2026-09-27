@@ -342,5 +342,5 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
-	return "↑↓ scroll • ^d delete • ^a attach • ^t detach • R refresh • esc back • ? help"
+	return "↑↓ scroll • ^d delete • " + shared.Keys.Attach.Help().Key + " attach • ^t detach • R refresh • esc back • ? help"
 }

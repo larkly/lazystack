@@ -1,6 +1,34 @@
 package shared
 
-import "charm.land/bubbles/v2/key"
+import (
+	"strings"
+
+	"charm.land/bubbles/v2/key"
+)
+
+// reservedKeys can never be bound: Ctrl+A is the GNU Screen prefix and
+// Ctrl+B the tmux prefix, so binding either would make lazystack unusable
+// (or steal the multiplexer's prefix) inside those tools.
+var reservedKeys = map[string]bool{
+	"ctrl+a": true,
+	"ctrl+b": true,
+}
+
+// IsReservedKey reports whether k is a key string that must never be bound.
+func IsReservedKey(k string) bool {
+	return reservedKeys[strings.ToLower(strings.TrimSpace(k))]
+}
+
+// ContainsReservedKey reports whether any key in a comma-separated
+// keybinding list is reserved.
+func ContainsReservedKey(keys string) bool {
+	for _, k := range strings.Split(keys, ",") {
+		if IsReservedKey(k) {
+			return true
+		}
+	}
+	return false
+}
 
 type KeyMap struct {
 	Quit           key.Binding
@@ -192,8 +220,8 @@ var Keys = KeyMap{
 		key.WithHelp("ctrl+r", "restart"),
 	),
 	Attach: key.NewBinding(
-		key.WithKeys("ctrl+a"),
-		key.WithHelp("ctrl+a", "attach"),
+		key.WithKeys("i"),
+		key.WithHelp("i", "attach"),
 	),
 	AssignFIP: key.NewBinding(
 		key.WithKeys("ctrl+u"),
@@ -328,7 +356,7 @@ var Keys = KeyMap{
 		key.WithHelp("U", "user management"),
 	),
 	ColumnPick: key.NewBinding(
-		key.WithKeys("ctrl+shift+c"),
-		key.WithHelp("ctrl+shift+c", "columns"),
+		key.WithKeys("O"),
+		key.WithHelp("O", "columns"),
 	),
 }
