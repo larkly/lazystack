@@ -135,7 +135,10 @@ func fitsWidth(columns []Column, totalWidth int) bool {
 // Messages
 type imagesLoadedMsg struct{ images []img.Image }
 type imagesErrMsg struct{ err error }
-type serversLoadedMsg struct{ servers []compute.Server }
+type serversLoadedMsg struct {
+	servers []compute.Server
+	err     error
+}
 type sortClearMsg struct{}
 
 // Model is the combined image selector + detail view.
@@ -160,6 +163,8 @@ type Model struct {
 
 	// Servers using image
 	servers       []compute.Server
+	serversLoaded bool   // a server list has been fetched successfully
+	serversErr    string // last server fetch failed; usage is unknown
 	serversCursor int
 	serversScroll int
 
@@ -337,7 +342,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case serversLoadedMsg:
+		if msg.err != nil {
+			// Usage is unknown: drop the old list rather than presenting
+			// stale (or no) servers as the current answer.
+			m.servers = nil
+			m.serversErr = msg.err.Error()
+			return m, nil
+		}
 		m.servers = msg.servers
+		m.serversLoaded = true
+		m.serversErr = ""
 		return m, nil
 
 	case shared.TickMsg:
@@ -696,6 +710,27 @@ func (m *Model) ensureServersCursorVisible() {
 	if m.serversCursor >= m.serversScroll+visH {
 		m.serversScroll = m.serversCursor - visH + 1
 	}
+}
+
+// windowStart returns the first row of a window of visible rows over total
+// rows, starting from scroll but moved just enough to contain cursor. The
+// render paths use it so the cursor stays visible even when the pane height
+// or layout mode differs from what the scroll offset was computed for.
+func windowStart(scroll, cursor, visible, total int) int {
+	start := scroll
+	if cursor < start {
+		start = cursor
+	}
+	if cursor >= start+visible {
+		start = cursor - visible + 1
+	}
+	if start > total-visible {
+		start = total - visible
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start
 }
 
 // --- Height calculations ---
@@ -1200,6 +1235,15 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 	if m.SelectedImage() == nil {
 		return ""
 	}
+	if m.serversErr != "" {
+		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Server usage unavailable: " + m.serversErr)
+	}
+	if !m.serversLoaded {
+		if m.computeClient == nil {
+			return shared.StyleHelp.Render("Server usage unavailable")
+		}
+		return shared.StyleHelp.Render("Loading servers…")
+	}
 	if len(srvs) == 0 {
 		return shared.StyleHelp.Render("No servers using this image")
 	}
@@ -1240,11 +1284,12 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 	var lines []string
 	lines = append(lines, headerLine)
 
+	start := windowStart(m.serversScroll, m.serversCursor, visibleLines, len(srvs))
 	for i, s := range srvs {
-		if i < m.serversScroll {
+		if i < start {
 			continue
 		}
-		if i >= m.serversScroll+visibleLines {
+		if i >= start+visibleLines {
 			break
 		}
 
@@ -1300,13 +1345,12 @@ func (m Model) renderServersCompact(srvs []compute.Server, maxWidth, visibleLine
 		nameW = 8
 	}
 
-	// Two servers per line
+	// Two servers per line. serversScroll is kept in item units, so map it
+	// and the cursor to rows before choosing the first visible row.
 	var lines []string
 	totalSlots := visibleLines * 2
-	start := m.serversScroll * 2 // scroll by pairs
-	if start >= len(srvs) {
-		start = 0
-	}
+	totalRows := (len(srvs) + 1) / 2
+	start := windowStart(m.serversScroll/2, m.serversCursor/2, visibleLines, totalRows) * 2
 
 	for row := 0; row < visibleLines; row++ {
 		var cells []string
@@ -1461,7 +1505,7 @@ func (m Model) fetchServers() tea.Cmd {
 		srvs, err := compute.ListServers(context.Background(), client)
 		if err != nil {
 			shared.Debugf("[imageview] fetch servers error (non-fatal): %v", err)
-			return serversLoadedMsg{servers: nil}
+			return serversLoadedMsg{err: err}
 		}
 		shared.Debugf("[imageview] fetch servers done, count=%d", len(srvs))
 		return serversLoadedMsg{servers: srvs}
