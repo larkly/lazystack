@@ -5,10 +5,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
 	"github.com/larkly/lazystack/internal/network"
+	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/testutil"
 )
 
@@ -169,5 +171,43 @@ func TestProjectIDFromAuthResult(t *testing.T) {
 	}
 	if got := New(nil, "s", "web").projectID; got != "" {
 		t.Fatalf("projectID with nil client = %q, want empty", got)
+	}
+}
+
+// A slow router lookup (admin credentials list every project's routers)
+// must not use up the deadline of the external network listing, or
+// "Allocate new" fails with a deadline error.
+func TestSlowRouterLookupDoesNotStarveExternalNetworks(t *testing.T) {
+	orig := shared.RequestTimeout
+	shared.RequestTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { shared.RequestTimeout = orig })
+
+	client, cleanup := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/ports":
+			if r.URL.Query().Get("device_id") != "srv" {
+				<-r.Context().Done() // router interfaces stall until the deadline
+				return
+			}
+			_, _ = w.Write([]byte(`{"ports":[{"id":"p1","device_id":"srv","network_id":"net-a",
+				"fixed_ips":[{"subnet_id":"sub-a","ip_address":"10.0.0.5"}]}]}`))
+		case "/routers":
+			_, _ = w.Write([]byte(`{"routers":[{"id":"r1","external_gateway_info":{"network_id":"ext-1"}}]}`))
+		case "/networks":
+			_, _ = w.Write([]byte(`{"networks":[{"id":"ext-1","name":"public","router:external":true}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer cleanup()
+
+	msg := New(client, "srv", "web").resolveTargets(nil)()
+	loaded, ok := msg.(targetsLoadedMsg)
+	if !ok {
+		t.Fatalf("got %#v, want targetsLoadedMsg", msg)
+	}
+	if loaded.extNetID != "ext-1" || len(loaded.targets) != 1 {
+		t.Fatalf("extNetID=%q targets=%v", loaded.extNetID, loaded.targets)
 	}
 }
