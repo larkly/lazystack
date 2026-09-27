@@ -218,6 +218,8 @@ type Model struct {
 	connectSeq          uint64     // identifies the latest connect attempt
 	detailReqSeq        uint64     // last delayed server-detail refresh issued
 	detailReqApplied    uint64     // newest delayed server-detail refresh applied
+	cloudListSeq        uint64     // latest asynchronous clouds.yaml read
+	copySeq             uint64     // latest asynchronous clipboard write
 	returnToView        activeView // cross-resource navigation back-nav
 	nav                 *NavStack  // local drill-down/overlay back-nav
 	refreshInterval     time.Duration
@@ -1203,7 +1205,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case copypicker.ChosenMsg:
-		return m.copyToClipboard(msg.Label, msg.Value), nil
+		return m.copyToClipboard(msg.Label, msg.Value)
+
+	case clipboardResultMsg:
+		return m.applyClipboardResult(msg)
+
+	case cloudsListedMsg:
+		return m.applyCloudList(msg)
 
 	case copypicker.CancelledMsg:
 		return m, nil

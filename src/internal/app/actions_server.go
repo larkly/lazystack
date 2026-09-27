@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"charm.land/bubbletea/v2"
-	"github.com/atotto/clipboard"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/larkly/lazystack/internal/audit"
@@ -1447,12 +1446,7 @@ func (m Model) copySSHCommand() (Model, tea.Cmd) {
 	}
 	keyPath := ssh.FindKeyPath(keyName)
 	cmdStr := ssh.BuildCommandString(ssh.Options{User: "USER", IP: ip, KeyPath: keyPath})
-	if err := clipboard.WriteAll(cmdStr); err != nil {
-		m.statusBar.StickyHint = "Clipboard error: " + err.Error()
-	} else {
-		m.statusBar.StickyHint = "Copied: " + cmdStr
-	}
-	return m, nil
+	return m.copyToClipboard("", cmdStr)
 }
 
 func (m Model) openVMPassword() (Model, tea.Cmd) {
