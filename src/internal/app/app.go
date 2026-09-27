@@ -1162,8 +1162,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cfg := m.configView.Cfg()
 		if cfg != nil {
 			cfg.Columns = msg.Columns
-			_ = cfg.Save()
 			m.serverList.SetColumns(cfg.Columns)
+			if err := cfg.Save(); err != nil {
+				m.statusBar.StickyHint = "Column layout applied but not saved: " + err.Error()
+			}
 		}
 		return m, nil
 
