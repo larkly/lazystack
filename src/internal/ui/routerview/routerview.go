@@ -75,7 +75,6 @@ type Model struct {
 	spinner         spinner.Model
 	err             string
 	refreshInterval time.Duration
-	highlightNames  map[string]bool
 }
 
 // New creates a router view model.
@@ -249,7 +248,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.routers) && len(m.routers) > 0 {
 			m.cursor = len(m.routers) - 1
 		}
-		m.applyHighlightNames()
 		if r := m.selectedRouter(); r != nil && r.ID != m.lastDetailID {
 			shared.Debugf("[routerview] routersLoaded: new selection %.8s, fetching detail", r.ID)
 			m.lastDetailID = r.ID
@@ -1110,33 +1108,6 @@ func (m *Model) ForceRefresh() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-}
-
-// ScrollToNames positions the cursor on the first matching router name.
-func (m *Model) ScrollToNames(names []string) {
-	m.highlightNames = make(map[string]bool, len(names))
-	for _, n := range names {
-		m.highlightNames[n] = true
-	}
-	m.applyHighlightNames()
-}
-
-func (m *Model) applyHighlightNames() {
-	if len(m.highlightNames) == 0 {
-		return
-	}
-	for i, r := range m.routers {
-		if m.highlightNames[r.Name] {
-			m.cursor = i
-			m.ensureSelectorCursorVisible()
-			m.highlightNames = nil
-			if r.ID != m.lastDetailID {
-				m.lastDetailID = r.ID
-				m.resetDetailState()
-			}
-			return
-		}
-	}
 }
 
 // Hints returns key hints for the status bar.
