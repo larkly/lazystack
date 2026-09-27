@@ -35,11 +35,14 @@
 |---|---|
 | [`nfpm.yaml`](nfpm.yaml) | NFPM packaging configuration for `.deb` and `.rpm` releases. |
 | [`aur/`](aur/) | AUR packaging files. |
-| [`Makefile`](Makefile) | Build targets (`build`, `test`, `install`). |
+| [`Makefile`](Makefile) | Repository-root targets: `build` (writes `bin/lazystack`, version `dev`) and `test` (`go test -race ./...`). |
+| [`src/Makefile`](src/Makefile) | Module targets, run from `src/`: `build` (writes `src/lazystack`, version from `git describe`), `test`, `vet`, `clean`, and `all` (vet, test, build). |
+
+There is no `install` target; copy the built binary onto your `PATH` yourself (see [README.md](README.md#from-source)).
 
 ---
 
 ## Contributing
 
-- All code is in `src/`. Run `make test` before committing.
+- All code is in `src/`. Run `make test` (from the repository root) before committing.
 - Release workflow is in [`.github/workflows/`](.github/workflows/) — CI workflows removed 2026-07-19 by release-only policy.
