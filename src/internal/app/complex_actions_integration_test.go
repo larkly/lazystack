@@ -37,7 +37,7 @@ func TestBulkMemberDeletionWaitsAndAggregates(t *testing.T) {
 				}
 				if r.Method == "DELETE" {
 					if mode == "delete-error" && r.URL.Path == "/lbaas/pools/pool/members/a" {
-						http.Error(w, "member failed", 409)
+						http.Error(w, "member failed", http.StatusConflict)
 					} else {
 						w.WriteHeader(204)
 					}
@@ -128,7 +128,7 @@ func TestRouterInterfaceRemovalChoosesDetachOrFixedIPUpdate(t *testing.T) {
 							checkJSON(t, body, `{"subnet_id":"sub1"}`)
 						}
 						if failed {
-							http.Error(w, "removal failed", 409)
+							http.Error(w, "removal failed", http.StatusConflict)
 							return
 						}
 						if multi {

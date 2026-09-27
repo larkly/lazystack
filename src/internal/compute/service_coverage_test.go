@@ -23,6 +23,9 @@ func TestGetPasswordHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Nova encrypts the admin password with RSA PKCS#1 v1.5, so the fixture
+	// must produce that legacy ciphertext for the decryption path to be tested.
+	//lint:ignore SA1019 Nova-compatible PKCS#1 v1.5 ciphertext is the test contract
 	ciphertext, err := rsa.EncryptPKCS1v15(rand.Reader, &key.PublicKey, []byte("secret"))
 	if err != nil {
 		t.Fatal(err)
