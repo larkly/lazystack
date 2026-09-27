@@ -139,7 +139,7 @@ func TestConfirmedServerActionsHTTPAndAudit(t *testing.T) {
 					if calls != 0 {
 						t.Fatal("action ran before command execution")
 					}
-					msg := cmd()
+					msg := unwrapResult(cmd())
 					if calls != 1 {
 						t.Fatalf("HTTP calls=%d", calls)
 					}

@@ -224,6 +224,7 @@ type Model struct {
 	downloadURL         string
 	checksumsURL        string
 	updateCheckInterval time.Duration
+	actions             *actionState // in-flight mutation locks, shared across model copies
 }
 
 // ShouldRestart returns true if the app quit due to a restart request.
@@ -280,6 +281,7 @@ func New(opts Options) Model {
 			tabInited:           make([]bool, len(tabs)),
 			nav:                 &NavStack{},
 			auditLogger:         audit.NewLogger(audit.DefaultPath(), opts.Config.Audit.Enabled),
+			actions:             newActionState(),
 		}
 	}
 
@@ -302,6 +304,7 @@ func New(opts Options) Model {
 		tabInited:           make([]bool, len(tabs)),
 		nav:                 &NavStack{},
 		auditLogger:         audit.NewLogger(audit.DefaultPath(), opts.Config.Audit.Enabled),
+		actions:             newActionState(),
 	}
 }
 
@@ -1105,9 +1108,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modal.ConfirmAction:
 		m.activeModal = modalNone
 		if msg.Confirm {
-			return m.executeAction(msg)
+			return m.runConfirmedAction(msg)
 		}
 		return m, nil
+
+	case actionResultMsg:
+		return m.handleActionResult(msg)
 
 	case modal.ErrorDismissedMsg:
 		m.activeModal = modalNone
