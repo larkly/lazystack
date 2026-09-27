@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -189,10 +190,12 @@ type rawGeneral struct {
 }
 
 type rawConfig struct {
-	General     rawGeneral        `yaml:"general"`
-	Colors      ColorConfig       `yaml:"colors"`
-	Keybindings map[string]string `yaml:"keybindings,omitempty"`
-	Columns     []ColumnConfig    `yaml:"columns,omitempty"`
+	General      rawGeneral        `yaml:"general"`
+	Colors       ColorConfig       `yaml:"colors"`
+	Keybindings  map[string]string `yaml:"keybindings,omitempty"`
+	SavedFilters []SavedFilter     `yaml:"saved_filters,omitempty"`
+	Columns      []ColumnConfig    `yaml:"columns,omitempty"`
+	Audit        AuditConfig       `yaml:"audit,omitempty"`
 }
 
 // LoadFrom reads config from the given path.
@@ -225,9 +228,11 @@ func LoadFrom(path string) (Config, error) {
 			RefreshInterval: raw.General.RefreshInterval,
 			IdleTimeout:     raw.General.IdleTimeout,
 		},
-		Colors:      raw.Colors,
-		Keybindings: raw.Keybindings,
-		Columns:     raw.Columns,
+		Colors:       raw.Colors,
+		Keybindings:  raw.Keybindings,
+		SavedFilters: raw.SavedFilters,
+		Columns:      raw.Columns,
+		Audit:        raw.Audit,
 	}
 
 	// Use raw pointer bools to distinguish "explicitly false" from "absent".
@@ -350,6 +355,10 @@ func (c *Config) Save() error {
 	return c.SaveTo(DefaultPath())
 }
 
+// chmodConfigFile sets the mode of an open config file. It is a variable so
+// tests can inject a permission-change failure.
+var chmodConfigFile = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
+
 // SaveTo writes config to the given path.
 func (c *Config) SaveTo(path string) error {
 	shared.Debugf("[config] SaveTo: start path=%s", path)
@@ -366,10 +375,35 @@ func (c *Config) SaveTo(path string) error {
 		shared.Debugf("[config] SaveTo: error marshaling: %v", err)
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := writePrivateFile(path, data); err != nil {
 		shared.Debugf("[config] SaveTo: error writing: %v", err)
 		return err
 	}
 	shared.Debugf("[config] SaveTo: success")
 	return nil
+}
+
+// writePrivateFile writes data to path with mode 0600. Unlike os.WriteFile,
+// the mode is also enforced on an existing file (which may have been created
+// with broader permissions), and it is enforced before the old content is
+// truncated so a failed permission change leaves the file untouched. The file
+// is rewritten in place so a symlinked config keeps pointing at its target.
+func writePrivateFile(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := chmodConfigFile(f, 0o600); err != nil {
+		f.Close()
+		return fmt.Errorf("setting permissions on %s: %w", path, err)
+	}
+	if err := f.Truncate(0); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
