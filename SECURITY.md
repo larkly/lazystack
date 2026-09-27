@@ -51,8 +51,8 @@ or the running binary is v0.20.0 or later, the update is refused unless:
    `src/internal/selfupdate/signature.go`).
 
 A release without a signature, with a malformed signature, or signed by any
-other key is rejected, and so is every such update from a build whose embedded
-key is still the empty placeholder.
+other key is rejected, and so is every such update from a build that has no
+embedded key (development builds made before the key was added).
 
 **Before v0.20.0 (transition).** While both versions are older than v0.20.0,
 signing is being rolled out and older clients must be able to keep updating

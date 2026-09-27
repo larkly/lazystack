@@ -17,15 +17,14 @@ import (
 // SHA256SUMS with the matching private key (repository secret
 // RELEASE_SIGNING_KEY) and publishes the result as SHA256SUMS.sig.
 //
-// PLACEHOLDER: until this is set, self-update verifies releases before
-// SignatureRequiredFrom with SHA256SUMS only, and refuses releases from it
-// on. Generate a key pair with
+// To rotate the key, generate a new pair with
 //
 //	cd src && go run ./internal/selfupdate/cmd/releasesign keygen
 //
-// store the printed private key as the RELEASE_SIGNING_KEY secret and paste
-// the printed public key here. See SECURITY.md.
-const ReleaseSigningPublicKey = ""
+// store the printed private key as the RELEASE_SIGNING_KEY secret and replace
+// the value below with the printed public key. Clients built with the old key
+// then fall back or refuse updates as described in SECURITY.md.
+const ReleaseSigningPublicKey = "Ky7UMN69rec2L8N74Cmcig55fvuz/tOwGAbByvzEmtk="
 
 // releasePublicKey is the key that verification trusts. It is a variable only
 // so tests can substitute their own key.

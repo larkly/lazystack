@@ -146,3 +146,15 @@ func TestVerifyChecksum_RequiresValidSignature(t *testing.T) {
 		})
 	}
 }
+
+// The embedded release key must be a well-formed Ed25519 public key, so a
+// typo cannot silently disable signature verification.
+func TestEmbeddedReleaseKeyIsValid(t *testing.T) {
+	pub, err := base64.StdEncoding.DecodeString(ReleaseSigningPublicKey)
+	if err != nil {
+		t.Fatalf("ReleaseSigningPublicKey is not valid base64: %v", err)
+	}
+	if len(pub) != ed25519.PublicKeySize {
+		t.Fatalf("ReleaseSigningPublicKey is %d bytes, want %d", len(pub), ed25519.PublicKeySize)
+	}
+}
