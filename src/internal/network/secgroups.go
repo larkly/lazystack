@@ -31,6 +31,8 @@ type SecurityRule struct {
 	PortRangeMax   int
 	RemoteIPPrefix string
 	RemoteGroupID  string
+	// RemoteAddressGroupID restricts the rule to a Neutron address group.
+	RemoteAddressGroupID string
 }
 
 // ListSecurityGroups fetches all security groups with their rules.
@@ -58,6 +60,8 @@ func ListSecurityGroups(ctx context.Context, client *gophercloud.ServiceClient) 
 					PortRangeMax:   r.PortRangeMax,
 					RemoteIPPrefix: r.RemoteIPPrefix,
 					RemoteGroupID:  r.RemoteGroupID,
+
+					RemoteAddressGroupID: r.RemoteAddressGroupID,
 				})
 			}
 			result = append(result, group)
@@ -163,6 +167,8 @@ func GetSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, id
 			PortRangeMax:   r.PortRangeMax,
 			RemoteIPPrefix: r.RemoteIPPrefix,
 			RemoteGroupID:  r.RemoteGroupID,
+
+			RemoteAddressGroupID: r.RemoteAddressGroupID,
 		})
 	}
 	return group, nil
@@ -233,7 +239,7 @@ func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, 
 	copied := 0
 	for _, r := range src.Rules {
 		// Skip default egress-allow-all rules — OpenStack creates these automatically
-		if r.Direction == "egress" && r.Protocol == "" && r.RemoteIPPrefix == "" && r.RemoteGroupID == "" && r.PortRangeMin == 0 && r.PortRangeMax == 0 {
+		if r.Direction == "egress" && r.Protocol == "" && r.RemoteIPPrefix == "" && r.RemoteGroupID == "" && r.RemoteAddressGroupID == "" && r.PortRangeMin == 0 && r.PortRangeMax == 0 {
 			continue
 		}
 		remoteGroupID := r.RemoteGroupID
@@ -249,6 +255,9 @@ func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, 
 			PortRangeMax:   r.PortRangeMax,
 			RemoteIPPrefix: r.RemoteIPPrefix,
 			RemoteGroupID:  remoteGroupID,
+			// Keep address-group restrictions; dropping them would open
+			// the cloned rule to any source.
+			RemoteAddressGroupID: r.RemoteAddressGroupID,
 		}
 		_, err := CreateSecurityGroupRule(ctx, client, opts)
 		if err != nil {

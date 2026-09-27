@@ -219,7 +219,7 @@ func (m Model) View() string {
 
 			name := vol.Name
 			if name == "" {
-				name = vol.ID[:12]
+				name = shared.TruncateID(vol.ID, 12)
 			}
 			detail := mutedStyle.Render(fmt.Sprintf(" %dGB", vol.Size))
 			if vol.VolumeType != "" {
@@ -277,7 +277,7 @@ func (m Model) attachVolume(vol volume.Volume) tea.Cmd {
 	volumeID := vol.ID
 	volumeName := vol.Name
 	if volumeName == "" {
-		volumeName = vol.ID[:12]
+		volumeName = shared.TruncateID(vol.ID, 12)
 	}
 	return func() tea.Msg {
 		_, err := volume.AttachVolume(context.Background(), client, serverID, volumeID)

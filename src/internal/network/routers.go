@@ -194,19 +194,47 @@ func RemoveRouterInterface(ctx context.Context, client *gophercloud.ServiceClien
 	return nil
 }
 
-// ListRouterInterfaces lists ports owned by a router (device_owner=network:router_interface).
+// routerInterfaceOwners are the device_owner values Neutron uses for a
+// router's subnet interfaces: legacy, HA (replicated) and distributed (DVR)
+// routers. Gateway ports, HA-network ports (network:router_ha_interface) and
+// DVR SNAT ports are auxiliary and deliberately not listed.
+var routerInterfaceOwners = map[string]bool{
+	"network:router_interface":               true,
+	"network:ha_router_replicated_interface": true,
+	"network:router_interface_distributed":   true,
+}
+
+// IsRouterInterfaceOwner reports whether a port device_owner denotes a
+// router subnet interface (legacy, HA or DVR).
+func IsRouterInterfaceOwner(owner string) bool {
+	return routerInterfaceOwners[owner]
+}
+
+// isRouterInterfacePort reports whether p, listed with a device_id filter
+// for routerID, is one of that router's subnet interfaces.
+func isRouterInterfacePort(p ports.Port, routerID string) bool {
+	if p.DeviceID != "" && p.DeviceID != routerID {
+		return false
+	}
+	return IsRouterInterfaceOwner(p.DeviceOwner)
+}
+
+// ListRouterInterfaces lists a router's subnet interface ports, including
+// HA and DVR interfaces.
 func ListRouterInterfaces(ctx context.Context, client *gophercloud.ServiceClient, routerID string) ([]RouterInterface, error) {
 	shared.Debugf("[network] listing router interfaces for router %s", routerID)
 	var result []RouterInterface
 	err := ports.List(client, ports.ListOpts{
-		DeviceID:    routerID,
-		DeviceOwner: "network:router_interface",
+		DeviceID: routerID,
 	}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		extracted, err := ports.ExtractPorts(page)
 		if err != nil {
 			return false, err
 		}
 		for _, p := range extracted {
+			if !isRouterInterfacePort(p, routerID) {
+				continue
+			}
 			for _, ip := range p.FixedIPs {
 				result = append(result, RouterInterface{
 					SubnetID:  ip.SubnetID,

@@ -257,12 +257,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focusField = (m.focusField + 1) % numFields
 		m.updateFocus()
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
 		}
@@ -284,11 +284,7 @@ type pickerItem struct {
 func (m Model) pickerItems() []pickerItem {
 	items := make([]pickerItem, len(m.extNetworks))
 	for i, n := range m.extNetworks {
-		desc := n.ID
-		if len(desc) > 8 {
-			desc = desc[:8]
-		}
-		items[i] = pickerItem{id: i, name: n.Name, desc: desc}
+		items[i] = pickerItem{id: i, name: n.Name, desc: shared.ShortID(n.ID)}
 	}
 	return items
 }
