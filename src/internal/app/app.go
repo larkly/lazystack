@@ -347,6 +347,12 @@ func isForceQuit(msg tea.KeyMsg) bool {
 	return msg.String() == "ctrl+c"
 }
 
+// isCreateFormView reports whether the active view is a full-page create
+// form, which owns every printable key.
+func (m Model) isCreateFormView() bool {
+	return m.view == viewServerCreate || m.view == viewVolumeCreate || m.view == viewKeypairCreate
+}
+
 // textInputFocused reports whether the active view has a focused filter or
 // search input that must receive every key before global shortcuts do.
 func (m Model) textInputFocused() bool {
@@ -434,7 +440,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		if m.view != viewServerCreate && m.view != viewVolumeCreate && m.view != viewKeypairCreate {
+		if !m.isCreateFormView() {
 			// Filter/search input mode (server list filter, LB and image
 			// search): every keystroke belongs to the input — never let
 			// global handlers see them (typing "q" would otherwise quit the
@@ -518,14 +524,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Global force refresh
-		if key.Matches(msg, shared.Keys.Refresh) && m.view != viewCloudPicker {
-			return m.forceRefreshActiveView()
-		}
-
-		// Global copy-field picker
-		if key.Matches(msg, shared.Keys.Copy) && m.view != viewCloudPicker {
-			return m.openCopyPicker()
+		// Global force refresh and copy-field picker. Create forms are
+		// full-page text entry, so R and Y must reach their inputs.
+		if m.view != viewCloudPicker && !m.isCreateFormView() {
+			if key.Matches(msg, shared.Keys.Refresh) {
+				return m.forceRefreshActiveView()
+			}
+			if key.Matches(msg, shared.Keys.Copy) {
+				return m.openCopyPicker()
+			}
 		}
 
 		if m.view == viewServerList || m.view == viewServerDetail {

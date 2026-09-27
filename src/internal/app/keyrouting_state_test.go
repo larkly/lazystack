@@ -215,6 +215,33 @@ func searchFilter(m Model, view activeView) string {
 	return child.FieldByName("searchFilter").String()
 }
 
+func TestCreateFormsReceiveUppercaseRAndY(t *testing.T) {
+	for _, view := range []activeView{viewServerCreate, viewVolumeCreate, viewKeypairCreate} {
+		m := initTestModel()
+		m.view = view
+		m.serverCreate = servercreate.New(nil, nil, nil)
+		m.serverCreate.SetSize(m.width, m.height)
+		m.volumeCreate = volumecreate.New(nil)
+		m.volumeCreate.SetSize(m.width, m.height)
+		m.keypairCreate = keypaircreate.New(nil)
+		m.keypairCreate.SetSize(m.width, m.height)
+		m, _ = typeKeys(t, m, "x", "R", "Y", "z")
+		if m.copyPicker.Active {
+			t.Errorf("view %d: Y opened the copy picker from a create form", view)
+		}
+		if !strings.Contains(m.viewContent(), "xRYz") {
+			t.Errorf("view %d: typed xRYz did not reach the name input", view)
+		}
+	}
+	// Outside text input, R still refreshes.
+	m := initTestModel()
+	m.view = viewServerList
+	m.serverList = serverlist.New(nil, nil, time.Hour)
+	if _, cmd := m.Update(press("R")); cmd == nil {
+		t.Fatal("R on the server list should refresh")
+	}
+}
+
 func TestCreateFormsKeepQAsInput(t *testing.T) {
 	for _, view := range []activeView{viewServerCreate, viewVolumeCreate, viewKeypairCreate} {
 		m := initTestModel()
