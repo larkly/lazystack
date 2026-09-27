@@ -154,9 +154,11 @@ func TestResourceBulkAuditAndStructuredOutcome(t *testing.T) {
 			if next == nil {
 				t.Error("no refresh after bulk mutation")
 			}
-			sel := m.volumeList.SelectionCount()
+			// The fixture lists have no rows loaded, so check the raw
+			// selection rather than the visible-row SelectionCount.
+			sel := len(m.volumeList.SelectedIDs())
 			if action == "delete_images_bulk" {
-				sel = m.imageView.SelectionCount()
+				sel = len(m.imageView.SelectedIDs())
 			}
 			if sel != len(wantFailed) {
 				t.Errorf("retryable selection=%d want %d", sel, len(wantFailed))

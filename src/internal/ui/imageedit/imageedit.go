@@ -305,26 +305,20 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	diskStr := strings.TrimSpace(m.minDiskInput.Value())
 	if diskStr != m.initMinDisk {
-		disk, err := strconv.Atoi(diskStr)
-		if err != nil && diskStr != "" {
-			m.err = "Min Disk must be a number"
+		disk, err := image.ParseMinimum("Min Disk", diskStr)
+		if err != nil {
+			m.err = err.Error()
 			return m, nil
-		}
-		if diskStr == "" {
-			disk = 0
 		}
 		opts.MinDisk = &disk
 	}
 
 	ramStr := strings.TrimSpace(m.minRAMInput.Value())
 	if ramStr != m.initMinRAM {
-		ram, err := strconv.Atoi(ramStr)
-		if err != nil && ramStr != "" {
-			m.err = "Min RAM must be a number"
+		ram, err := image.ParseMinimum("Min RAM", ramStr)
+		if err != nil {
+			m.err = err.Error()
 			return m, nil
-		}
-		if ramStr == "" {
-			ram = 0
 		}
 		opts.MinRAM = &ram
 	}

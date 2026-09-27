@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -113,12 +115,8 @@ func New(client *gophercloud.ServiceClient, imageID, imageName, diskFormat strin
 	pi.Prompt = ""
 
 	// Default path: cwd/imagename.format
-	ext := diskFormat
-	if ext == "" {
-		ext = "img"
-	}
 	cwd, _ := os.Getwd()
-	defaultFile := fmt.Sprintf("%s.%s", sanitizeFilename(imageName), ext)
+	defaultFile := defaultFilename(imageName, diskFormat)
 	defaultPath := filepath.Join(cwd, defaultFile)
 
 	pi.SetValue(defaultPath)
@@ -140,10 +138,52 @@ func New(client *gophercloud.ServiceClient, imageID, imageName, diskFormat strin
 	}
 }
 
-func sanitizeFilename(name string) string {
-	name = strings.ReplaceAll(name, "/", "_")
-	name = strings.ReplaceAll(name, " ", "_")
-	return name
+// maxDefaultNameBytes keeps generated names (plus extension) under the
+// common 255-byte filename limit.
+const maxDefaultNameBytes = 200
+
+// defaultFilename builds the suggested download filename from the image
+// name and disk format. The result is always a single, visible path
+// component: separators, whitespace, control characters, invalid UTF-8 and
+// characters that are invalid on common filesystems become "_", leading
+// dots are dropped, and an empty or dot-only name falls back to "image".
+// It is only a suggestion; the path the user types is used as-is.
+func defaultFilename(imageName, diskFormat string) string {
+	var b strings.Builder
+	for i, r := range imageName {
+		switch {
+		case r == utf8.RuneError && !strings.HasPrefix(imageName[i:], "�"),
+			unicode.IsControl(r), unicode.IsSpace(r),
+			strings.ContainsRune(`/\:*?"<>|`, r):
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	name := strings.TrimLeft(b.String(), ".")
+	name = strings.TrimRight(name, ". ")
+	if name == "" {
+		name = "image"
+	}
+	if len(name) > maxDefaultNameBytes {
+		cut := maxDefaultNameBytes
+		for cut > 0 && !utf8.RuneStart(name[cut]) {
+			cut--
+		}
+		name = name[:cut]
+	}
+
+	ext := diskFormat
+	for _, r := range ext {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			ext = ""
+			break
+		}
+	}
+	if ext == "" {
+		ext = "img"
+	}
+	return name + "." + ext
 }
 
 // Init returns initial commands.

@@ -314,7 +314,10 @@ func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, rout
 		err = network.AddRouterInterfaceByPort(ctx, client, routerID, port.ID)
 		if err != nil {
 			shared.Debugf("[subnetpicker] error adding port to router %s, cleaning up port %s: %v", routerID, port.ID, err)
-			_ = network.DeletePort(ctx, client, port.ID)
+			if delErr := network.DeletePort(ctx, client, port.ID); delErr != nil {
+				shared.Debugf("[subnetpicker] cleanup of port %s failed: %v", port.ID, delErr)
+				err = fmt.Errorf("%w (cleanup failed, port %s may be left behind: %v)", err, port.ID, delErr)
+			}
 			return interfaceAddErrMsg{err: err}
 		}
 

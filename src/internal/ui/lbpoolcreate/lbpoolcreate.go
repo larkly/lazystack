@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,15 +22,16 @@ const (
 	fieldName       = 0
 	fieldProtocol   = 1
 	fieldLBMethod   = 2
-	fieldMonType    = 3
-	fieldMonURL     = 4
-	fieldMonCodes   = 5
-	fieldMonDelay   = 6
-	fieldMonTimeout = 7
-	fieldMonRetries = 8
-	fieldSubmit     = 9
-	fieldCancel     = 10
-	numFields       = 11
+	fieldListener   = 3
+	fieldMonType    = 4
+	fieldMonURL     = 5
+	fieldMonCodes   = 6
+	fieldMonDelay   = 7
+	fieldMonTimeout = 8
+	fieldMonRetries = 9
+	fieldSubmit     = 10
+	fieldCancel     = 11
+	numFields       = 12
 )
 
 var (
@@ -40,8 +40,11 @@ var (
 	monTypeOpts  = []string{"NONE", "HTTP", "HTTPS", "TCP", "PING"}
 )
 
-type poolCreatedMsg struct{}
-type poolCreateErrMsg struct{ err error }
+type poolCreatedMsg struct{ listener string } // listener the pool was bound to, if any
+type poolCreateErrMsg struct {
+	err     error
+	partial string // what was already created when a later step failed
+}
 
 // Model is the pool create form modal.
 type Model struct {
@@ -60,6 +63,13 @@ type Model struct {
 	monTimeoutInput  textinput.Model
 	monRetriesInput  textinput.Model
 
+	// Listener binding: listeners without a default pool that the new pool
+	// can become the default pool of (0 = none, i = listeners[i-1]).
+	listeners        []loadbalancer.Listener
+	selectedListener int
+	// Edit mode: listeners currently using this pool as default pool.
+	boundListeners []string
+
 	// Edit mode
 	editMode bool
 	poolID   string
@@ -73,7 +83,9 @@ type Model struct {
 }
 
 // NewEdit creates an edit form for an existing pool (name + LB method only).
-func NewEdit(client *gophercloud.ServiceClient, poolID, currentName, currentLBMethod, lbName string) Model {
+// listeners are the load balancer's listeners, used to show which of them
+// route to this pool.
+func NewEdit(client *gophercloud.ServiceClient, poolID, currentName, currentLBMethod, lbName string, listeners []loadbalancer.Listener) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "pool name"
@@ -103,6 +115,12 @@ func NewEdit(client *gophercloud.ServiceClient, poolID, currentName, currentLBMe
 		}
 	}
 
+	for _, l := range listeners {
+		if l.DefaultPoolID == poolID {
+			m.boundListeners = append(m.boundListeners, listenerLabel(l))
+		}
+	}
+
 	// Create empty text inputs to avoid nil panics
 	for _, ti := range []*textinput.Model{&m.monURLInput, &m.monCodesInput, &m.monDelayInput, &m.monTimeoutInput, &m.monRetriesInput} {
 		*ti = textinput.New()
@@ -112,8 +130,9 @@ func NewEdit(client *gophercloud.ServiceClient, poolID, currentName, currentLBMe
 	return m
 }
 
-// New creates a pool create form.
-func New(client *gophercloud.ServiceClient, lbID, lbName string) Model {
+// New creates a pool create form. listeners are the load balancer's
+// listeners; those without a default pool are offered for binding.
+func New(client *gophercloud.ServiceClient, lbID, lbName string, listeners []loadbalancer.Listener) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "pool name"
@@ -165,8 +184,46 @@ func New(client *gophercloud.ServiceClient, lbID, lbName string) Model {
 		monDelayInput:   mdelay,
 		monTimeoutInput: mtimeout,
 		monRetriesInput: mretries,
+		listeners:       unboundListeners(listeners),
 		spinner:         s,
 	}
+}
+
+// unboundListeners returns the listeners that have no default pool yet.
+func unboundListeners(all []loadbalancer.Listener) []loadbalancer.Listener {
+	var out []loadbalancer.Listener
+	for _, l := range all {
+		if l.DefaultPoolID == "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func listenerLabel(l loadbalancer.Listener) string {
+	name := l.Name
+	if name == "" {
+		name = l.ID
+	}
+	return fmt.Sprintf("%s (%s:%d)", name, l.Protocol, l.ProtocolPort)
+}
+
+// chosenListener returns the listener to bind the new pool to, or nil.
+func (m Model) chosenListener() *loadbalancer.Listener {
+	if m.selectedListener > 0 && m.selectedListener <= len(m.listeners) {
+		return &m.listeners[m.selectedListener-1]
+	}
+	return nil
+}
+
+func (m Model) listenerView() string {
+	if l := m.chosenListener(); l != nil {
+		return "← " + listenerLabel(*l) + " →"
+	}
+	if len(m.listeners) == 0 {
+		return "none (no listener without a default pool)"
+	}
+	return "← none →"
 }
 
 // Init returns the initial command.
@@ -191,12 +248,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.submitting = false
 		m.Active = false
 		action := "Created pool on"
+		name := m.lbName
 		if m.editMode {
 			action = "Updated pool on"
 		}
-		shared.Debugf("[lbpoolcreate] success lbName=%q", m.lbName)
+		if msg.listener != "" {
+			name += " as default pool of " + msg.listener
+		}
+		shared.Debugf("[lbpoolcreate] success lbName=%q listener=%q", m.lbName, msg.listener)
 		return m, func() tea.Msg {
-			return shared.ResourceActionMsg{Action: action, Name: m.lbName}
+			return shared.ResourceActionMsg{Action: action, Name: name}
 		}
 	case poolCreateErrMsg:
 		m.submitting = false
@@ -204,6 +265,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		var cleanupErr *loadbalancer.PoolCleanupError
 		if errors.As(msg.err, &cleanupErr) && !strings.Contains(m.err, "may remain") {
 			m.err += fmt.Sprintf(" Rollback failed: pool %s may remain and need manual deletion.", cleanupErr.PoolID)
+		}
+		if msg.partial != "" {
+			// The pool exists but the binding does not: say so explicitly.
+			m.err = msg.partial + ": " + m.err
 		}
 		shared.Debugf("[lbpoolcreate] error: %v", msg.err)
 		return m, nil
@@ -273,6 +338,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.selectedProtocol = (m.selectedProtocol + 1) % len(protocolOpts)
 		case fieldLBMethod:
 			m.selectedLBMethod = (m.selectedLBMethod + 1) % len(lbMethodOpts)
+		case fieldListener:
+			m.selectedListener = (m.selectedListener + 1) % (len(m.listeners) + 1)
 		case fieldMonType:
 			m.selectedMonType = (m.selectedMonType + 1) % len(monTypeOpts)
 		case fieldSubmit:
@@ -285,6 +352,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.selectedProtocol = (m.selectedProtocol - 1 + len(protocolOpts)) % len(protocolOpts)
 		case fieldLBMethod:
 			m.selectedLBMethod = (m.selectedLBMethod - 1 + len(lbMethodOpts)) % len(lbMethodOpts)
+		case fieldListener:
+			n := len(m.listeners) + 1
+			m.selectedListener = (m.selectedListener - 1 + n) % n
 		case fieldMonType:
 			m.selectedMonType = (m.selectedMonType - 1 + len(monTypeOpts)) % len(monTypeOpts)
 		case fieldCancel:
@@ -398,56 +468,48 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 	protocol := protocolOpts[m.selectedProtocol]
 
+	// Reject a listener that cannot route to this pool's protocol before
+	// anything is created.
+	var listenerID, listenerName string
+	if l := m.chosenListener(); l != nil {
+		if !loadbalancer.CompatiblePoolProtocol(l.Protocol, protocol) {
+			m.err = fmt.Sprintf("A %s pool cannot be the default pool of %s listener %s", protocol, l.Protocol, listenerLabel(*l))
+			return m, nil
+		}
+		listenerID, listenerName = l.ID, listenerLabel(*l)
+	}
+
 	var monOpts *monitors.CreateOpts
 	if m.hasMonitor() {
 		monType := monTypeOpts[m.selectedMonType]
 
-		delayStr := strings.TrimSpace(m.monDelayInput.Value())
-		if delayStr == "" {
-			delayStr = "5"
-		}
-		delay, err := strconv.Atoi(delayStr)
-		if err != nil || delay < 1 {
-			m.err = "Delay must be a positive number (seconds)"
-			return m, nil
-		}
-		timeoutStr := strings.TrimSpace(m.monTimeoutInput.Value())
-		if timeoutStr == "" {
-			timeoutStr = "3"
-		}
-		timeout, err := strconv.Atoi(timeoutStr)
-		if err != nil || timeout < 1 {
-			m.err = "Timeout must be a positive number (seconds)"
-			return m, nil
-		}
-		retriesStr := strings.TrimSpace(m.monRetriesInput.Value())
-		if retriesStr == "" {
-			retriesStr = "3"
-		}
-		retries, err := strconv.Atoi(retriesStr)
-		if err != nil || retries < 1 || retries > 10 {
-			m.err = "Max retries must be a number between 1 and 10"
+		// Validate everything before the pool POST so a bad monitor
+		// setting cannot leave a pool behind without its monitor.
+		timing, err := loadbalancer.ParseMonitorTiming(m.monDelayInput.Value(), m.monTimeoutInput.Value(), m.monRetriesInput.Value())
+		if err != nil {
+			m.err = err.Error()
 			return m, nil
 		}
 
 		monOpts = &monitors.CreateOpts{
 			Type:       monType,
-			Delay:      delay,
-			Timeout:    timeout,
-			MaxRetries: retries,
+			Delay:      timing.Delay,
+			Timeout:    timing.Timeout,
+			MaxRetries: timing.MaxRetries,
 		}
 
 		if m.hasHTTPMonitor() {
+			codes, err := loadbalancer.NormalizeExpectedCodes(m.monCodesInput.Value())
+			if err != nil {
+				m.err = err.Error()
+				return m, nil
+			}
 			urlPath := strings.TrimSpace(m.monURLInput.Value())
 			if urlPath == "" {
 				urlPath = "/"
 			}
 			monOpts.URLPath = urlPath
 			monOpts.HTTPMethod = "GET"
-			codes := strings.TrimSpace(m.monCodesInput.Value())
-			if codes == "" {
-				codes = "200"
-			}
 			monOpts.ExpectedCodes = codes
 		}
 	}
@@ -463,11 +525,28 @@ func (m Model) submit() (Model, tea.Cmd) {
 		// optional health-monitor create, so allow a generous deadline.
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		_, err := loadbalancer.CreatePool(ctx, client, lbID, name, protocol, lbMethod, monOpts)
+		pool, err := loadbalancer.CreatePool(ctx, client, lbID, name, protocol, lbMethod, monOpts)
 		if err != nil {
 			return poolCreateErrMsg{err: err}
 		}
-		return poolCreatedMsg{}
+		if listenerID == "" {
+			return poolCreatedMsg{}
+		}
+		// Octavia rejects changes while the load balancer is PENDING_*, so
+		// wait for it before binding; success is only reported once the
+		// listener confirms the new default pool.
+		err = loadbalancer.WaitForActive(ctx, client, lbID, 2*time.Minute)
+		if err == nil {
+			err = loadbalancer.SetListenerDefaultPool(ctx, client, listenerID, pool.ID)
+		}
+		if err != nil {
+			shared.Debugf("[lbpoolcreate] binding pool %s to listener %s failed: %v", pool.ID, listenerID, err)
+			return poolCreateErrMsg{
+				err:     err,
+				partial: fmt.Sprintf("Pool %s was created but is not attached to listener %s", pool.ID, listenerName),
+			}
+		}
+		return poolCreatedMsg{listener: listenerName}
 	})
 }
 
@@ -520,6 +599,15 @@ func (m Model) View() string {
 		rows = append(rows, label("Protocol", fieldProtocol)+renderPicker(protocolOpts, m.selectedProtocol, m.focusField == fieldProtocol))
 	}
 	rows = append(rows, label("LB Method", fieldLBMethod)+renderPicker(lbMethodOpts, m.selectedLBMethod, m.focusField == fieldLBMethod))
+	if m.editMode {
+		bound := "none"
+		if len(m.boundListeners) > 0 {
+			bound = strings.Join(m.boundListeners, ", ")
+		}
+		rows = append(rows, labelStyle.Render("Default for")+lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(bound))
+	} else {
+		rows = append(rows, label("Listener", fieldListener)+lipgloss.NewStyle().Foreground(shared.ColorHighlight).Render(m.listenerView()))
+	}
 
 	if !m.editMode {
 		// Health monitor section

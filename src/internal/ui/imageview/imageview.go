@@ -135,7 +135,10 @@ func fitsWidth(columns []Column, totalWidth int) bool {
 // Messages
 type imagesLoadedMsg struct{ images []img.Image }
 type imagesErrMsg struct{ err error }
-type serversLoadedMsg struct{ servers []compute.Server }
+type serversLoadedMsg struct {
+	servers []compute.Server
+	err     error
+}
 type sortClearMsg struct{}
 
 // Model is the combined image selector + detail view.
@@ -160,6 +163,8 @@ type Model struct {
 
 	// Servers using image
 	servers       []compute.Server
+	serversLoaded bool   // a server list has been fetched successfully
+	serversErr    string // last server fetch failed; usage is unknown
 	serversCursor int
 	serversScroll int
 
@@ -220,17 +225,14 @@ func (m Model) SelectedImage() *img.Image {
 	return nil
 }
 
-// SelectedImages returns all selected images, or the cursor image if none selected.
+// SelectedImages returns the selected images that are currently visible, or
+// the cursor image when no visible image is selected. Selections hidden by
+// the search filter are kept (they return when the filter is cleared) but
+// are never acted on, so the count, confirm dialog and action always refer
+// to the same images.
 func (m Model) SelectedImages() []img.Image {
-	visible := m.visibleImages()
-	if len(m.selected) > 0 {
-		var result []img.Image
-		for _, im := range visible {
-			if m.selected[im.ID] {
-				result = append(result, im)
-			}
-		}
-		return result
+	if sel := m.visibleSelection(); len(sel) > 0 {
+		return sel
 	}
 	if i := m.SelectedImage(); i != nil {
 		return []img.Image{*i}
@@ -241,14 +243,57 @@ func (m Model) SelectedImages() []img.Image {
 // IsSearching reports whether the search input has focus.
 func (m Model) IsSearching() bool { return m.searchActive }
 
-// SelectionCount returns the number of selected images.
+// SelectionCount returns the number of selected images that bulk actions
+// would target (selected and visible).
 func (m Model) SelectionCount() int {
-	return len(m.selected)
+	return len(m.visibleSelection())
+}
+
+func (m Model) visibleSelection() []img.Image {
+	if len(m.selected) == 0 {
+		return nil
+	}
+	var result []img.Image
+	for _, im := range m.visibleImages() {
+		if m.selected[im.ID] {
+			result = append(result, im)
+		}
+	}
+	return result
 }
 
 // ClearSelection clears all selected images.
 func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
+}
+
+// pruneSelection drops selected IDs of images that no longer exist.
+func (m *Model) pruneSelection() {
+	if len(m.selected) == 0 {
+		return
+	}
+	present := make(map[string]bool, len(m.images))
+	for _, im := range m.images {
+		present[im.ID] = true
+	}
+	for id := range m.selected {
+		if !present[id] {
+			delete(m.selected, id)
+		}
+	}
+}
+
+// SelectedIDs returns every selected image ID, including selections that
+// are currently hidden or not yet loaded, in sorted order.
+func (m Model) SelectedIDs() []string {
+	ids := make([]string, 0, len(m.selected))
+	for id, on := range m.selected {
+		if on {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // SelectIDs adds the given IDs to the bulk selection (e.g. to keep failed
@@ -329,6 +374,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.images = msg.images
 		m.err = ""
+		m.pruneSelection()
 		m.sortImages()
 		if cursorID != "" {
 			for i, im := range m.visibleImages() {
@@ -351,7 +397,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case serversLoadedMsg:
+		if msg.err != nil {
+			// Usage is unknown: drop the old list rather than presenting
+			// stale (or no) servers as the current answer.
+			m.servers = nil
+			m.serversErr = msg.err.Error()
+			return m, nil
+		}
 		m.servers = msg.servers
+		m.serversLoaded = true
+		m.serversErr = ""
 		return m, nil
 
 	case shared.TickMsg:
@@ -648,6 +703,11 @@ func (m *Model) sortImages() {
 	asc := m.sortAsc
 	sort.SliceStable(m.images, func(i, j int) bool {
 		a, b := m.images[i], m.images[j]
+		// Descending swaps the operands so equal keys still compare false
+		// and keep their relative order.
+		if !asc {
+			a, b = b, a
+		}
 		var less bool
 		switch colKey {
 		case "name":
@@ -666,9 +726,6 @@ func (m *Model) sortImages() {
 			less = a.CreatedAt.Before(b.CreatedAt)
 		default:
 			less = false
-		}
-		if !asc {
-			return !less
 		}
 		return less
 	})
@@ -710,6 +767,27 @@ func (m *Model) ensureServersCursorVisible() {
 	if m.serversCursor >= m.serversScroll+visH {
 		m.serversScroll = m.serversCursor - visH + 1
 	}
+}
+
+// windowStart returns the first row of a window of visible rows over total
+// rows, starting from scroll but moved just enough to contain cursor. The
+// render paths use it so the cursor stays visible even when the pane height
+// or layout mode differs from what the scroll offset was computed for.
+func windowStart(scroll, cursor, visible, total int) int {
+	start := scroll
+	if cursor < start {
+		start = cursor
+	}
+	if cursor >= start+visible {
+		start = cursor - visible + 1
+	}
+	if start > total-visible {
+		start = total - visible
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start
 }
 
 // --- Height calculations ---
@@ -1208,6 +1286,15 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 	if m.SelectedImage() == nil {
 		return ""
 	}
+	if m.serversErr != "" {
+		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Server usage unavailable: " + m.serversErr)
+	}
+	if !m.serversLoaded {
+		if m.computeClient == nil {
+			return shared.StyleHelp.Render("Server usage unavailable")
+		}
+		return shared.StyleHelp.Render("Loading servers…")
+	}
 	if len(srvs) == 0 {
 		return shared.StyleHelp.Render("No servers using this image")
 	}
@@ -1248,11 +1335,12 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 	var lines []string
 	lines = append(lines, headerLine)
 
+	start := windowStart(m.serversScroll, m.serversCursor, visibleLines, len(srvs))
 	for i, s := range srvs {
-		if i < m.serversScroll {
+		if i < start {
 			continue
 		}
-		if i >= m.serversScroll+visibleLines {
+		if i >= start+visibleLines {
 			break
 		}
 
@@ -1306,13 +1394,12 @@ func (m Model) renderServersCompact(srvs []compute.Server, maxWidth, visibleLine
 		nameW = 8
 	}
 
-	// Two servers per line
+	// Two servers per line. serversScroll is kept in item units, so map it
+	// and the cursor to rows before choosing the first visible row.
 	var lines []string
 	totalSlots := visibleLines * 2
-	start := m.serversScroll * 2 // scroll by pairs
-	if start >= len(srvs) {
-		start = 0
-	}
+	totalRows := (len(srvs) + 1) / 2
+	start := windowStart(m.serversScroll/2, m.serversCursor/2, visibleLines, totalRows) * 2
 
 	for row := 0; row < visibleLines; row++ {
 		var cells []string
@@ -1465,7 +1552,7 @@ func (m Model) fetchServers() tea.Cmd {
 		srvs, err := compute.ListServers(context.Background(), client)
 		if err != nil {
 			shared.Debugf("[imageview] fetch servers error (non-fatal): %v", err)
-			return serversLoadedMsg{servers: nil}
+			return serversLoadedMsg{err: err}
 		}
 		shared.Debugf("[imageview] fetch servers done, count=%d", len(srvs))
 		return serversLoadedMsg{servers: srvs}
@@ -1490,8 +1577,8 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) Hints() string {
 	switch m.focus {
 	case FocusSelector:
-		if len(m.selected) > 0 {
-			return fmt.Sprintf("(%d selected) space toggle • ^d delete • esc clear • ? help", len(m.selected))
+		if n := m.SelectionCount(); n > 0 {
+			return fmt.Sprintf("(%d selected) space toggle • ^d delete • esc clear • ? help", n)
 		}
 		return "\u2191\u2193 navigate \u2022 / search \u2022 S sort \u2022 ^n upload \u2022 d deactivate \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 ? help"
 	case FocusInfo:

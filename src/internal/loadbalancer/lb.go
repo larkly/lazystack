@@ -340,22 +340,28 @@ func GetHealthMonitor(ctx context.Context, client *gophercloud.ServiceClient, id
 	}, nil
 }
 
-// CreateListener creates a listener on a load balancer.
-func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol string, port int) (*Listener, error) {
+// CreateListener creates a listener on a load balancer. A non-empty
+// defaultPoolID binds that pool in the same request; the binding is
+// confirmed from the response.
+func CreateListener(ctx context.Context, client *gophercloud.ServiceClient, lbID, name, protocol string, port int, defaultPoolID string) (*Listener, error) {
 	if err := requireLBClient(client); err != nil {
 		return nil, err
 	}
-	shared.Debugf("[lb] CreateListener: starting, lbID=%s name=%s protocol=%s port=%d", lbID, name, protocol, port)
+	shared.Debugf("[lb] CreateListener: starting, lbID=%s name=%s protocol=%s port=%d defaultPool=%s", lbID, name, protocol, port, defaultPoolID)
 	opts := listeners.CreateOpts{
 		LoadbalancerID: lbID,
 		Name:           name,
 		Protocol:       listeners.Protocol(protocol),
 		ProtocolPort:   port,
+		DefaultPoolID:  defaultPoolID,
 	}
 	l, err := listeners.Create(ctx, client, opts).Extract()
 	if err != nil {
 		shared.Debugf("[lb] CreateListener: error: %v", err)
 		return nil, fmt.Errorf("creating listener: %w", err)
+	}
+	if defaultPoolID != "" && l.DefaultPoolID != defaultPoolID {
+		return nil, fmt.Errorf("creating listener %s: default pool is %q, expected %q", l.ID, l.DefaultPoolID, defaultPoolID)
 	}
 	shared.Debugf("[lb] CreateListener: success, id=%s name=%s", l.ID, l.Name)
 	return &Listener{

@@ -177,16 +177,12 @@ func (m Model) SelectedVolume() *volume.Volume {
 	return nil
 }
 
-// SelectedVolumes returns all selected volumes, or the cursor volume if none selected.
+// SelectedVolumes returns the selected volumes that are still listed, or the
+// cursor volume if none is. Selected IDs that disappeared from the list are
+// never acted on, so the count, confirm dialog and action agree.
 func (m Model) SelectedVolumes() []volume.Volume {
-	if len(m.selected) > 0 {
-		var result []volume.Volume
-		for _, v := range m.volumes {
-			if m.selected[v.ID] {
-				result = append(result, v)
-			}
-		}
-		return result
+	if sel := m.listedSelection(); len(sel) > 0 {
+		return sel
 	}
 	if v := m.SelectedVolume(); v != nil {
 		return []volume.Volume{*v}
@@ -194,14 +190,41 @@ func (m Model) SelectedVolumes() []volume.Volume {
 	return nil
 }
 
-// SelectionCount returns the number of selected volumes.
+// SelectionCount returns the number of selected volumes bulk actions would
+// target.
 func (m Model) SelectionCount() int {
-	return len(m.selected)
+	return len(m.listedSelection())
+}
+
+func (m Model) listedSelection() []volume.Volume {
+	if len(m.selected) == 0 {
+		return nil
+	}
+	var result []volume.Volume
+	for _, v := range m.volumes {
+		if m.selected[v.ID] {
+			result = append(result, v)
+		}
+	}
+	return result
 }
 
 // ClearSelection clears all selected volumes.
 func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
+}
+
+// SelectedIDs returns every selected volume ID, including selections that
+// are currently hidden or not yet loaded, in sorted order.
+func (m Model) SelectedIDs() []string {
+	ids := make([]string, 0, len(m.selected))
+	for id, on := range m.selected {
+		if on {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // SelectIDs adds the given IDs to the bulk selection (e.g. to keep failed
@@ -212,6 +235,22 @@ func (m *Model) SelectIDs(ids []string) {
 	}
 	for _, id := range ids {
 		m.selected[id] = true
+	}
+}
+
+// pruneSelection drops selected IDs of volumes that no longer exist.
+func (m *Model) pruneSelection() {
+	if len(m.selected) == 0 {
+		return
+	}
+	present := make(map[string]bool, len(m.volumes))
+	for _, v := range m.volumes {
+		present[v.ID] = true
+	}
+	for id := range m.selected {
+		if !present[id] {
+			delete(m.selected, id)
+		}
 	}
 }
 
@@ -242,6 +281,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.volumes = msg.volumes
 		m.err = ""
+		m.pruneSelection()
 		m.sortVolumes()
 		if cursorID != "" {
 			for i, v := range m.volumes {
@@ -438,6 +478,11 @@ func (m *Model) sortVolumes() {
 	asc := m.sortAsc
 	sort.SliceStable(m.volumes, func(i, j int) bool {
 		a, b := m.volumes[i], m.volumes[j]
+		// Descending swaps the operands so equal keys still compare false
+		// and keep their relative order.
+		if !asc {
+			a, b = b, a
+		}
 		var less bool
 		switch colKey {
 		case "name":
@@ -460,9 +505,6 @@ func (m *Model) sortVolumes() {
 			less = a.Bootable < b.Bootable
 		default:
 			less = false
-		}
-		if !asc {
-			return !less
 		}
 		return less
 	})
@@ -743,8 +785,8 @@ func (m *Model) applyHighlight() {
 
 // Hints returns key hints.
 func (m Model) Hints() string {
-	if len(m.selected) > 0 {
-		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^t detach • esc clear • ? help", len(m.selected))
+	if n := m.SelectionCount(); n > 0 {
+		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^t detach • esc clear • ? help", n)
 	}
 	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • " + shared.Keys.Attach.Help().Key + " attach • ^t detach • R refresh • 1-9/←→ switch tab • ? help"
 }

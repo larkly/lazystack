@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -63,7 +64,9 @@ type Model struct {
 	computeClient *gophercloud.ServiceClient
 	poolID        string
 	poolName      string
-	excludedAddrs map[string]struct{}
+	// Members already in the pool when the form opened. The local check
+	// only avoids obvious duplicates; Octavia's 409 remains authoritative.
+	existing map[memberKey]struct{}
 
 	nameInput   textinput.Model
 	addrInput   textinput.Model
@@ -104,7 +107,7 @@ type Model struct {
 }
 
 // New creates a member create form.
-func New(client, computeClient *gophercloud.ServiceClient, poolID, poolName, lbVIPAddress string, existingMemberAddrs []string) Model {
+func New(client, computeClient *gophercloud.ServiceClient, poolID, poolName, lbVIPAddress string, existingMembers []loadbalancer.Member) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "member name"
@@ -156,7 +159,7 @@ func New(client, computeClient *gophercloud.ServiceClient, poolID, poolName, lbV
 		computeClient:  computeClient,
 		poolID:         poolID,
 		poolName:       poolName,
-		excludedAddrs:  makeAddressSet(existingMemberAddrs),
+		existing:       makeMemberSet(existingMembers),
 		nameInput:      ni,
 		addrInput:      ai,
 		portInput:      pi,
@@ -273,6 +276,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case memberCreateErrMsg:
 		m.submitting = false
 		m.err = shared.SanitizeAPIError(msg.err)
+		if !m.editMode && gophercloud.ResponseCodeIs(msg.err, http.StatusConflict) {
+			// Octavia returns 409 both for a duplicate address and port
+			// (possibly added concurrently) and for a pool that is busy.
+			m.err = "Conflict: a member with this address and port may already exist in the pool, or the pool is busy. Refresh and try again."
+		}
 		shared.Debugf("[lbmembercreate] error: %v", msg.err)
 		return m, nil
 
@@ -675,6 +683,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		m.err = "Port must be a number between 1 and 65535"
 		return m, nil
 	}
+	if _, exists := m.existing[newMemberKey(addr, port)]; exists {
+		m.err = fmt.Sprintf("A member with address %s and port %d is already in this pool", addr, port)
+		return m, nil
+	}
 
 	m.submitting = true
 	m.err = ""
@@ -959,9 +971,6 @@ func (m Model) fetchServers() tea.Cmd {
 			if addr == "" {
 				continue
 			}
-			if _, exists := m.excludedAddrs[addr]; exists {
-				continue
-			}
 			name := strings.TrimSpace(srv.Name)
 			if name == "" {
 				name = srv.ID
@@ -1011,14 +1020,28 @@ func ipVersion(addr string) int {
 	return 6
 }
 
-func makeAddressSet(addrs []string) map[string]struct{} {
-	set := make(map[string]struct{}, len(addrs))
-	for _, addr := range addrs {
-		addr = strings.TrimSpace(addr)
-		if addr == "" {
+// memberKey identifies a pool member the way Octavia enforces uniqueness:
+// the same address may back a pool several times on different ports.
+type memberKey struct {
+	addr string
+	port int
+}
+
+func newMemberKey(addr string, port int) memberKey {
+	addr = strings.TrimSpace(addr)
+	if ip := net.ParseIP(addr); ip != nil {
+		addr = ip.String() // one spelling per address, e.g. for IPv6
+	}
+	return memberKey{addr: addr, port: port}
+}
+
+func makeMemberSet(members []loadbalancer.Member) map[memberKey]struct{} {
+	set := make(map[memberKey]struct{}, len(members))
+	for _, mem := range members {
+		if strings.TrimSpace(mem.Address) == "" {
 			continue
 		}
-		set[addr] = struct{}{}
+		set[newMemberKey(mem.Address, mem.ProtocolPort)] = struct{}{}
 	}
 	return set
 }

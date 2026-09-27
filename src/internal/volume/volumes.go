@@ -8,6 +8,7 @@ import (
 	"github.com/larkly/lazystack/internal/shared"
 
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/availabilityzones"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumetypes"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/volumeattach"
@@ -222,6 +223,33 @@ func ListVolumeTypes(ctx context.Context, client *gophercloud.ServiceClient) ([]
 		return nil, fmt.Errorf("listing volume types: %w", err)
 	}
 	shared.Debugf("[volume] ListVolumeTypes: success, count=%d", len(result))
+	return result, nil
+}
+
+// ListAvailabilityZones returns the names of the block storage availability
+// zones that Cinder currently reports as available.
+func ListAvailabilityZones(ctx context.Context, client *gophercloud.ServiceClient) ([]string, error) {
+	if err := requireBlockStorageClient(client); err != nil {
+		return nil, err
+	}
+	shared.Debugf("[volume] ListAvailabilityZones: starting")
+	page, err := availabilityzones.List(client).AllPages(ctx)
+	if err != nil {
+		shared.Debugf("[volume] ListAvailabilityZones: error: %v", err)
+		return nil, fmt.Errorf("listing volume availability zones: %w", err)
+	}
+	zones, err := availabilityzones.ExtractAvailabilityZones(page)
+	if err != nil {
+		shared.Debugf("[volume] ListAvailabilityZones: error: %v", err)
+		return nil, fmt.Errorf("listing volume availability zones: %w", err)
+	}
+	var result []string
+	for _, z := range zones {
+		if z.ZoneState.Available && z.ZoneName != "" {
+			result = append(result, z.ZoneName)
+		}
+	}
+	shared.Debugf("[volume] ListAvailabilityZones: success, count=%d", len(result))
 	return result, nil
 }
 

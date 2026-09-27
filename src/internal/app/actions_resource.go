@@ -585,13 +585,13 @@ func (m Model) openLBListenerEdit() (Model, tea.Cmd) {
 	if l == nil {
 		return m, nil
 	}
-	m.lbListenerCreate = lblistenercreate.NewEdit(m.client.LoadBalancer, l.ID, l.Name, l.Description, l.ConnLimit, m.lbView.LBName())
+	m.lbListenerCreate = lblistenercreate.NewEdit(m.client.LoadBalancer, l.ID, l.Name, l.Description, l.ConnLimit, m.lbView.LBName(), l.Protocol, l.DefaultPoolID, m.lbView.Pools())
 	m.lbListenerCreate.SetSize(m.width, m.height)
 	return m, m.lbListenerCreate.Init()
 }
 
 func (m Model) openLBListenerCreate() (Model, tea.Cmd) {
-	m.lbListenerCreate = lblistenercreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName())
+	m.lbListenerCreate = lblistenercreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName(), m.lbView.Pools())
 	m.lbListenerCreate.SetSize(m.width, m.height)
 	return m, m.lbListenerCreate.Init()
 }
@@ -617,13 +617,13 @@ func (m Model) openLBPoolEdit() (Model, tea.Cmd) {
 	if p == nil {
 		return m, nil
 	}
-	m.lbPoolCreate = lbpoolcreate.NewEdit(m.client.LoadBalancer, p.ID, p.Name, p.LBMethod, m.lbView.LBName())
+	m.lbPoolCreate = lbpoolcreate.NewEdit(m.client.LoadBalancer, p.ID, p.Name, p.LBMethod, m.lbView.LBName(), m.lbView.Listeners())
 	m.lbPoolCreate.SetSize(m.width, m.height)
 	return m, m.lbPoolCreate.Init()
 }
 
 func (m Model) openLBPoolCreate() (Model, tea.Cmd) {
-	m.lbPoolCreate = lbpoolcreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName())
+	m.lbPoolCreate = lbpoolcreate.New(m.client.LoadBalancer, m.lbView.LBID(), m.lbView.LBName(), m.lbView.Listeners())
 	m.lbPoolCreate.SetSize(m.width, m.height)
 	return m, m.lbPoolCreate.Init()
 }
@@ -678,12 +678,7 @@ func (m Model) openLBMemberCreate() (Model, tea.Cmd) {
 	if lb := m.lbView.LB(); lb != nil {
 		lbVIPAddress = lb.VipAddress
 	}
-	existingMembers := m.lbView.SelectedPoolMembers()
-	existingMemberAddrs := make([]string, 0, len(existingMembers))
-	for _, member := range existingMembers {
-		existingMemberAddrs = append(existingMemberAddrs, member.Address)
-	}
-	m.lbMemberCreate = lbmembercreate.New(m.client.LoadBalancer, m.client.Compute, poolID, poolName, lbVIPAddress, existingMemberAddrs)
+	m.lbMemberCreate = lbmembercreate.New(m.client.LoadBalancer, m.client.Compute, poolID, poolName, lbVIPAddress, m.lbView.SelectedPoolMembers())
 	m.lbMemberCreate.SetSize(m.width, m.height)
 	return m, m.lbMemberCreate.Init()
 }
