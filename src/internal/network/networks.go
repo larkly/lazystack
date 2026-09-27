@@ -271,14 +271,34 @@ func DeleteSubnet(ctx context.Context, client *gophercloud.ServiceClient, id str
 	return nil
 }
 
-// SubnetUpdateOpts holds options for updating a subnet.
+// SubnetUpdateOpts holds options for updating a subnet. Nil fields are left
+// unchanged; a non-nil pointer to an empty list clears that list.
 type SubnetUpdateOpts struct {
 	Name            *string
 	EnableDHCP      *bool
 	GatewayIP       *string
 	DNSNameservers  *[]string
 	HostRoutes      *[]HostRoute
-	AllocationPools []AllocationPool
+	AllocationPools *[]AllocationPool
+}
+
+// subnetUpdateBuilder extends subnets.UpdateOpts so an explicitly empty pool
+// list is sent as allocation_pools:[] (the SDK field is omitempty and would
+// drop it).
+type subnetUpdateBuilder struct {
+	subnets.UpdateOpts
+	clearPools bool
+}
+
+func (b subnetUpdateBuilder) ToSubnetUpdateMap() (map[string]any, error) {
+	m, err := b.UpdateOpts.ToSubnetUpdateMap()
+	if err != nil {
+		return nil, err
+	}
+	if b.clearPools {
+		m["subnet"].(map[string]any)["allocation_pools"] = []any{}
+	}
+	return m, nil
 }
 
 // UpdateSubnet updates a subnet.
@@ -295,7 +315,12 @@ func UpdateSubnet(ctx context.Context, client *gophercloud.ServiceClient, id str
 		updateOpts.GatewayIP = opts.GatewayIP
 	}
 	if opts.DNSNameservers != nil {
-		updateOpts.DNSNameservers = opts.DNSNameservers
+		// A nil slice would be sent as null; clearing must send [].
+		dns := *opts.DNSNameservers
+		if dns == nil {
+			dns = []string{}
+		}
+		updateOpts.DNSNameservers = &dns
 	}
 	if opts.HostRoutes != nil {
 		routes := make([]subnets.HostRoute, len(*opts.HostRoutes))
@@ -307,17 +332,20 @@ func UpdateSubnet(ctx context.Context, client *gophercloud.ServiceClient, id str
 		}
 		updateOpts.HostRoutes = &routes
 	}
+	builder := subnetUpdateBuilder{}
 	if opts.AllocationPools != nil {
-		pools := make([]subnets.AllocationPool, len(opts.AllocationPools))
-		for i, p := range opts.AllocationPools {
+		pools := make([]subnets.AllocationPool, len(*opts.AllocationPools))
+		for i, p := range *opts.AllocationPools {
 			pools[i] = subnets.AllocationPool{
 				Start: p.Start,
 				End:   p.End,
 			}
 		}
 		updateOpts.AllocationPools = pools
+		builder.clearPools = len(pools) == 0
 	}
-	_, err := subnets.Update(ctx, client, id, updateOpts).Extract()
+	builder.UpdateOpts = updateOpts
+	_, err := subnets.Update(ctx, client, id, builder).Extract()
 	if err != nil {
 		shared.Debugf("[network] update subnet %s: %v", id, err)
 		return fmt.Errorf("updating subnet %s: %w", id, err)

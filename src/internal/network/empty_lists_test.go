@@ -35,3 +35,31 @@ func TestUpdatePortNilSecurityGroupsSendsEmptyArray(t *testing.T) {
 		t.Errorf("untouched body = %s", bodies[1])
 	}
 }
+
+func TestUpdateSubnetEmptyListsSerialiseAsArrays(t *testing.T) {
+	var bodies []string
+	client := fakeNeutronClient(bodyRecorder("subnet", &bodies))
+	var noDNS []string
+	noPools := []AllocationPool{}
+	if err := UpdateSubnet(context.Background(), client, "s", SubnetUpdateOpts{DNSNameservers: &noDNS, AllocationPools: &noPools}); err != nil {
+		t.Fatalf("UpdateSubnet: %v", err)
+	}
+	pools := []AllocationPool{{Start: "10.0.0.2", End: "10.0.0.9"}}
+	if err := UpdateSubnet(context.Background(), client, "s", SubnetUpdateOpts{AllocationPools: &pools}); err != nil {
+		t.Fatalf("UpdateSubnet: %v", err)
+	}
+	name := "n"
+	if err := UpdateSubnet(context.Background(), client, "s", SubnetUpdateOpts{Name: &name}); err != nil {
+		t.Fatalf("UpdateSubnet: %v", err)
+	}
+	want := []string{
+		`{"subnet":{"allocation_pools":[],"dns_nameservers":[]}}`,
+		`{"subnet":{"allocation_pools":[{"end":"10.0.0.9","start":"10.0.0.2"}]}}`,
+		`{"subnet":{"name":"n"}}`,
+	}
+	for i, w := range want {
+		if bodies[i] != w {
+			t.Errorf("body %d = %s, want %s", i, bodies[i], w)
+		}
+	}
+}
