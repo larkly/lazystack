@@ -43,3 +43,43 @@ func TestMissingBrowserReportsError(t *testing.T) {
 		t.Fatalf("status=%q", m.status)
 	}
 }
+
+func TestOpenRejectsNonHTTPURLs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows launcher lookup differs")
+	}
+	// An empty PATH makes any launch attempt fail with "Failed to open
+	// browser", so a refusal must be reported before a launcher is run.
+	t.Setenv("PATH", t.TempDir())
+	for _, u := range []string{
+		"file:///etc/passwd",
+		"javascript:alert(1)",
+		"ssh://host",
+		"-a Calculator",
+		"--help",
+		"",
+		"https://",
+		"not a url",
+	} {
+		m := New(u, "web")
+		m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		if cmd != nil || !m.Active {
+			t.Fatalf("%q: unexpected cmd/close", u)
+		}
+		if !strings.Contains(m.status, "Refusing to open") {
+			t.Fatalf("%q: status=%q, want refusal", u, m.status)
+		}
+	}
+}
+
+func TestValidateURLAcceptsHTTPAndHTTPS(t *testing.T) {
+	for _, u := range []string{
+		"https://console.example/vnc?token=abc",
+		"http://[2001:db8::1]:6080/vnc_auto.html",
+		"HTTPS://Console.Example/",
+	} {
+		if err := validateURL(u); err != nil {
+			t.Fatalf("%q rejected: %v", u, err)
+		}
+	}
+}

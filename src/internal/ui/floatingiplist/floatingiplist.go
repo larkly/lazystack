@@ -331,6 +331,9 @@ func (m *Model) sortFIPs() {
 	asc := m.sortAsc
 	sort.SliceStable(m.fips, func(i, j int) bool {
 		a, b := m.fips[i], m.fips[j]
+		if !asc {
+			a, b = b, a
+		}
 		var less bool
 		switch colKey {
 		case "floatingip":
@@ -343,9 +346,6 @@ func (m *Model) sortFIPs() {
 			less = a.PortID < b.PortID
 		default:
 			less = false
-		}
-		if !asc {
-			return !less
 		}
 		return less
 	})

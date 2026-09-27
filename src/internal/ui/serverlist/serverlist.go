@@ -468,6 +468,9 @@ func (m *Model) sortServers() {
 	asc := m.sortAsc
 	sort.SliceStable(m.filtered, func(i, j int) bool {
 		a, b := m.filtered[i], m.filtered[j]
+		if !asc {
+			a, b = b, a
+		}
 		var less bool
 		switch colKey {
 		case "name":
@@ -513,9 +516,6 @@ func (m *Model) sortServers() {
 			less = a.ID < b.ID
 		default:
 			less = false
-		}
-		if !asc {
-			return !less
 		}
 		return less
 	})

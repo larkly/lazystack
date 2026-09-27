@@ -1,6 +1,8 @@
 package consoleurl
 
 import (
+	"fmt"
+	"net/url"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -64,18 +66,45 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 }
 
+// validateURL accepts only absolute http/https URLs with a host. The URL
+// comes from the API and is handed to the OS URL handler, so anything else
+// (file://, custom scheme handlers, values starting with '-' that open(1)
+// would read as options) is refused.
+func validateURL(raw string) error {
+	if strings.HasPrefix(raw, "-") {
+		return fmt.Errorf("URL starts with '-'")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+	default:
+		return fmt.Errorf("unsupported scheme %q", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("URL has no host")
+	}
+	return nil
+}
+
 func (m Model) openInBrowser() (Model, tea.Cmd) {
-	url := m.url
+	target := m.url
+	if err := validateURL(target); err != nil {
+		m.status = "Refusing to open URL: " + err.Error()
+		return m, nil
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.Command("open", target)
 	case "windows":
 		// rundll32 passes the URL as a single argument — no cmd.exe
 		// metacharacter (&, ^, ...) interpretation of API-provided URLs.
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
 	default:
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.Command("xdg-open", target)
 	}
 	if err := cmd.Start(); err != nil {
 		m.status = "Failed to open browser: " + err.Error()

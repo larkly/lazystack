@@ -273,6 +273,9 @@ func (m *Model) sortPairs() {
 	asc := m.sortAsc
 	sort.SliceStable(m.pairs, func(i, j int) bool {
 		a, b := m.pairs[i], m.pairs[j]
+		if !asc {
+			a, b = b, a
+		}
 		var less bool
 		switch colKey {
 		case "name":
@@ -281,9 +284,6 @@ func (m *Model) sortPairs() {
 			less = strings.ToLower(a.Type) < strings.ToLower(b.Type)
 		default:
 			less = false
-		}
-		if !asc {
-			return !less
 		}
 		return less
 	})

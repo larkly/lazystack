@@ -100,6 +100,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.volume = msg.vol
 		m.serverName = msg.serverName
 		m.err = ""
+		m.clampScroll()
 		return m, nil
 
 	case volumeDetailErrMsg:
@@ -127,6 +128,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.clampScroll()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -149,8 +151,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.scroll = 0
 			}
 		}
+		m.clampScroll()
 	}
 	return m, nil
+}
+
+// viewHeight is the number of content lines shown at once.
+func (m Model) viewHeight() int {
+	return max(1, m.height-5)
+}
+
+// clampScroll keeps the stored scroll offset within the content, so
+// scrolling back up responds immediately after overscrolling.
+func (m *Model) clampScroll() {
+	maxScroll := 0
+	if m.volume != nil {
+		maxScroll = max(0, len(m.contentLines())-m.viewHeight())
+	}
+	m.scroll = min(max(m.scroll, 0), maxScroll)
 }
 
 // View renders the volume detail.
@@ -172,6 +190,25 @@ func (m Model) View() string {
 		return b.String()
 	}
 
+	lines := m.contentLines()
+	viewHeight := m.viewHeight()
+	m.clampScroll()
+
+	end := m.scroll + viewHeight
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	for _, line := range lines[m.scroll:end] {
+		b.WriteString(line + "\n")
+	}
+
+	return b.String()
+}
+
+// contentLines renders the scrollable property and metadata lines of the
+// loaded volume. It must only be called when m.volume is non-nil.
+func (m Model) contentLines() []string {
 	v := m.volume
 
 	encrypted := "no"
@@ -247,24 +284,7 @@ func (m Model) View() string {
 		}
 	}
 
-	viewHeight := m.height - 5
-	if viewHeight < 1 {
-		viewHeight = 1
-	}
-	if m.scroll > len(lines)-viewHeight {
-		m.scroll = max(0, len(lines)-viewHeight)
-	}
-
-	end := m.scroll + viewHeight
-	if end > len(lines) {
-		end = len(lines)
-	}
-
-	for _, line := range lines[m.scroll:end] {
-		b.WriteString(line + "\n")
-	}
-
-	return b.String()
+	return lines
 }
 
 func volumeStatusStyle(status string) lipgloss.Style {

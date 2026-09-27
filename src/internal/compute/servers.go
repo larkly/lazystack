@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -672,8 +673,15 @@ func mapServer(s servers.Server) Server {
 }
 
 func classifyIPs(addresses map[string]interface{}) (ipv4, ipv6, floating []string) {
-	for _, netAddrs := range addresses {
-		addrs, ok := netAddrs.([]interface{})
+	// Walk networks in name order: map iteration is random, and callers use
+	// the first address (IP columns, sorting, SSH target, LB member default).
+	netNames := make([]string, 0, len(addresses))
+	for netName := range addresses {
+		netNames = append(netNames, netName)
+	}
+	sort.Strings(netNames)
+	for _, netName := range netNames {
+		addrs, ok := addresses[netName].([]interface{})
 		if !ok {
 			continue
 		}

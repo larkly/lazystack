@@ -55,6 +55,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case keypairLoadedMsg:
 		m.loading = false
 		m.kp = msg.kp
+		m.clampScroll()
 		shared.Debugf("[keypairdetail] loaded keypair %q", m.name)
 		return m, nil
 	case keypairErrMsg:
@@ -72,6 +73,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.clampScroll()
 		return m, nil
 	case tea.KeyMsg:
 		switch {
@@ -81,6 +83,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, shared.Keys.Down):
 			m.scroll++
+			m.clampScroll()
 		case key.Matches(msg, shared.Keys.Up):
 			if m.scroll > 0 {
 				m.scroll--
@@ -88,6 +91,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// keyViewHeight is the number of public key lines shown at once.
+func (m Model) keyViewHeight() int {
+	viewHeight := m.height - 12
+	if viewHeight < 3 {
+		viewHeight = 3
+	}
+	return viewHeight
+}
+
+// maxScroll is the largest scroll offset that still fills the key view.
+func (m Model) maxScroll() int {
+	if m.kp == nil {
+		return 0
+	}
+	lines := strings.Count(m.kp.PublicKey, "\n") + 1
+	return max(0, lines-m.keyViewHeight())
+}
+
+// clampScroll keeps the stored scroll offset within the content, so
+// scrolling back up responds immediately after overscrolling.
+func (m *Model) clampScroll() {
+	m.scroll = min(max(m.scroll, 0), m.maxScroll())
 }
 
 // View renders the keypair detail.
@@ -125,17 +152,8 @@ func (m Model) View() string {
 	b.WriteString("  " + labelStyle.Render("Public Key") + "\n")
 
 	lines := strings.Split(m.kp.PublicKey, "\n")
-	viewHeight := m.height - 12
-	if viewHeight < 3 {
-		viewHeight = 3
-	}
-	maxScroll := len(lines) - viewHeight
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if m.scroll > maxScroll {
-		m.scroll = maxScroll
-	}
+	viewHeight := m.keyViewHeight()
+	m.clampScroll()
 	end := m.scroll + viewHeight
 	if end > len(lines) {
 		end = len(lines)
