@@ -290,6 +290,13 @@ func ConnectWithProject(ctx context.Context, cloudName, projectID string) (*Clie
 
 func connectWithOpts(ctx context.Context, ao gophercloud.AuthOptions, eo gophercloud.EndpointOpts, tlsConfig *tls.Config, cloudName string) (*Client, error) {
 	shared.Debugf("[cloud] connectWithOpts: authenticating to %s", cloudName)
+	// Password and application-credential auth can fetch a new token when
+	// the current one expires; without AllowReauth every call fails with 401
+	// once the token lifetime is over (clouds.Parse ignores allow_reauth).
+	// A fixed token cannot be renewed, and gophercloud rejects the option.
+	if ao.TokenID == "" {
+		ao.AllowReauth = true
+	}
 	// TLS config is applied inside newHTTPClient: gophercloud's
 	// config.WithTLSConfig replaces the transport of any client passed via
 	// config.WithHTTPClient, so both must be combined into one option.

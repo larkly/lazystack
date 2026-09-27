@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,10 @@ type versionCloud struct {
 	mu            sync.Mutex
 	serverHeaders []string
 	rootGets      int
+	tokensIssued  int
+	// rejectToken makes /servers answer 401 for that token, as Keystone
+	// does once a token has expired.
+	rejectToken string
 }
 
 func newVersionCloud(t *testing.T, configure func(*versionCloud)) *versionCloud {
@@ -57,14 +62,24 @@ func (c *versionCloud) serve(t *testing.T) func(http.ResponseWriter, *http.Reque
 				}
 				catalog = append(catalog, map[string]any{"type": typ, "name": typ, "endpoints": eps})
 			}
-			w.Header().Set("X-Subject-Token", "tok")
+			c.mu.Lock()
+			c.tokensIssued++
+			tok := fmt.Sprintf("tok-%d", c.tokensIssued)
+			c.mu.Unlock()
+			w.Header().Set("X-Subject-Token", tok)
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{"token": map[string]any{"expires_at": "2099-01-01T00:00:00Z", "catalog": catalog}})
 		case strings.HasPrefix(r.URL.Path, "/compute-") && strings.HasSuffix(r.URL.Path, "/servers/detail"):
 			h := r.Header.Get("X-OpenStack-Nova-API-Version")
 			c.mu.Lock()
 			c.serverHeaders = append(c.serverHeaders, h)
+			reject := c.rejectToken != "" && r.Header.Get("X-Auth-Token") == c.rejectToken
 			c.mu.Unlock()
+			if reject {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprint(w, `{"error":{"code":401,"message":"The request you have made requires authentication."}}`)
+				return
+			}
 			if c.maxMinor > 0 {
 				ma, mi, err := parseMicroversion(h)
 				if h != "" && (err != nil || ma != 2 || mi > c.maxMinor) {
@@ -237,7 +252,7 @@ func TestConnectCapabilityWarning(t *testing.T) {
 				t.Errorf("CapabilityWarning = %q, want warning=%v", client.CapabilityWarning, tc.wantWarning)
 			}
 			if tc.wantWarning {
-				for _, s := range []string{"tok", "test-password", c.srv.URL} {
+				for _, s := range []string{"tok-", "test-password", c.srv.URL} {
 					if strings.Contains(client.CapabilityWarning, s) {
 						t.Errorf("warning leaks %q: %s", s, client.CapabilityWarning)
 					}
@@ -278,5 +293,39 @@ func TestConnectRegionFromSelectedEndpoint(t *testing.T) {
 func TestResolveRegionFallsBackToAuto(t *testing.T) {
 	if got := resolveRegion(nil, "", ""); got != "auto" {
 		t.Errorf("resolveRegion without catalog = %q, want auto", got)
+	}
+}
+
+func TestConnectReauthenticatesAfterTokenExpiry(t *testing.T) {
+	c := newVersionCloud(t, nil)
+	client := c.connect(t, "")
+	if client.ProviderClient.ReauthFunc == nil {
+		t.Fatal("password auth connected without re-authentication support")
+	}
+	c.mu.Lock()
+	c.rejectToken = client.ProviderClient.Token()
+	c.mu.Unlock()
+
+	if _, err := c.listServers(t, client); err != nil {
+		t.Fatalf("request after token expiry failed: %v", err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.tokensIssued != 2 {
+		t.Errorf("tokens issued = %d, want a fresh token after the 401", c.tokensIssued)
+	}
+}
+
+func TestConnectApplicationCredentialCanReauthenticate(t *testing.T) {
+	c := newVersionCloud(t, nil)
+	coverageCloudConfig(t, c.srv.URL, "")
+	appCred := "clouds:\n  appcred:\n    auth_type: v3applicationcredential\n    auth:\n      auth_url: " + c.srv.URL + "/v3\n      application_credential_id: app-id\n      application_credential_secret: app-secret\n"
+	writeFile(t, os.Getenv("OS_CLIENT_CONFIG_FILE"), appCred)
+	client, err := Connect(context.Background(), "appcred")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.ProviderClient.ReauthFunc == nil {
+		t.Fatal("application-credential auth connected without re-authentication support")
 	}
 }
