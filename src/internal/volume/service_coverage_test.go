@@ -3,6 +3,8 @@ package volume
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/testutil"
 	"net/http"
 	"reflect"
@@ -12,14 +14,20 @@ import (
 
 func TestAttachmentHTTPFailuresAndFallbacks(t *testing.T) {
 	for _, tc := range []struct {
-		name, listing, target    string
+		name, listing            string
 		listStatus, deleteStatus int
+		wantDelete               bool
+		wantErr                  string
 	}{
-		{"resolved", `{"volumeAttachments":[{"id":"other","volumeId":"other"},{"id":"attachment","volumeId":"vol"}]}`, "attachment", 200, 204},
-		{"unmatched", `{"volumeAttachments":[]}`, "vol", 200, 204},
-		{"lookup failure", `{}`, "vol", 403, 204},
-		{"malformed lookup", `{"volumeAttachments":"bad"}`, "vol", 200, 204},
-		{"delete failure", `{"volumeAttachments":[{"id":"attachment","volumeId":"vol"}]}`, "attachment", 200, 409},
+		// Before microversion 2.89 Nova reports the volume ID as "id".
+		{"resolved", `{"volumeAttachments":[{"id":"other","volumeId":"other"},{"id":"vol","volumeId":"vol"}]}`, 200, 204, true, ""},
+		// From 2.89 "id" is gone; the Cinder attachment UUID must not be used as the path key.
+		{"resolved 2.89", `{"volumeAttachments":[{"attachment_id":"cinder-uuid","volumeId":"vol"}]}`, 200, 204, true, ""},
+		{"unmatched", `{"volumeAttachments":[]}`, 200, 204, true, ""},
+		{"lookup forbidden", `{}`, 403, 204, false, "403"},
+		{"lookup server error", `{}`, 500, 204, false, "500"},
+		{"malformed lookup", `{"volumeAttachments":"bad"}`, 200, 204, false, "looking up attachment"},
+		{"delete failure", `{"volumeAttachments":[{"id":"vol","volumeId":"vol"}]}`, 200, 409, true, "409"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls []string
@@ -35,18 +43,40 @@ func TestAttachmentHTTPFailuresAndFallbacks(t *testing.T) {
 			}))
 			defer close()
 			err := DetachVolume(context.Background(), client, "vm", "vol")
-			want := []string{"GET /servers/vm/os-volume_attachments", "DELETE /servers/vm/os-volume_attachments/" + tc.target}
+			want := []string{"GET /servers/vm/os-volume_attachments"}
+			if tc.wantDelete {
+				want = append(want, "DELETE /servers/vm/os-volume_attachments/vol")
+			}
 			if !reflect.DeepEqual(calls, want) {
 				t.Errorf("calls=%v want=%v", calls, want)
 			}
-			if (err != nil) != (tc.deleteStatus == 409) {
+			if (err != nil) != (tc.wantErr != "") {
 				t.Fatalf("err=%v", err)
 			}
-			if err != nil && !strings.Contains(err.Error(), "detaching volume vol from server vm") {
+			if err != nil && (!strings.Contains(err.Error(), "detaching volume vol from server vm") || !strings.Contains(err.Error(), tc.wantErr)) {
 				t.Fatal(err)
+			}
+			if tc.listStatus != 200 && !gophercloud.ResponseCodeIs(err, tc.listStatus) {
+				t.Fatalf("lookup status %d not preserved: %v", tc.listStatus, err)
 			}
 		})
 	}
+	t.Run("lookup cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		deletes := 0
+		client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "DELETE" {
+				deletes++
+			}
+			w.WriteHeader(204)
+		}))
+		defer close()
+		err := DetachVolume(ctx, client, "vm", "vol")
+		if !errors.Is(err, context.Canceled) || deletes != 0 {
+			t.Fatalf("deletes=%d err=%v", deletes, err)
+		}
+	})
 	for _, status := range []int{200, 409} {
 		t.Run("attach/"+http.StatusText(status), func(t *testing.T) {
 			client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
