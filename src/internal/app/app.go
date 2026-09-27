@@ -120,7 +120,12 @@ type delayedDetailRefreshMsg struct {
 	id string
 }
 
+// serverDetailRefreshedMsg carries a delayed refresh for the detail view
+// instance inst; seq orders overlapping refreshes so an older response
+// never overwrites a newer one.
 type serverDetailRefreshedMsg struct {
+	inst   uint64
+	seq    uint64
 	server *compute.Server
 }
 
@@ -211,6 +216,8 @@ type Model struct {
 	connGen             uint64     // bumped on every successful connect
 	tickGen             uint64     // identifies the live refresh tick chain
 	connectSeq          uint64     // identifies the latest connect attempt
+	detailReqSeq        uint64     // last delayed server-detail refresh issued
+	detailReqApplied    uint64     // newest delayed server-detail refresh applied
 	returnToView        activeView // cross-resource navigation back-nav
 	nav                 *NavStack  // local drill-down/overlay back-nav
 	refreshInterval     time.Duration
@@ -1393,6 +1400,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewServerDetail && m.serverDetail.ServerID() == msg.id {
 			client := m.client.Compute
 			id := msg.id
+			inst := m.serverDetail.Instance()
+			m.detailReqSeq++
+			seq := m.detailReqSeq
 			return m, func() tea.Msg {
 				ctx, cancel := actionCtx()
 				defer cancel()
@@ -1400,13 +1410,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err != nil {
 					return shared.ErrMsg{Err: err}
 				}
-				return serverDetailRefreshedMsg{server: srv}
+				return serverDetailRefreshedMsg{inst: inst, seq: seq, server: srv}
 			}
 		}
 		return m, nil
 
 	case serverDetailRefreshedMsg:
-		if m.view == viewServerDetail && msg.server != nil {
+		// Apply only to the detail view that requested it, and never let an
+		// older overlapping refresh overwrite a newer one.
+		if m.view == viewServerDetail && msg.server != nil &&
+			msg.inst == m.serverDetail.Instance() && msg.seq > m.detailReqApplied {
+			m.detailReqApplied = msg.seq
 			m.serverDetail.SetServer(msg.server)
 		}
 		return m, nil
