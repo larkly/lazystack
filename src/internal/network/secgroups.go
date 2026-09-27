@@ -29,6 +29,8 @@ type SecurityRule struct {
 	PortRangeMax   int
 	RemoteIPPrefix string
 	RemoteGroupID  string
+	// RemoteAddressGroupID restricts the rule to a Neutron address group.
+	RemoteAddressGroupID string
 }
 
 // ListSecurityGroups fetches all security groups with their rules.
@@ -56,6 +58,8 @@ func ListSecurityGroups(ctx context.Context, client *gophercloud.ServiceClient) 
 					PortRangeMax:   r.PortRangeMax,
 					RemoteIPPrefix: r.RemoteIPPrefix,
 					RemoteGroupID:  r.RemoteGroupID,
+
+					RemoteAddressGroupID: r.RemoteAddressGroupID,
 				})
 			}
 			result = append(result, group)
@@ -161,6 +165,8 @@ func GetSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, id
 			PortRangeMax:   r.PortRangeMax,
 			RemoteIPPrefix: r.RemoteIPPrefix,
 			RemoteGroupID:  r.RemoteGroupID,
+
+			RemoteAddressGroupID: r.RemoteAddressGroupID,
 		})
 	}
 	return group, nil
