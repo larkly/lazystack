@@ -68,17 +68,41 @@ func (m Model) openCopyPicker() (Model, tea.Cmd) {
 	return m, m.copyPicker.Init()
 }
 
-// copyToClipboard writes value to the system clipboard and updates
-// the status bar. It is the single source of truth for copy feedback.
-func (m Model) copyToClipboard(label, value string) Model {
-	if err := clipboard.WriteAll(value); err != nil {
-		m.statusBar.StickyHint = "Clipboard error: " + err.Error()
-		return m
+// writeClipboard writes to the system clipboard. It may spawn a helper
+// process, so it never runs on the Update goroutine. It is a variable so
+// tests can inject a slow or failing implementation.
+var writeClipboard = clipboard.WriteAll
+
+// clipboardResultMsg reports the outcome of an asynchronous clipboard write.
+type clipboardResultMsg struct {
+	seq          uint64
+	label, value string
+	err          error
+}
+
+// copyToClipboard writes value to the system clipboard in the background;
+// the status bar is updated when clipboardResultMsg arrives.
+func (m Model) copyToClipboard(label, value string) (Model, tea.Cmd) {
+	m.copySeq++
+	seq := m.copySeq
+	return m, func() tea.Msg {
+		return clipboardResultMsg{seq: seq, label: label, value: value, err: writeClipboard(value)}
 	}
-	if label == "" {
-		m.statusBar.StickyHint = "Copied: " + value
-	} else {
-		m.statusBar.StickyHint = fmt.Sprintf("Copied %s: %s", label, value)
+}
+
+// applyClipboardResult shows copy feedback. It is the single source of
+// truth for copy feedback; results of superseded copies are ignored.
+func (m Model) applyClipboardResult(msg clipboardResultMsg) (Model, tea.Cmd) {
+	if msg.seq != m.copySeq {
+		return m, nil
 	}
-	return m
+	switch {
+	case msg.err != nil:
+		m.statusBar.StickyHint = "Clipboard error: " + msg.err.Error()
+	case msg.label == "":
+		m.statusBar.StickyHint = "Copied: " + msg.value
+	default:
+		m.statusBar.StickyHint = fmt.Sprintf("Copied %s: %s", msg.label, msg.value)
+	}
+	return m, nil
 }

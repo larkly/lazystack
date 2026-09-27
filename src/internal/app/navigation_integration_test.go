@@ -289,7 +289,7 @@ func TestIdlePauseAndWakeConsumesFirstKey(t *testing.T) {
 	if m.idlePaused || !m.lastActivity.After(old) || m.statusBar.Hint != "" || cmd == nil {
 		t.Fatal("wake did not reset pause state")
 	}
-	if _, ok := cmd().(shared.TickMsg); !ok {
+	if _, ok := cmd().(refreshTickMsg); !ok {
 		t.Fatal("first wake key must restart tick, not quit")
 	}
 	if len(*requests) != 0 {
@@ -327,7 +327,7 @@ func TestIdleTickRemainsActiveWhenDisabledRecentOrUninitialized(t *testing.T) {
 			}
 			ticks := 0
 			for _, msg := range commandMessages(cmd) {
-				if _, ok := msg.(shared.TickMsg); ok {
+				if _, ok := msg.(refreshTickMsg); ok {
 					ticks++
 				}
 			}

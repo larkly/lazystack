@@ -1,8 +1,6 @@
 package app
 
 import (
-	"time"
-
 	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/servercreate"
@@ -10,13 +8,33 @@ import (
 	"github.com/larkly/lazystack/internal/ui/volumedetail"
 )
 
-// refreshTickCmd returns a single tea.Tick that fires shared.TickMsg after
-// the refresh interval. This is the ONLY tick source in the app — views
-// must not create their own tick timers.
-func (m Model) refreshTickCmd() tea.Cmd {
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
-		return shared.TickMsg{}
-	})
+// setSizeAllViews propagates the terminal size to every view model, not
+// just the active one, so a list or detail kept in the background fits the
+// current terminal as soon as the user returns to it. Size setters only
+// store dimensions, so this is safe for views that were never opened.
+func (m *Model) setSizeAllViews(w, h int) {
+	m.serverList.SetSize(w, h)
+	m.serverDetail.SetSize(w, h)
+	m.serverCreate.SetSize(w, h)
+	m.consoleLog.SetSize(w, h)
+	m.actionLog.SetSize(w, h)
+	m.auditLog.SetSize(w, h)
+	m.volumeList.SetSize(w, h)
+	m.volumeDetail.SetSize(w, h)
+	m.volumeCreate.SetSize(w, h)
+	m.floatingIPList.SetSize(w, h)
+	m.secGroupView.SetSize(w, h)
+	m.keypairList.SetSize(w, h)
+	m.keypairCreate.SetSize(w, h)
+	m.keypairDetail.SetSize(w, h)
+	m.networkView.SetSize(w, h)
+	m.routerView.SetSize(w, h)
+	m.lbView.SetSize(w, h)
+	m.imageView.SetSize(w, h)
+	m.hypervisorList.SetSize(w, h)
+	m.serviceCatalog.SetSize(w, h)
+	m.dnsList.SetSize(w, h)
+	m.userManagement.SetSize(w, h)
 }
 
 func (m Model) updateActiveView(msg tea.Msg) (Model, tea.Cmd) {
@@ -256,6 +274,13 @@ func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
 	shared.Debugf("[app] handleViewChange: target=%s", msg.View)
 	switch msg.View {
 	case "serverlist":
+		// Overlay views (hypervisors, catalog, users, audit log) pushed
+		// their origin when they opened; return there.
+		if m.isNavOverlayView() {
+			if entry, ok := m.popNav(); ok {
+				return m.restoreNavEntry(entry)
+			}
+		}
 		// If returning from a cross-resource jump, go back to the originating view
 		if m.returnToView == viewServerDetail && m.serverDetail.ServerID() != "" {
 			m.returnToView = 0
@@ -404,12 +429,72 @@ func (m Model) restoreNavEntry(entry NavEntry) (Model, tea.Cmd) {
 	case viewVolumeDetail:
 		m.statusBar.Hint = m.volumeDetail.Hints()
 		return m, m.volumeDetail.Init()
-	case viewConsoleLog:
-		m.statusBar.Hint = m.consoleLog.Hints()
-	case viewActionLog:
-		m.statusBar.Hint = m.actionLog.Hints()
 	}
+	m.statusBar.Hint = m.activeViewHints()
 	return m, nil
+}
+
+// isNavOverlayView reports whether the active view is a full-screen overlay
+// that pushed its origin on the nav stack when it opened.
+func (m Model) isNavOverlayView() bool {
+	switch m.view {
+	case viewHypervisorList, viewServiceCatalog, viewUserManagement, viewAuditLog:
+		return true
+	}
+	return false
+}
+
+// activeViewHints returns the status-bar key hints of the active view.
+func (m Model) activeViewHints() string {
+	switch m.view {
+	case viewCloudPicker:
+		return m.cloudPicker.Hints()
+	case viewServerList:
+		return m.serverList.Hints()
+	case viewServerDetail:
+		return m.serverDetail.Hints()
+	case viewServerCreate:
+		return m.serverCreate.Hints()
+	case viewConsoleLog:
+		return m.consoleLog.Hints()
+	case viewActionLog:
+		return m.actionLog.Hints()
+	case viewAuditLog:
+		return m.auditLog.Hints()
+	case viewVolumeList:
+		return m.volumeList.Hints()
+	case viewVolumeDetail:
+		return m.volumeDetail.Hints()
+	case viewVolumeCreate:
+		return m.volumeCreate.Hints()
+	case viewFloatingIPList:
+		return m.floatingIPList.Hints()
+	case viewSecGroupView:
+		return m.secGroupView.Hints()
+	case viewKeypairList:
+		return m.keypairList.Hints()
+	case viewKeypairCreate:
+		return m.keypairCreate.Hints()
+	case viewKeypairDetail:
+		return m.keypairDetail.Hints()
+	case viewNetworkList:
+		return m.networkView.Hints()
+	case viewRouterView:
+		return m.routerView.Hints()
+	case viewLBView:
+		return m.lbView.Hints()
+	case viewImageView:
+		return m.imageView.Hints()
+	case viewHypervisorList:
+		return m.hypervisorList.Hints()
+	case viewServiceCatalog:
+		return m.serviceCatalog.Hints()
+	case viewDNSList:
+		return m.dnsList.Hints()
+	case viewUserManagement:
+		return m.userManagement.Hints()
+	}
+	return ""
 }
 
 func (m Model) forceRefreshActiveView() (Model, tea.Cmd) {

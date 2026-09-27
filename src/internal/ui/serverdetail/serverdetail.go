@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -46,44 +47,87 @@ func shouldPollDetailAPIs(status string) bool {
 	}
 }
 
+// Every data reply carries the instance ID of the model that requested it.
+// A new model is created each time a server detail is opened (including
+// the same server after a cloud/project switch), so a late reply for an
+// earlier server can never be applied to the one now on screen.
+
 type serverDetailLoadedMsg struct {
+	inst   uint64
 	server *compute.Server
 }
 
 type serverDetailErrMsg struct {
-	err error
+	inst uint64
+	err  error
 }
 
 type consoleLoadedMsg struct {
+	inst   uint64
 	output string
 }
 
 type consoleErrMsg struct {
-	err error
+	inst uint64
+	err  error
 }
 
 type actionsLoadedMsg struct {
+	inst    uint64
 	actions []compute.Action
 }
 
 type actionsErrMsg struct {
-	err error
+	inst uint64
+	err  error
 }
 
 type interfacesLoadedMsg struct {
+	inst  uint64
 	ports []network.Port
 }
 
 type interfacesErrMsg struct {
-	err error
+	inst uint64
+	err  error
 }
 
 type volumeInfoLoadedMsg struct {
+	inst    uint64
 	volumes map[string]*volume.Volume
+}
+
+// lastInstance hands out a unique ID to every detail model.
+var lastInstance atomic.Uint64
+
+// replyInstance returns the requesting model instance of a data reply.
+func replyInstance(msg tea.Msg) (uint64, bool) {
+	switch msg := msg.(type) {
+	case serverDetailLoadedMsg:
+		return msg.inst, true
+	case serverDetailErrMsg:
+		return msg.inst, true
+	case consoleLoadedMsg:
+		return msg.inst, true
+	case consoleErrMsg:
+		return msg.inst, true
+	case actionsLoadedMsg:
+		return msg.inst, true
+	case actionsErrMsg:
+		return msg.inst, true
+	case interfacesLoadedMsg:
+		return msg.inst, true
+	case interfacesErrMsg:
+		return msg.inst, true
+	case volumeInfoLoadedMsg:
+		return msg.inst, true
+	}
+	return 0, false
 }
 
 // Model is the server detail dashboard view.
 type Model struct {
+	inst            uint64 // unique per model; tags every data request
 	client          *gophercloud.ServiceClient
 	networkClient   *gophercloud.ServiceClient
 	blockClient     *gophercloud.ServiceClient
@@ -126,6 +170,7 @@ func New(client, networkClient, blockClient *gophercloud.ServiceClient, serverID
 	s.Spinner = spinner.Dot
 
 	return Model{
+		inst:              lastInstance.Add(1),
 		client:            client,
 		networkClient:     networkClient,
 		blockClient:       blockClient,
@@ -160,6 +205,12 @@ func (m Model) canPollDetailAPIs() bool {
 		return true
 	}
 	return shouldPollDetailAPIs(m.server.Status)
+}
+
+// Instance returns the unique ID of this model instance. It differs for
+// every opened detail view, even of the same server.
+func (m Model) Instance() uint64 {
+	return m.inst
 }
 
 // ServerID returns the current server ID.
@@ -213,8 +264,15 @@ func (m Model) ServerStatus() string {
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if inst, ok := replyInstance(msg); ok && inst != m.inst {
+		shared.Debugf("[serverdetail] dropping %T for another detail view", msg)
+		return m, nil
+	}
 	switch msg := msg.(type) {
 	case serverDetailLoadedMsg:
+		if msg.server != nil && msg.server.ID != m.serverID {
+			return m, nil
+		}
 		shared.Debugf("[serverdetail] serverDetailLoadedMsg")
 		m.loading = false
 		if m.pendingAction != "" && msg.server != nil {
@@ -1381,65 +1439,70 @@ func formatAge(t time.Time) string {
 func (m Model) fetchServer() tea.Cmd {
 	client := m.client
 	id := m.serverID
+	inst := m.inst
 	return func() tea.Msg {
 		shared.Debugf("[serverdetail] fetchServer start")
 		srv, err := compute.GetServer(context.Background(), client, id)
 		if err != nil {
 			shared.Debugf("[serverdetail] fetchServer error: %v", err)
-			return serverDetailErrMsg{err: err}
+			return serverDetailErrMsg{inst: inst, err: err}
 		}
 		shared.Debugf("[serverdetail] fetchServer done")
-		return serverDetailLoadedMsg{server: srv}
+		return serverDetailLoadedMsg{inst: inst, server: srv}
 	}
 }
 
 func (m Model) fetchConsole() tea.Cmd {
 	client := m.client
 	id := m.serverID
+	inst := m.inst
 	return func() tea.Msg {
 		shared.Debugf("[serverdetail] fetchConsole start")
 		output, err := compute.GetConsoleOutput(context.Background(), client, id, maxConsoleLines)
 		if err != nil {
 			shared.Debugf("[serverdetail] fetchConsole error: %v", err)
-			return consoleErrMsg{err: err}
+			return consoleErrMsg{inst: inst, err: err}
 		}
 		shared.Debugf("[serverdetail] fetchConsole done: %d chars", len(output))
-		return consoleLoadedMsg{output: output}
+		return consoleLoadedMsg{inst: inst, output: output}
 	}
 }
 
 func (m Model) fetchActions() tea.Cmd {
 	client := m.client
 	id := m.serverID
+	inst := m.inst
 	return func() tea.Msg {
 		shared.Debugf("[serverdetail] fetchActions start")
 		actions, err := compute.ListActions(context.Background(), client, id)
 		if err != nil {
 			shared.Debugf("[serverdetail] fetchActions error: %v", err)
-			return actionsErrMsg{err: err}
+			return actionsErrMsg{inst: inst, err: err}
 		}
 		shared.Debugf("[serverdetail] fetchActions done: %d actions", len(actions))
-		return actionsLoadedMsg{actions: actions}
+		return actionsLoadedMsg{inst: inst, actions: actions}
 	}
 }
 
 func (m Model) fetchInterfaces() tea.Cmd {
 	client := m.networkClient
 	id := m.serverID
+	inst := m.inst
 	return func() tea.Msg {
 		shared.Debugf("[serverdetail] fetchInterfaces start")
 		ports, err := network.ListPortsByDevice(context.Background(), client, id)
 		if err != nil {
 			shared.Debugf("[serverdetail] fetchInterfaces error: %v", err)
-			return interfacesErrMsg{err: err}
+			return interfacesErrMsg{inst: inst, err: err}
 		}
 		shared.Debugf("[serverdetail] fetchInterfaces done: %d ports", len(ports))
-		return interfacesLoadedMsg{ports: ports}
+		return interfacesLoadedMsg{inst: inst, ports: ports}
 	}
 }
 
 func (m Model) fetchVolumeInfo(attachments []compute.VolumeAttachment) tea.Cmd {
 	client := m.blockClient
+	inst := m.inst
 	return func() tea.Msg {
 		vols := make(map[string]*volume.Volume)
 		for _, va := range attachments {
@@ -1448,7 +1511,7 @@ func (m Model) fetchVolumeInfo(attachments []compute.VolumeAttachment) tea.Cmd {
 				vols[va.ID] = v
 			}
 		}
-		return volumeInfoLoadedMsg{volumes: vols}
+		return volumeInfoLoadedMsg{inst: inst, volumes: vols}
 	}
 }
 
@@ -1559,8 +1622,12 @@ func (m Model) ServerIPv4() []string {
 	return nil
 }
 
-// SetServer updates the server data directly.
+// SetServer updates the server data directly. Data for any other server
+// than the one this view shows is ignored.
 func (m *Model) SetServer(s *compute.Server) {
+	if s != nil && s.ID != m.serverID {
+		return
+	}
 	if m.pendingAction != "" && s != nil && s.Status != "VERIFY_RESIZE" {
 		m.pendingAction = ""
 	}
