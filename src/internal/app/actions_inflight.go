@@ -13,8 +13,9 @@ import (
 // root model. inflight and seq are only touched from Update; the audit
 // failure fields are written from command goroutines and guarded by mu.
 type actionState struct {
-	inflight map[string]string // lock key -> display name of the resource
-	seq      uint64
+	inflight      map[string]string // lock key -> display name of the resource
+	seq           uint64
+	pendingResize pendingResize // operation owning the optimistic resize label
 
 	mu            sync.Mutex
 	auditErr      error // first unreported audit write failure
@@ -214,6 +215,7 @@ func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
 			delete(m.actions.inflight, k)
 		}
 	}
+	m.rollbackPendingResize(msg.seq, msg.msg)
 	var cmd tea.Cmd
 	if msg.msg != nil {
 		var next tea.Model
