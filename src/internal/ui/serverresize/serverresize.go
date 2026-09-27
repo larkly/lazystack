@@ -41,6 +41,12 @@ type Model struct {
 	width         int
 	height        int
 	err           string
+
+	// Track, when set, is called as a resize is submitted with the target
+	// server IDs and the request command. It returns the command to run in
+	// its place (for example one holding per-server in-flight locks for its
+	// lifetime) or, when a target is busy, a reason to refuse the request.
+	Track func(ids []string, cmd tea.Cmd) (tea.Cmd, string)
 }
 
 // NewBulk creates a resize picker for multiple servers.
@@ -225,16 +231,16 @@ func (m *Model) ensureVisible() {
 }
 
 func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
-	m.submitting = true
-	m.err = ""
 	client := m.client
 	name := m.serverName
 	flavorID := flavor.ID
 
-	// Bulk resize
+	var ids []string
+	var cmd tea.Cmd
 	if len(m.serverIDs) > 0 {
-		ids := m.serverIDs
-		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		// Bulk resize
+		ids = m.serverIDs
+		cmd = func() tea.Msg {
 			shared.Debugf("[serverresize] resizing %d servers to flavor %s", len(ids), flavorID)
 			var errs []string
 			for _, id := range ids {
@@ -249,21 +255,34 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 			}
 			shared.Debugf("[serverresize] resized %d servers to flavor %s", len(ids), flavorID)
 			return resizeDoneMsg{name: name}
-		})
+		}
+	} else {
+		// Single resize
+		id := m.serverID
+		ids = []string{id}
+		cmd = func() tea.Msg {
+			shared.Debugf("[serverresize] resizing server %s (%s) to flavor %s", id, name, flavorID)
+			err := compute.ResizeServer(context.Background(), client, id, flavorID)
+			if err != nil {
+				shared.Debugf("[serverresize] error resizing server %s: %v", id, err)
+				return resizeErrMsg{err: err}
+			}
+			shared.Debugf("[serverresize] resized server %s (%s)", id, name)
+			return resizeDoneMsg{name: name}
+		}
 	}
 
-	// Single resize
-	id := m.serverID
-	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		shared.Debugf("[serverresize] resizing server %s (%s) to flavor %s", id, name, flavorID)
-		err := compute.ResizeServer(context.Background(), client, id, flavorID)
-		if err != nil {
-			shared.Debugf("[serverresize] error resizing server %s: %v", id, err)
-			return resizeErrMsg{err: err}
+	if m.Track != nil {
+		tracked, busy := m.Track(ids, cmd)
+		if busy != "" {
+			m.err = busy
+			return m, nil
 		}
-		shared.Debugf("[serverresize] resized server %s (%s)", id, name)
-		return resizeDoneMsg{name: name}
-	})
+		cmd = tracked
+	}
+	m.submitting = true
+	m.err = ""
+	return m, tea.Batch(m.spinner.Tick, cmd)
 }
 
 func (m Model) listHeight() int {

@@ -207,3 +207,39 @@ func TestResizeErrorUnlocksAndRetries(t *testing.T) {
 		t.Fatal("escape after error should close")
 	}
 }
+
+func TestTrackHookGuardsSubmission(t *testing.T) {
+	m, rec := newBulk(t)
+	var gotIDs []string
+	m.Track = func(ids []string, cmd tea.Cmd) (tea.Cmd, string) {
+		gotIDs = ids
+		return nil, "srv-b already has an operation in progress"
+	}
+	m, _ = m.Update(keyDown)
+	m, _ = m.Update(keyEnter)
+	m, cmd := m.Update(keyY)
+	if cmd != nil || m.submitting || !m.Active {
+		t.Fatalf("refused resize still submitted: cmd=%v submitting=%v active=%v", cmd != nil, m.submitting, m.Active)
+	}
+	if strings.Join(gotIDs, ",") != "srv-a,srv-b" {
+		t.Fatalf("Track ids=%v", gotIDs)
+	}
+	if !strings.Contains(m.View(), "in progress") {
+		t.Fatalf("refusal not shown:\n%s", m.View())
+	}
+
+	// An accepting hook's command replaces the request.
+	wrapped := false
+	m.Track = func(ids []string, cmd tea.Cmd) (tea.Cmd, string) {
+		return func() tea.Msg { wrapped = true; return cmd() }, ""
+	}
+	m, _ = m.Update(keyEnter)
+	m, cmd = m.Update(keyY)
+	if !m.submitting {
+		t.Fatal("accepted resize not submitting")
+	}
+	run(cmd)
+	if !wrapped || rec.count() != 2 {
+		t.Fatalf("wrapped=%v posts=%d", wrapped, rec.count())
+	}
+}
