@@ -616,7 +616,7 @@ func classifyIPs(addresses map[string]interface{}) (ipv4, ipv6, floating []strin
 				continue
 			}
 			addr, ok := addrMap["addr"].(string)
-			if !ok {
+			if !ok || strings.TrimSpace(addr) == "" {
 				continue
 			}
 
