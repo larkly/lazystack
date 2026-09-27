@@ -296,12 +296,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focusField = (m.focusField + 1) % numFields
 		m.updateFocus()
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		filtered := m.filteredPickerItems(items)
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
