@@ -25,6 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tag.outputs.version }}
+      # "true" for a vX.Y.Z-PRERELEASE tag. Pre-releases are published as
+      # GitHub pre-releases (never "latest", so the self-updater does not
+      # offer them) and are not sent to Homebrew or the AUR.
+      prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
       - name: Validate tag format
         id: tag
@@ -37,6 +41,11 @@ jobs:
             exit 1
           fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          if [[ "$TAG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -236,7 +245,9 @@ jobs:
 
       # The self-updater only trusts SHA256SUMS with a valid Ed25519
       # signature from the key embedded in the client, so a release is never
-      # published without SHA256SUMS.sig. releasesign also refuses a key that
+      # published without SHA256SUMS.sig. The signature binds SHA256SUMS to
+      # this release's tag ($VERSION, from the job env), so it cannot be
+      # re-published under another tag. releasesign also refuses a key that
       # does not match selfupdate.ReleaseSigningPublicKey at this tag.
       - name: Sign checksums
         working-directory: source/src
@@ -247,7 +258,7 @@ jobs:
             echo "::error::RELEASE_SIGNING_KEY secret is not set; refusing to publish an unsigned release"
             exit 1
           fi
-          go run ./internal/selfupdate/cmd/releasesign sign "$GITHUB_WORKSPACE/dist/SHA256SUMS"
+          go run ./internal/selfupdate/cmd/releasesign sign "$GITHUB_WORKSPACE/dist/SHA256SUMS" "$VERSION"
           test -s "$GITHUB_WORKSPACE/dist/SHA256SUMS.sig"
 
       - name: Parse checksums
@@ -269,14 +280,17 @@ jobs:
         with:
           tag_name: ${{ needs.validate.outputs.version }}
           generate_release_notes: true
+          prerelease: ${{ needs.validate.outputs.prerelease == 'true' }}
           files: dist/*
 
   # Notifies the Homebrew tap and AUR repositories. Each token is exposed
   # only to the one step that uses it, and only to first-party tooling (gh).
   # Use fine-grained tokens limited to the single target repository with
   # Contents: read and write, which is what repository_dispatch requires.
+  # Only final releases are dispatched; pre-releases stay on GitHub.
   dispatch:
     needs: [validate, release]
+    if: needs.validate.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     permissions: {}
     env:

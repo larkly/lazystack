@@ -426,9 +426,14 @@ func (m Model) resolveTargets(fip *network.FloatingIP) tea.Cmd {
 	client := m.client
 	serverID := m.serverID
 	return func() tea.Msg {
-		ctx, cancel := shared.RequestCtx()
-		defer cancel()
-		targets, err := network.ListFloatingIPTargets(ctx, client, serverID)
+		// The router lookup in ListFloatingIPTargets makes one call per
+		// gateway router, which with admin credentials covers every
+		// project. It gets its own deadline so it cannot starve the
+		// external network listing below; if it runs out, reachability
+		// is just unknown.
+		tctx, tcancel := shared.RequestCtx()
+		targets, err := network.ListFloatingIPTargets(tctx, client, serverID)
+		tcancel()
 		if err != nil {
 			shared.Debugf("[fippicker] error listing addresses for server %s: %v", serverID, err)
 			if fip == nil {
@@ -443,6 +448,8 @@ func (m Model) resolveTargets(fip *network.FloatingIP) tea.Cmd {
 			// Nothing can take a floating IP; do not allocate one.
 			return targetsLoadedMsg{}
 		}
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
 		nets, err := network.ListExternalNetworks(ctx, client)
 		if err != nil {
 			shared.Debugf("[fippicker] error listing external networks: %v", err)

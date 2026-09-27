@@ -1,7 +1,11 @@
 // Command releasesign manages the Ed25519 key that signs release checksums.
 //
-//	releasesign keygen      print a new key pair
-//	releasesign sign FILE   sign FILE with $RELEASE_SIGNING_KEY, writing FILE.sig
+//	releasesign keygen          print a new key pair
+//	releasesign sign FILE TAG   sign FILE for release TAG with $RELEASE_SIGNING_KEY, writing FILE.sig
+//
+// sign signs selfupdate.ReleaseSignatureMessage(TAG, contents of FILE), which
+// binds the checksums to the release tag; TAG must be of the form
+// vMAJOR.MINOR.PATCH[-PRERELEASE] and must be the tag being released.
 //
 // RELEASE_SIGNING_KEY is the base64-encoded 32-byte Ed25519 seed printed by
 // keygen. sign refuses to run when the key is missing or when it does not
@@ -38,15 +42,15 @@ func run(args []string, getenv func(string) string, trustedPub string, stdout, s
 		}
 		return 0
 	case "sign":
-		if len(args) != 2 {
+		if len(args) != 3 {
 			usage(stderr)
 			return 2
 		}
-		if err := sign(args[1], getenv("RELEASE_SIGNING_KEY"), trustedPub); err != nil {
+		if err := sign(args[1], args[2], getenv("RELEASE_SIGNING_KEY"), trustedPub); err != nil {
 			fmt.Fprintf(stderr, "releasesign: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "wrote %s.sig\n", args[1])
+		fmt.Fprintf(stdout, "wrote %s.sig for %s\n", args[1], args[2])
 		return 0
 	default:
 		usage(stderr)
@@ -55,7 +59,7 @@ func run(args []string, getenv func(string) string, trustedPub string, stdout, s
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: releasesign keygen | releasesign sign FILE")
+	fmt.Fprintln(w, "usage: releasesign keygen | releasesign sign FILE TAG")
 }
 
 func keygen(w io.Writer) error {
@@ -70,7 +74,10 @@ func keygen(w io.Writer) error {
 	return nil
 }
 
-func sign(path, keyB64, trustedPub string) error {
+func sign(path, tag, keyB64, trustedPub string) error {
+	if !selfupdate.ValidReleaseTag(tag) {
+		return fmt.Errorf("release tag %q is not of the form vMAJOR.MINOR.PATCH[-PRERELEASE]", tag)
+	}
 	if keyB64 == "" {
 		return errors.New("RELEASE_SIGNING_KEY is not set; refusing to publish unsigned checksums")
 	}
@@ -91,6 +98,7 @@ func sign(path, keyB64, trustedPub string) error {
 	if err != nil {
 		return err
 	}
-	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, data)) + "\n"
+	msg := selfupdate.ReleaseSignatureMessage(tag, data)
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, msg)) + "\n"
 	return os.WriteFile(path+".sig", []byte(sig), 0o644)
 }

@@ -58,6 +58,9 @@ type cloudsListedMsg struct {
 func (m Model) switchToCloudPicker() (Model, tea.Cmd) {
 	m.cloudListSeq++
 	seq := m.cloudListSeq
+	// An explicit pick always shows the list, never the placeholder of the
+	// automatic startup connection.
+	m.autoCloud = ""
 	m.cloudPicker = cloudpicker.New(nil, nil)
 	m.cloudPicker.SetSize(m.width, m.height)
 	m.view = viewCloudPicker

@@ -31,18 +31,24 @@ const focusPaneCount = 4
 const narrowThreshold = 80
 
 type networksLoadedMsg struct {
+	seq         uint64
 	networks    []network.Network
 	allSubnets  map[string]network.Subnet // ID → Subnet
 	externalIDs map[string]bool
 }
-type networksErrMsg struct{ err error }
+type networksErrMsg struct {
+	seq uint64
+	err error
+}
 type detailLoadedMsg struct {
+	seq         uint64
 	netID       string
 	ports       []network.Port
 	serverNames map[string]string
 	sgNames     map[string]string
 }
 type detailErrMsg struct {
+	seq   uint64
 	netID string
 	err   error
 }
@@ -83,6 +89,8 @@ type Model struct {
 	highlightNames  map[string]bool
 	lastDetailNetID string
 	pendingDetailID string // network whose detail fetch is pending after highlight navigation
+	refresh         shared.RefreshGate
+	detailRefresh   shared.RefreshGate
 }
 
 // New creates a network view model.
@@ -106,7 +114,7 @@ func (m *Model) SetComputeClient(client *gophercloud.ServiceClient) {
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
 	shared.Debugf("[networkview] Init()")
-	return tea.Batch(m.spinner.Tick, m.fetchNetworks())
+	return tea.Batch(m.spinner.Tick, m.fetchNetworks(m.refresh.Seq()))
 }
 
 func (m Model) selectedNetwork() *network.Network {
@@ -263,6 +271,9 @@ func (m Model) networkSubnets() []network.Subnet {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case networksLoadedMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[networkview] networksLoadedMsg: %d networks", len(msg.networks))
 		var cursorID string
 		if m.cursor >= 0 && m.cursor < len(m.networks) {
@@ -291,17 +302,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if n := m.selectedNetwork(); n != nil && n.ID != m.lastDetailNetID {
 			m.lastDetailNetID = n.ID
 			m.resetDetailState()
-			fetchCmd = m.fetchDetail(n.ID)
+			fetchCmd = m.fetchDetail(n.ID, m.detailRefresh.Start())
 		}
 		return m, fetchCmd
 
 	case networksErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		shared.Debugf("[networkview] networksErrMsg: %v", msg.err)
 		m.loading = false
 		m.err = msg.err.Error()
 		return m, nil
 
 	case detailLoadedMsg:
+		if !m.detailRefresh.Accept(msg.seq) {
+			// Superseded by a newer fetch; still flush any pending
+			// highlight-navigation fetch.
+			return m, m.takePendingDetailFetch()
+		}
 		shared.Debugf("[networkview] detailLoadedMsg: %d ports", len(msg.ports))
 		if n := m.selectedNetwork(); n != nil && n.ID == msg.netID {
 			m.detailLoading = false
@@ -317,6 +336,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.takePendingDetailFetch()
 
 	case detailErrMsg:
+		if !m.detailRefresh.Accept(msg.seq) {
+			return m, m.takePendingDetailFetch()
+		}
 		shared.Debugf("[networkview] detailErrMsg: %v", msg.err)
 		if n := m.selectedNetwork(); n != nil && n.ID == msg.netID {
 			m.detailLoading = false
@@ -331,12 +353,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[networkview] tick fetching")
-		cmds := []tea.Cmd{m.fetchNetworks()}
+		// Never overlap background fetches: a slower older reply could
+		// otherwise bring back a just-deleted network or port.
+		var cmds []tea.Cmd
+		if !m.refresh.Busy() {
+			cmds = append(cmds, m.fetchNetworks(m.refresh.Start()))
+		}
 		if cmd := m.takePendingDetailFetch(); cmd != nil {
 			cmds = append(cmds, cmd)
-		} else if n := m.selectedNetwork(); n != nil && !m.detailLoading {
-			// Guard against overlapping in-flight detail requests.
-			cmds = append(cmds, m.fetchDetail(n.ID))
+		} else if n := m.selectedNetwork(); n != nil && !m.detailRefresh.Busy() {
+			cmds = append(cmds, m.fetchDetail(n.ID, m.detailRefresh.Start()))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -481,7 +507,7 @@ func (m Model) onSelectorChange() (Model, tea.Cmd) {
 	m.pendingDetailID = "" // manual navigation supersedes any pending highlight fetch
 	m.lastDetailNetID = n.ID
 	m.resetDetailState()
-	return m, m.fetchDetail(n.ID)
+	return m, m.fetchDetail(n.ID, m.detailRefresh.Start())
 }
 
 func (m *Model) ensureSelectorCursorVisible() {
@@ -1255,10 +1281,10 @@ func (m Model) renderActionBar() string {
 func (m *Model) ForceRefresh() tea.Cmd {
 	shared.Debugf("[networkview] ForceRefresh()")
 	m.loading = true
-	cmds := []tea.Cmd{m.spinner.Tick, m.fetchNetworks()}
+	cmds := []tea.Cmd{m.spinner.Tick, m.fetchNetworks(m.refresh.Start())}
 	if n := m.selectedNetwork(); n != nil {
 		m.detailLoading = true
-		cmds = append(cmds, m.fetchDetail(n.ID))
+		cmds = append(cmds, m.fetchDetail(n.ID, m.detailRefresh.Start()))
 	}
 	return tea.Batch(cmds...)
 }
@@ -1308,7 +1334,7 @@ func (m *Model) takePendingDetailFetch() tea.Cmd {
 	}
 	netID := m.pendingDetailID
 	m.pendingDetailID = ""
-	return m.fetchDetail(netID)
+	return m.fetchDetail(netID, m.detailRefresh.Start())
 }
 
 // Hints returns key hints for the status bar.
@@ -1327,7 +1353,7 @@ func (m Model) Hints() string {
 
 // --- Data fetching ---
 
-func (m Model) fetchNetworks() tea.Cmd {
+func (m Model) fetchNetworks(seq uint64) tea.Cmd {
 	client := m.networkClient
 	return func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
@@ -1336,11 +1362,11 @@ func (m Model) fetchNetworks() tea.Cmd {
 		nets, err := network.ListNetworks(ctx, client)
 		if err != nil {
 			shared.Debugf("[networkview] fetchNetworks error: %v", err)
-			return networksErrMsg{err: err}
+			return networksErrMsg{seq: seq, err: err}
 		}
 		subs, err := network.ListSubnets(ctx, client)
 		if err != nil {
-			return networksErrMsg{err: err}
+			return networksErrMsg{seq: seq, err: err}
 		}
 		subMap := make(map[string]network.Subnet, len(subs))
 		for _, s := range subs {
@@ -1355,11 +1381,11 @@ func (m Model) fetchNetworks() tea.Cmd {
 			}
 		}
 		shared.Debugf("[networkview] fetchNetworks done: %d networks", len(nets))
-		return networksLoadedMsg{networks: nets, allSubnets: subMap, externalIDs: extIDs}
+		return networksLoadedMsg{seq: seq, networks: nets, allSubnets: subMap, externalIDs: extIDs}
 	}
 }
 
-func (m Model) fetchDetail(netID string) tea.Cmd {
+func (m Model) fetchDetail(netID string, seq uint64) tea.Cmd {
 	networkClient := m.networkClient
 	computeClient := m.computeClient
 	return func() tea.Msg {
@@ -1369,7 +1395,7 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 		fetchedPorts, err := network.ListPorts(ctx, networkClient, netID)
 		if err != nil {
 			shared.Debugf("[networkview] fetchDetail error: %v", err)
-			return detailErrMsg{netID: netID, err: err}
+			return detailErrMsg{seq: seq, netID: netID, err: err}
 		}
 
 		// Sort ports by device owner, then MAC
@@ -1401,7 +1427,7 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 
 		if computeClient == nil {
 			shared.Debugf("[networkview] fetchDetail done: %d ports (no compute client)", len(fetchedPorts))
-			return detailLoadedMsg{netID: netID, ports: fetchedPorts, sgNames: sgNameMap}
+			return detailLoadedMsg{seq: seq, netID: netID, ports: fetchedPorts, sgNames: sgNameMap}
 		}
 
 		// Collect device IDs that look like compute instances
@@ -1435,6 +1461,6 @@ func (m Model) fetchDetail(netID string) tea.Cmd {
 		}
 
 		shared.Debugf("[networkview] fetchDetail done: %d ports", len(fetchedPorts))
-		return detailLoadedMsg{netID: netID, ports: fetchedPorts, serverNames: srvNames, sgNames: sgNameMap}
+		return detailLoadedMsg{seq: seq, netID: netID, ports: fetchedPorts, serverNames: srvNames, sgNames: sgNameMap}
 	}
 }

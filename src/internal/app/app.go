@@ -1032,6 +1032,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case shared.CloudConnectedMsg:
 		m.lastActivity = time.Now()
 		m.idlePaused = false
+		// The automatic startup connection is done; the cloud picker must
+		// render its list from now on, not the "Connecting to" placeholder.
+		m.autoCloud = ""
 		// Reset back-navigation and drill-down views from the previous
 		// cloud/project so nothing can restore models bound to old clients.
 		m.clearBackNav()
@@ -1172,6 +1175,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 	case shared.CloudConnectErrMsg:
+		// A failed automatic connection falls back to the cloud list so
+		// another cloud can be chosen once the error is dismissed.
+		m.autoCloud = ""
 		m.errModal = modal.NewError("Cloud Connection", msg.Err)
 		m.errModal.SetSize(m.width, m.height)
 		m.activeModal = modalError

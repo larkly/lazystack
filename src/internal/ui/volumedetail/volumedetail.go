@@ -16,15 +16,21 @@ import (
 	"github.com/larkly/lazystack/internal/volume"
 )
 
+// volumeDetailLoadedMsg and volumeDetailErrMsg carry the ID of the volume
+// that was requested. The sequence gate is per model and every New starts
+// it again at 0, so a late reply from a previous detail view could otherwise
+// be applied to the volume shown now.
 type volumeDetailLoadedMsg struct {
 	seq        uint64
+	volumeID   string
 	vol        *volume.Volume
 	serverName string
 }
 
 type volumeDetailErrMsg struct {
-	seq uint64
-	err error
+	seq      uint64
+	volumeID string
+	err      error
 }
 
 // Model is the volume detail view.
@@ -97,6 +103,10 @@ func (m Model) CopyEntries() (string, []copypicker.Entry) {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case volumeDetailLoadedMsg:
+		if msg.volumeID != m.volumeID || msg.vol == nil || msg.vol.ID != m.volumeID {
+			shared.Debugf("[volumedetail] dropping reply for volume %s (showing %s)", msg.volumeID, m.volumeID)
+			return m, nil
+		}
 		if !m.refresh.Accept(msg.seq) {
 			return m, nil
 		}
@@ -109,6 +119,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case volumeDetailErrMsg:
+		if msg.volumeID != m.volumeID {
+			shared.Debugf("[volumedetail] dropping error for volume %s (showing %s)", msg.volumeID, m.volumeID)
+			return m, nil
+		}
 		if !m.refresh.Accept(msg.seq) {
 			return m, nil
 		}
@@ -324,7 +338,7 @@ func (m Model) fetchVolume(seq uint64) tea.Cmd {
 		vol, err := volume.GetVolume(ctx, client, id)
 		if err != nil {
 			shared.Debugf("[volumedetail] fetch error: %v", err)
-			return volumeDetailErrMsg{seq: seq, err: err}
+			return volumeDetailErrMsg{seq: seq, volumeID: id, err: err}
 		}
 		serverName := ""
 		if vol.AttachedServerID != "" && computeClient != nil {
@@ -334,7 +348,7 @@ func (m Model) fetchVolume(seq uint64) tea.Cmd {
 			}
 		}
 		shared.Debugf("[volumedetail] fetch done id=%s", id)
-		return volumeDetailLoadedMsg{seq: seq, vol: vol, serverName: serverName}
+		return volumeDetailLoadedMsg{seq: seq, volumeID: id, vol: vol, serverName: serverName}
 	}
 }
 

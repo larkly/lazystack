@@ -1,6 +1,7 @@
 package lbview
 
 import (
+	"context"
 	"fmt"
 	"image/color"
 	"sort"
@@ -2032,21 +2033,34 @@ func (m Model) fetchDetail(lbID string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		shared.Debugf("[lbview] fetchDetail start for %s", lbID)
-		ctx, cancel := shared.RequestCtx()
-		defer cancel()
+		// Each API call gets its own RequestTimeout so that on a slow
+		// Octavia the calls for the first pools cannot use up the time
+		// of the later ones. The whole fetch is still bounded by
+		// LongRequestTimeout.
+		all, cancelAll := shared.LongRequestCtx()
+		defer cancelAll()
+		callCtx := func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(all, shared.RequestTimeout)
+		}
 
+		ctx, cancel := callCtx()
 		lb, err := loadbalancer.GetLoadBalancer(ctx, client, lbID)
+		cancel()
 		if err != nil {
 			return detailErrMsg{lbID: lbID, err: err}
 		}
 		_ = lb // we already have it in the selector list
 
+		ctx, cancel = callCtx()
 		lstnrs, err := loadbalancer.ListListeners(ctx, client, lbID)
+		cancel()
 		if err != nil {
 			return detailErrMsg{lbID: lbID, err: err}
 		}
 
+		ctx, cancel = callCtx()
 		pls, err := loadbalancer.ListPools(ctx, client, lbID)
+		cancel()
 		if err != nil {
 			return detailErrMsg{lbID: lbID, err: err}
 		}
@@ -2057,7 +2071,9 @@ func (m Model) fetchDetail(lbID string) tea.Cmd {
 		monitorErrs := make(map[string]string)
 
 		for _, p := range pls {
+			ctx, cancel := callCtx()
 			mems, err := loadbalancer.ListMembers(ctx, client, p.ID)
+			cancel()
 			if err != nil {
 				shared.Debugf("[lbview] fetchDetail: members of pool %s: %v", p.ID, err)
 				memberErrs[p.ID] = err.Error()
@@ -2066,7 +2082,9 @@ func (m Model) fetchDetail(lbID string) tea.Cmd {
 			}
 
 			if p.MonitorID != "" {
+				ctx, cancel := callCtx()
 				mon, err := loadbalancer.GetHealthMonitor(ctx, client, p.MonitorID)
+				cancel()
 				if err != nil {
 					shared.Debugf("[lbview] fetchDetail: health monitor %s: %v", p.MonitorID, err)
 					monitorErrs[p.MonitorID] = err.Error()

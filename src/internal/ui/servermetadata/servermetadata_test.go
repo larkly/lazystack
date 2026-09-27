@@ -80,6 +80,33 @@ func newModel(t *testing.T, meta map[string]string) (Model, *metaRecorder) {
 	return m, rec
 }
 
+// j/k must be typed into the key/value inputs, not switch fields; only
+// tab/shift+tab and the arrows navigate.
+func TestFormTypesJKAndNavigatesWithTabAndArrows(t *testing.T) {
+	for _, mode := range []string{"a", "e"} {
+		m, _ := newModel(t, map[string]string{"role": "db"})
+		m = runes(m, mode)
+		m.keyInput.SetValue("")
+		m.valueInput.SetValue("")
+		m = runes(m, "project_id_jk")
+		if !m.keyInput.Focused() || m.keyInput.Value() != "project_id_jk" {
+			t.Fatalf("%s: key=%q focused=%v", mode, m.keyInput.Value(), m.keyInput.Focused())
+		}
+		for _, k := range []tea.KeyPressMsg{keyTab, {Code: tea.KeyTab, Mod: tea.ModShift}, keyDown, {Code: tea.KeyUp}} {
+			wasKey := m.keyInput.Focused()
+			m, _ = press(m, k)
+			if m.keyInput.Focused() == wasKey || m.valueInput.Focused() != wasKey {
+				t.Fatalf("%s: %q did not switch fields", mode, k.String())
+			}
+		}
+		m, _ = press(m, keyTab)
+		m = runes(m, "jk")
+		if !m.valueInput.Focused() || m.valueInput.Value() != "jk" {
+			t.Fatalf("%s: value=%q focused=%v", mode, m.valueInput.Value(), m.valueInput.Focused())
+		}
+	}
+}
+
 func TestBlankKeyIsRejectedWithoutRequests(t *testing.T) {
 	for _, mode := range []string{"a", "e"} {
 		m, rec := newModel(t, map[string]string{"role": "db"})

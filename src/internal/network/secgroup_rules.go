@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/security/groups"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/security/rules"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -61,8 +62,34 @@ func GetSecurityRuleSpec(ctx context.Context, client *gophercloud.ServiceClient,
 		shared.Debugf("[network] get security group rule %s: %v", id, err)
 		return nil, fmt.Errorf("getting security group rule %s: %w", id, err)
 	}
-	w := body.Rule
-	return &SecurityRuleSpec{
+	spec := body.Rule.spec()
+	return &spec, nil
+}
+
+// listSecurityGroupRuleSpecs fetches a group's rules with null-aware fields.
+// It reads the rules embedded in the group itself, so the result is the same
+// rule set GetSecurityGroup sees.
+func listSecurityGroupRuleSpecs(ctx context.Context, client *gophercloud.ServiceClient, groupID string) ([]SecurityRuleSpec, error) {
+	shared.Debugf("[network] getting security group %s rule specs", groupID)
+	var body struct {
+		Group struct {
+			Rules []ruleSpecWire `json:"security_group_rules"`
+		} `json:"security_group"`
+	}
+	if err := groups.Get(ctx, client, groupID).ExtractInto(&body); err != nil {
+		shared.Debugf("[network] get security group %s rule specs: %v", groupID, err)
+		return nil, fmt.Errorf("getting security group %s: %w", groupID, err)
+	}
+	specs := make([]SecurityRuleSpec, 0, len(body.Group.Rules))
+	for _, w := range body.Group.Rules {
+		specs = append(specs, w.spec())
+	}
+	shared.Debugf("[network] got security group %s (%d rules)", groupID, len(specs))
+	return specs, nil
+}
+
+func (w ruleSpecWire) spec() SecurityRuleSpec {
+	return SecurityRuleSpec{
 		ID:                   w.ID,
 		SecGroupID:           w.SecGroupID,
 		Direction:            w.Direction,
@@ -74,7 +101,7 @@ func GetSecurityRuleSpec(ctx context.Context, client *gophercloud.ServiceClient,
 		RemoteGroupID:        derefString(w.RemoteGroupID),
 		RemoteAddressGroupID: derefString(w.RemoteAddressGroupID),
 		Description:          derefString(w.Description),
-	}, nil
+	}
 }
 
 // ruleSpecCreate builds a create request that keeps explicit zero port

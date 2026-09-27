@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -29,6 +30,16 @@ var httpClient = &http.Client{Timeout: 30 * time.Second, CheckRedirect: httpsOnl
 
 // downloadClient is used for binary downloads (5 minute timeout).
 var downloadClient = &http.Client{Timeout: 5 * time.Minute, CheckRedirect: httpsOnlyRedirects}
+
+// Download size limits. Real release assets are far below them; they stop a
+// broken or hostile server from exhausting memory or disk. They are
+// variables so tests can lower them.
+var (
+	maxReleaseJSONSize int64 = 10 << 20  // GitHub release API response
+	maxChecksumsSize   int64 = 1 << 20   // SHA256SUMS
+	maxSignatureSize   int64 = 4 << 10   // SHA256SUMS.sig
+	maxBinarySize      int64 = 256 << 20 // release binary
+)
 
 // githubRelease is the subset of the GitHub release API response we need.
 type githubRelease struct {
@@ -51,7 +62,7 @@ func CheckLatest(ctx context.Context, currentVersion string) (latest, downloadUR
 		return "", "", "", errors.New("cannot check for updates on a dev build; build with -ldflags \"-X main.version=vX.Y.Z\"")
 	}
 
-	body, err := httpGet(ctx, releaseAPI)
+	body, err := httpGet(ctx, releaseAPI, maxReleaseJSONSize)
 	if err != nil {
 		shared.Debugf("[selfupdate] CheckLatest: error fetching release: %v", err)
 		return "", "", "", fmt.Errorf("fetching latest release: %w", err)
@@ -117,18 +128,20 @@ func CheckLatest(ctx context.Context, currentVersion string) (latest, downloadUR
 //
 // current and target are the running and the new release version. They
 // decide whether the release must carry a valid SHA256SUMS signature (from
-// SignatureRequiredFrom on) or may fall back to SHA256SUMS alone. Apply
+// SignatureRequiredFrom on) or may fall back to SHA256SUMS alone. target must
+// be the exact tag returned by CheckLatest: the signature covers it, so a
+// signed SHA256SUMS re-published under another tag is rejected. Apply
 // reports whether the installed binary was signature-verified.
 func Apply(ctx context.Context, current, target, downloadURL, checksumsURL string) (signed bool, err error) {
 	required := signatureRequired(current, target)
 	shared.Debugf("[selfupdate] Apply: %s -> %s, signature required=%v", current, target, required)
-	if err := apply(ctx, downloadURL, checksumsURL, required, &signed); err != nil {
+	if err := apply(ctx, target, downloadURL, checksumsURL, required, &signed); err != nil {
 		return false, err
 	}
 	return signed, nil
 }
 
-func apply(ctx context.Context, downloadURL, checksumsURL string, signatureRequired bool, signed *bool) error {
+func apply(ctx context.Context, tag, downloadURL, checksumsURL string, signatureRequired bool, signed *bool) error {
 	shared.Debugf("[selfupdate] Apply: start downloadURL=%s", downloadURL)
 	if checksumsURL == "" {
 		shared.Debugf("[selfupdate] Apply: refusing to install without checksums")
@@ -189,9 +202,17 @@ func apply(ctx context.Context, downloadURL, checksumsURL string, signatureRequi
 
 	hasher := sha256.New()
 	w := io.MultiWriter(tmp, hasher)
-	if _, err := io.Copy(w, resp.Body); err != nil {
+	// Read one byte past the limit so an oversized download is reported
+	// rather than silently truncated; the deferred cleanup removes the
+	// staged file.
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxBinarySize+1))
+	if err != nil {
 		shared.Debugf("[selfupdate] Apply: error writing binary: %v", err)
 		return fmt.Errorf("writing binary: %w", err)
+	}
+	if n > maxBinarySize {
+		shared.Debugf("[selfupdate] Apply: binary exceeds %d bytes", maxBinarySize)
+		return fmt.Errorf("downloading binary: %w", &tooLargeError{What: "binary", Limit: maxBinarySize})
 	}
 	// Make the staged bytes durable before they can replace the binary:
 	// an atomic rename of unsynced data can leave an empty file after a
@@ -209,7 +230,7 @@ func apply(ctx context.Context, downloadURL, checksumsURL string, signatureRequi
 	got := hex.EncodeToString(hasher.Sum(nil))
 
 	shared.Debugf("[selfupdate] Apply: verifying checksum")
-	verified, err := verifyChecksum(ctx, checksumsURL, got, signatureRequired)
+	verified, err := verifyChecksum(ctx, checksumsURL, tag, got, signatureRequired)
 	if err != nil {
 		shared.Debugf("[selfupdate] Apply: error checksum verification: %v", err)
 		return err
@@ -360,15 +381,16 @@ func httpsOnlyRedirects(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-// verifyChecksum checks gotHash against the release's SHA256SUMS after
-// verifying the SHA256SUMS signature (see verifyChecksumsSignature). It
-// reports whether the checksums were signature-verified.
-func verifyChecksum(ctx context.Context, checksumsURL, gotHash string, signatureRequired bool) (bool, error) {
-	body, err := httpGet(ctx, checksumsURL)
+// verifyChecksum checks gotHash against the SHA256SUMS of the release tagged
+// tag after verifying the SHA256SUMS signature (see
+// verifyChecksumsSignature). It reports whether the checksums were
+// signature-verified.
+func verifyChecksum(ctx context.Context, checksumsURL, tag, gotHash string, signatureRequired bool) (bool, error) {
+	body, err := httpGet(ctx, checksumsURL, maxChecksumsSize)
 	if err != nil {
 		return false, fmt.Errorf("downloading checksums: %w", err)
 	}
-	signed, err := verifyChecksumsSignature(ctx, checksumsURL, body, signatureRequired)
+	signed, err := verifyChecksumsSignature(ctx, checksumsURL, tag, body, signatureRequired)
 	if err != nil {
 		return false, err
 	}
@@ -387,7 +409,9 @@ func verifyChecksum(ctx context.Context, checksumsURL, gotHash string, signature
 	return false, fmt.Errorf("no checksum found for %s in SHA256SUMS", assetName)
 }
 
-func httpGet(ctx context.Context, url string) ([]byte, error) {
+// httpGet fetches url and returns its body, failing if the body is larger
+// than limit bytes.
+func httpGet(ctx context.Context, url string, limit int64) ([]byte, error) {
 	if err := requireHTTPS(url); err != nil {
 		return nil, err
 	}
@@ -403,7 +427,26 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, &httpStatusError{Code: resp.StatusCode, URL: url}
 	}
-	return io.ReadAll(resp.Body)
+	// Read one byte past the limit to tell a body of exactly limit bytes
+	// from an oversized one.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, &tooLargeError{What: url, Limit: limit}
+	}
+	return body, nil
+}
+
+// tooLargeError is returned when a download exceeds its size limit.
+type tooLargeError struct {
+	What  string
+	Limit int64
+}
+
+func (e *tooLargeError) Error() string {
+	return fmt.Sprintf("%s is larger than the %d byte limit", e.What, e.Limit)
 }
 
 // httpStatusError is returned by httpGet for a non-200 response.
@@ -414,42 +457,144 @@ type httpStatusError struct {
 
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d from %s", e.Code, e.URL) }
 
-// isNewer returns true if latest is a higher semver than current.
-// Both must be in "vX.Y.Z" format.
+// isNewer returns true if latest is a higher version than current under
+// semver precedence, so v0.13.0 is newer than v0.13.0-rc1. Both must be in
+// "vX.Y.Z[-PRERELEASE]" format; see parseVersion.
 func isNewer(latest, current string) bool {
 	l := parseVersion(latest)
 	c := parseVersion(current)
 	if l == nil || c == nil {
 		return false
 	}
-	for i := 0; i < 3; i++ {
-		if l[i] > c[i] {
-			return true
-		}
-		if l[i] < c[i] {
-			return false
-		}
-	}
-	return false
+	return l.compare(c) > 0
 }
 
-func parseVersion(v string) []int {
+// version is a parsed release version: MAJOR.MINOR.PATCH and the optional
+// dot-separated semver pre-release identifiers.
+type version struct {
+	core [3]int
+	pre  []string
+}
+
+// gitDescribeSuffix matches what "git describe --tags --dirty" appends to a
+// tag for a build past it (e.g. "-7-g09160b8", "-dirty").
+var gitDescribeSuffix = regexp.MustCompile(`(-[0-9]+-g[0-9a-f]{4,})?(-dirty)?$`)
+
+// parseVersion parses "vX.Y.Z[-PRERELEASE][+BUILD]" and returns nil for
+// anything else. A git-describe suffix is dropped, so a local build of
+// "v0.3.0-7-g09160b8" compares equal to the tag it was built from
+// ("v0.3.0") rather than as a pre-release of it; build metadata is ignored
+// as semver requires.
+func parseVersion(v string) *version {
 	v = strings.TrimPrefix(v, "v")
-	// Strip git-describe suffix (e.g. "0.3.0-7-g09160b8" → "0.3.0")
-	if idx := strings.Index(v, "-"); idx >= 0 {
+	v = gitDescribeSuffix.ReplaceAllString(v, "")
+	if idx := strings.Index(v, "+"); idx >= 0 {
 		v = v[:idx]
 	}
-	parts := strings.Split(v, ".")
+	coreStr, preStr, hasPre := strings.Cut(v, "-")
+	parts := strings.Split(coreStr, ".")
 	if len(parts) != 3 {
 		return nil
 	}
-	nums := make([]int, 3)
+	var parsed version
 	for i, p := range parts {
+		if !isNumeric(p) {
+			return nil
+		}
 		n, err := strconv.Atoi(p)
 		if err != nil {
 			return nil
 		}
-		nums[i] = n
+		parsed.core[i] = n
 	}
-	return nums
+	if hasPre {
+		parsed.pre = strings.Split(preStr, ".")
+		for _, id := range parsed.pre {
+			if id == "" || strings.Trim(id, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-") != "" {
+				return nil
+			}
+		}
+	}
+	return &parsed
+}
+
+// compareCore compares only MAJOR.MINOR.PATCH, ignoring pre-release
+// identifiers. It returns -1, 0 or +1.
+func (v *version) compareCore(o *version) int {
+	for i := range v.core {
+		if v.core[i] != o.core[i] {
+			if v.core[i] > o.core[i] {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
+
+// compare orders versions by semver precedence and returns -1, 0 or +1: a
+// pre-release sorts before the release it precedes, and pre-release
+// identifiers are compared left to right, numeric ones numerically and
+// below alphanumeric ones, with a shorter list sorting first when all
+// shared identifiers are equal.
+func (v *version) compare(o *version) int {
+	if c := v.compareCore(o); c != 0 {
+		return c
+	}
+	switch {
+	case len(v.pre) == 0 && len(o.pre) == 0:
+		return 0
+	case len(v.pre) == 0:
+		return 1
+	case len(o.pre) == 0:
+		return -1
+	}
+	for i := 0; i < len(v.pre) && i < len(o.pre); i++ {
+		if c := compareIdentifier(v.pre[i], o.pre[i]); c != 0 {
+			return c
+		}
+	}
+	switch {
+	case len(v.pre) > len(o.pre):
+		return 1
+	case len(v.pre) < len(o.pre):
+		return -1
+	}
+	return 0
+}
+
+// compareIdentifier compares two pre-release identifiers.
+func compareIdentifier(a, b string) int {
+	aNum, bNum := isNumeric(a), isNumeric(b)
+	switch {
+	case aNum && bNum:
+		// Compare as arbitrary-size integers: by length once leading zeros
+		// are gone, then digit by digit.
+		a, b = strings.TrimLeft(a, "0"), strings.TrimLeft(b, "0")
+		if len(a) != len(b) {
+			if len(a) > len(b) {
+				return 1
+			}
+			return -1
+		}
+		return strings.Compare(a, b)
+	case aNum:
+		return -1
+	case bNum:
+		return 1
+	}
+	return strings.Compare(a, b)
+}
+
+// isNumeric reports whether s is a non-empty string of ASCII digits.
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }

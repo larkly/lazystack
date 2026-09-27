@@ -23,6 +23,9 @@ func TestSignatureRequired(t *testing.T) {
 		{"v0.19.9", "v0.20.0", true}, // updating to the first mandatory release
 		{"v0.20.0", "v0.20.1", true}, // clients from v0.20.0 always require it
 		{"v0.20.0-3-gabc1234", "v0.19.9", true},
+		{"v0.19.9", "v0.20.0-rc1", true}, // pre-releases of v0.20.0 are covered
+		{"v0.20.0-rc1", "v0.19.9", true},
+		{"v0.19.0", "v0.19.1-rc1", false},
 		{"v1.0.0", "v1.0.1", true},
 		{"v0.12.0", "not-a-version", true}, // unknown target fails closed
 		{"custom-build", "v0.13.0", false}, // unparseable current version doesn't force it
@@ -46,6 +49,8 @@ func TestVerifyChecksum_TransitionPolicy(t *testing.T) {
 	hash := hex.EncodeToString(sum[:])
 	asset := fmt.Sprintf("lazystack-%s-%s", runtime.GOOS, runtime.GOARCH)
 	sums := []byte(hash + "  " + asset + "\n")
+	const tag = "v0.13.0"
+	good := signRelease(priv, tag, sums)
 
 	tests := []struct {
 		name       string
@@ -58,14 +63,15 @@ func TestVerifyChecksum_TransitionPolicy(t *testing.T) {
 		wantErr    string
 	}{
 		{name: "unsigned release falls back before v0.20.0", sig: nil, hash: hash},
-		{name: "signed release is verified before v0.20.0", sig: encodeSig(priv, sums), hash: hash, wantSigned: true},
-		{name: "invalid signature is rejected before v0.20.0", sig: encodeSig(otherPriv, sums), hash: hash, wantErr: "signature verification failed"},
-		{name: "no embedded key falls back before v0.20.0", noKey: true, sig: encodeSig(priv, sums), hash: hash},
+		{name: "signed release is verified before v0.20.0", sig: good, hash: hash, wantSigned: true},
+		{name: "invalid signature is rejected before v0.20.0", sig: signRelease(otherPriv, tag, sums), hash: hash, wantErr: "signature verification failed"},
+		{name: "signature for another tag is rejected before v0.20.0", sig: signRelease(priv, "v0.12.0", sums), hash: hash, wantErr: "signature verification failed"},
+		{name: "no embedded key falls back before v0.20.0", noKey: true, sig: good, hash: hash},
 		{name: "fallback still checks the checksum", sig: nil, hash: strings.Repeat("f", 64), wantErr: "checksum mismatch"},
 		{name: "signature server error is not treated as unsigned", sigStatus: http.StatusInternalServerError, hash: hash, wantErr: "HTTP 500"},
 		{name: "unsigned release is rejected from v0.20.0", required: true, sig: nil, hash: hash, wantErr: "SHA256SUMS.sig"},
-		{name: "no embedded key is rejected from v0.20.0", required: true, noKey: true, sig: encodeSig(priv, sums), hash: hash, wantErr: "no release signing key"},
-		{name: "signed release is accepted from v0.20.0", required: true, sig: encodeSig(priv, sums), hash: hash, wantSigned: true},
+		{name: "no embedded key is rejected from v0.20.0", required: true, noKey: true, sig: good, hash: hash, wantErr: "no release signing key"},
+		{name: "signed release is accepted from v0.20.0", required: true, sig: good, hash: hash, wantSigned: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -91,7 +97,7 @@ func TestVerifyChecksum_TransitionPolicy(t *testing.T) {
 			httpClient.Transport = srv.Client().Transport
 			t.Cleanup(func() { httpClient.Transport = prev })
 
-			signed, err := verifyChecksum(context.Background(), srv.URL+"/SHA256SUMS", tc.hash, tc.required)
+			signed, err := verifyChecksum(context.Background(), srv.URL+"/SHA256SUMS", tag, tc.hash, tc.required)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("error = %v, want containing %q", err, tc.wantErr)

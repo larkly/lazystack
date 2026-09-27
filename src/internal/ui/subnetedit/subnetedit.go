@@ -3,6 +3,7 @@ package subnetedit
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -63,7 +64,7 @@ func New(client *gophercloud.ServiceClient, sub network.Subnet) Model {
 	ni := textinput.New()
 	ni.Prompt = ""
 	ni.Placeholder = "subnet name"
-	ni.CharLimit = 255
+	ni.CharLimit = fitLimit(255, sub.Name)
 	ni.SetWidth(40)
 	ni.SetValue(sub.Name)
 	ni.Focus()
@@ -71,21 +72,24 @@ func New(client *gophercloud.ServiceClient, sub network.Subnet) Model {
 	gi := textinput.New()
 	gi.Prompt = ""
 	gi.Placeholder = "e.g. 10.0.0.1"
-	gi.CharLimit = 45
+	gi.CharLimit = fitLimit(45, sub.GatewayIP)
 	gi.SetWidth(40)
 	gi.SetValue(sub.GatewayIP)
 
 	di := textinput.New()
 	di.Prompt = ""
 	di.Placeholder = "e.g. 2001:4860:4860::8888, 2001:4860:4860::8844"
-	di.CharLimit = 200
+	// List fields are unlimited: textinput truncates SetValue to CharLimit,
+	// so any cap would silently drop (or cut mid-address) existing entries
+	// on an unrelated save. Neutron validates the result.
+	di.CharLimit = 0
 	di.SetWidth(40)
 	di.SetValue(strings.Join(sub.DNSNameservers, ", "))
 
 	ai := textinput.New()
 	ai.Prompt = ""
 	ai.Placeholder = "e.g. 10.0.0.2-10.0.0.254"
-	ai.CharLimit = 500
+	ai.CharLimit = 0
 	ai.SetWidth(40)
 	var poolStrs []string
 	for _, p := range sub.AllocationPools {
@@ -96,7 +100,7 @@ func New(client *gophercloud.ServiceClient, sub network.Subnet) Model {
 	ri := textinput.New()
 	ri.Prompt = ""
 	ri.Placeholder = "e.g. 172.16.0.0/24>10.0.0.1, 192.168.0.0/16>10.0.0.1"
-	ri.CharLimit = 500
+	ri.CharLimit = 0
 	ri.SetWidth(40)
 	var routeStrs []string
 	for _, r := range sub.HostRoutes {
@@ -125,6 +129,12 @@ func New(client *gophercloud.ServiceClient, sub network.Subnet) Model {
 		dhcp:           dhcp,
 		spinner:        s,
 	}
+}
+
+// fitLimit returns limit, raised if needed so that pre-filling v is not
+// truncated by textinput's CharLimit.
+func fitLimit(limit int, v string) int {
+	return max(limit, utf8.RuneCountInString(v))
 }
 
 // Init returns the initial command.

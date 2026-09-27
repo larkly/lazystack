@@ -214,11 +214,15 @@ func (e *SecurityGroupCloneError) Unwrap() error { return e.Err }
 
 // CloneSecurityGroup creates a copy of a security group with all its rules.
 //
-// Rules keep their direction, ethertype, protocol, port range and remote
-// CIDR. A rule whose remote group is the source group itself ("members of
-// this group") is remapped to the new group, so the clone keeps the same
-// intra-group meaning instead of granting the source group's members access;
-// rules referencing any other group are copied verbatim.
+// Rules keep their direction, ethertype, protocol, port range, remote CIDR,
+// remote address group and description. Rules are read and recreated with
+// null-aware port bounds, so an unset bound stays unset and an explicit 0
+// (ICMP type 0 or code 0) stays 0; the SDK types collapse both into 0 and
+// drop it on create, which would widen ICMP rules. A rule whose remote group
+// is the source group itself ("members of this group") is remapped to the
+// new group, so the clone keeps the same intra-group meaning instead of
+// granting the source group's members access; rules referencing any other
+// group are copied verbatim.
 //
 // If copying a rule fails, the new group is deleted (best effort) so no
 // partial clone is left behind; when that rollback fails too, the returned
@@ -226,7 +230,7 @@ func (e *SecurityGroupCloneError) Unwrap() error { return e.Err }
 // never modified.
 func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, srcID, newName, newDesc string) (*SecurityGroup, error) {
 	shared.Debugf("[network] cloning security group %s as %q", srcID, newName)
-	src, err := GetSecurityGroup(ctx, client, srcID)
+	srcRules, err := listSecurityGroupRuleSpecs(ctx, client, srcID)
 	if err != nil {
 		shared.Debugf("[network] clone security group %s: get source: %v", srcID, err)
 		return nil, fmt.Errorf("cloning: %w", err)
@@ -237,30 +241,19 @@ func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, 
 		return nil, fmt.Errorf("cloning: %w", err)
 	}
 	copied := 0
-	for _, r := range src.Rules {
+	for _, spec := range srcRules {
 		// Skip default egress-allow-all rules — OpenStack creates these automatically
-		if r.Direction == "egress" && r.Protocol == "" && r.RemoteIPPrefix == "" && r.RemoteGroupID == "" && r.RemoteAddressGroupID == "" && r.PortRangeMin == 0 && r.PortRangeMax == 0 {
+		if spec.Direction == "egress" && spec.Protocol == "" && spec.RemoteIPPrefix == "" && spec.RemoteGroupID == "" && spec.RemoteAddressGroupID == "" && spec.PortRangeMin == nil && spec.PortRangeMax == nil {
 			continue
 		}
-		remoteGroupID := r.RemoteGroupID
-		if remoteGroupID == srcID {
-			remoteGroupID = newSG.ID
+		spec.ID = ""
+		spec.SecGroupID = newSG.ID
+		if spec.RemoteGroupID == srcID {
+			spec.RemoteGroupID = newSG.ID
 		}
-		opts := rules.CreateOpts{
-			SecGroupID:     newSG.ID,
-			Direction:      rules.RuleDirection(r.Direction),
-			EtherType:      rules.RuleEtherType(r.EtherType),
-			Protocol:       rules.RuleProtocol(r.Protocol),
-			PortRangeMin:   r.PortRangeMin,
-			PortRangeMax:   r.PortRangeMax,
-			RemoteIPPrefix: r.RemoteIPPrefix,
-			RemoteGroupID:  remoteGroupID,
-			// Keep address-group restrictions; dropping them would open
-			// the cloned rule to any source.
-			RemoteAddressGroupID: r.RemoteAddressGroupID,
-		}
-		_, err := CreateSecurityGroupRule(ctx, client, opts)
-		if err != nil {
+		// Address-group restrictions are kept as part of the spec; dropping
+		// them would open the cloned rule to any source.
+		if _, err := CreateSecurityRuleSpec(ctx, client, spec); err != nil {
 			shared.Debugf("[network] clone security group %s: clone rule: %v", srcID, err)
 			origErr := fmt.Errorf("cloning rule: %w", err)
 			if cleanupErr := rollbackClone(ctx, client, newSG.ID); cleanupErr != nil {

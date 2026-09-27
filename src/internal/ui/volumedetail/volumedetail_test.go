@@ -21,7 +21,7 @@ func loadedModel(t *testing.T, metaKeys int, height int) Model {
 	}
 	m := New(nil, nil, "vol-1")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: height})
-	m, _ = m.Update(volumeDetailLoadedMsg{vol: &volume.Volume{
+	m, _ = m.Update(volumeDetailLoadedMsg{volumeID: "vol-1", vol: &volume.Volume{
 		ID: "vol-1", Name: "data", Status: "available", Size: 10, Metadata: meta,
 	}})
 	return m
@@ -82,7 +82,7 @@ func TestScrollStaysZeroWhenContentFits(t *testing.T) {
 func TestReloadWithLessContentReclampsScroll(t *testing.T) {
 	m := loadedModel(t, 20, 15)
 	m = press(m, tea.KeyDown, 100)
-	m, _ = m.Update(volumeDetailLoadedMsg{vol: &volume.Volume{ID: "vol-1", Name: "data"}})
+	m, _ = m.Update(volumeDetailLoadedMsg{volumeID: "vol-1", vol: &volume.Volume{ID: "vol-1", Name: "data"}})
 	if m.scroll != 0 {
 		t.Fatalf("scroll=%d after reload with short content, want 0", m.scroll)
 	}
@@ -103,14 +103,40 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	}
 
 	m.ForceRefresh()
-	m, _ = m.Update(volumeDetailLoadedMsg{seq: m.refresh.Seq(), vol: &volume.Volume{ID: "vol-1", Status: "in-use"}})
-	m, _ = m.Update(volumeDetailLoadedMsg{seq: staleSeq, vol: &volume.Volume{ID: "vol-1", Status: "available"}})
-	m, _ = m.Update(volumeDetailErrMsg{seq: staleSeq, err: fmt.Errorf("stale")})
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: m.refresh.Seq(), volumeID: "vol-1", vol: &volume.Volume{ID: "vol-1", Status: "in-use"}})
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: staleSeq, volumeID: "vol-1", vol: &volume.Volume{ID: "vol-1", Status: "available"}})
+	m, _ = m.Update(volumeDetailErrMsg{seq: staleSeq, volumeID: "vol-1", err: fmt.Errorf("stale")})
 	if m.volume.Status != "in-use" || m.err != "" {
 		t.Fatalf("stale response applied: status=%q err=%q", m.volume.Status, m.err)
 	}
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")
+	}
+}
+
+// A late reply from a previous detail view (whose sequence also started at
+// 0) must not be shown for the new volume, or delete would name one volume
+// and remove another.
+func TestReplyForOtherVolumeIsIgnored(t *testing.T) {
+	m := New(nil, nil, "vol-b")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	seq := m.refresh.Seq()
+
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: seq, volumeID: "vol-a", vol: &volume.Volume{ID: "vol-a", Name: "alpha"}})
+	m, _ = m.Update(volumeDetailErrMsg{seq: seq, volumeID: "vol-a", err: fmt.Errorf("stale")})
+	// A reply tagged with this view's ID but carrying another volume is
+	// rejected as well.
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: seq, volumeID: "vol-b", vol: &volume.Volume{ID: "vol-a", Name: "alpha"}})
+	if m.volume != nil || m.err != "" || !m.loading {
+		t.Fatalf("other volume's reply applied: volume=%+v err=%q loading=%v", m.volume, m.err, m.loading)
+	}
+	if m.SelectedVolumeName() != "vol-b" {
+		t.Fatalf("SelectedVolumeName = %q, want vol-b", m.SelectedVolumeName())
+	}
+
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: seq, volumeID: "vol-b", vol: &volume.Volume{ID: "vol-b", Name: "bravo"}})
+	if m.volume == nil || m.SelectedVolumeName() != "bravo" || m.SelectedVolumeID() != "vol-b" || m.loading {
+		t.Fatalf("own reply not applied: volume=%+v loading=%v", m.volume, m.loading)
 	}
 }
 
