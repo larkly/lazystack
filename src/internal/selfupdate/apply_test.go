@@ -295,7 +295,7 @@ func TestCheckLatestRejectsPlainHTTPAssetURLs(t *testing.T) {
 // applyStrict applies an update to the first release that requires a
 // signature, so the tests exercise the mandatory-signature path.
 func applyStrict(ctx context.Context, downloadURL, checksumsURL string) error {
-	_, err := Apply(ctx, "v0.13.0", SignatureRequiredFrom, downloadURL, checksumsURL)
+	_, err := Apply(ctx, "v0.19.0", SignatureRequiredFrom, downloadURL, checksumsURL)
 	return err
 }
 
@@ -306,7 +306,7 @@ func TestApplyUnsignedReleaseBeforeSignatureRequirement(t *testing.T) {
 
 	signed, err := Apply(context.Background(), "v0.12.0", "v0.13.0", r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS")
 	if err != nil {
-		t.Fatalf("unsigned pre-v0.14.0 update refused: %v", err)
+		t.Fatalf("unsigned pre-v0.20.0 update refused: %v", err)
 	}
 	if signed {
 		t.Fatal("unsigned release reported as signed")
@@ -316,8 +316,8 @@ func TestApplyUnsignedReleaseBeforeSignatureRequirement(t *testing.T) {
 	}
 
 	exe = installed(t)
-	if _, err := Apply(context.Background(), "v0.13.0", "v0.14.0", r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS"); err == nil || !strings.Contains(err.Error(), "SHA256SUMS.sig") {
-		t.Fatalf("unsigned v0.14.0 update: err = %v, want a missing-signature error", err)
+	if _, err := Apply(context.Background(), "v0.19.0", "v0.20.0", r.srv.URL+"/bin", r.srv.URL+"/SHA256SUMS"); err == nil || !strings.Contains(err.Error(), "SHA256SUMS.sig") {
+		t.Fatalf("unsigned v0.20.0 update: err = %v, want a missing-signature error", err)
 	}
 	assertOriginal(t, exe)
 }

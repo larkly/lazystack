@@ -35,7 +35,7 @@ var releasePublicKey = ReleaseSigningPublicKey
 // is mandatory. Before it, releases may be unsigned so that clients can keep
 // updating with --update while signing is rolled out; see
 // verifyChecksumsSignature for the fallback rules.
-const SignatureRequiredFrom = "v0.14.0"
+const SignatureRequiredFrom = "v0.20.0"
 
 // signatureSuffix is appended to the SHA256SUMS asset URL to locate its
 // detached signature (GitHub serves both assets under the same release path).

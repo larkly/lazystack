@@ -594,7 +594,7 @@ src/
 - `--update` flag downloads latest release from GitHub
 - `--no-check-update` skips automatic version check on startup
 - Downloads binary for current OS/architecture with SHA256 checksum verification
-- Verifies `SHA256SUMS` with the Ed25519 signature (`SHA256SUMS.sig`) from the release key embedded in the binary. An invalid signature always aborts the update. From v0.14.0 (the running or the target version) a missing signature also aborts it; before that, a release without a signature, or a build without a key, falls back to `SHA256SUMS` alone with a warning (see SECURITY.md)
+- Verifies `SHA256SUMS` with the Ed25519 signature (`SHA256SUMS.sig`) from the release key embedded in the binary. An invalid signature always aborts the update. From v0.20.0 (the running or the target version) a missing signature also aborts it; before that, a release without a signature, or a build without a key, falls back to `SHA256SUMS` alone with a warning (see SECURITY.md)
 
 ### CLI Flags
 

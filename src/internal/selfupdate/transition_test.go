@@ -18,11 +18,11 @@ func TestSignatureRequired(t *testing.T) {
 		want            bool
 	}{
 		{"v0.11.0", "v0.12.0", false},
-		{"v0.12.0", "v0.13.9", false},
-		{"v0.13.9", "v0.13.10", false},
-		{"v0.13.9", "v0.14.0", true}, // updating to the first mandatory release
-		{"v0.14.0", "v0.14.1", true}, // clients from v0.14.0 always require it
-		{"v0.14.0-3-gabc1234", "v0.13.9", true},
+		{"v0.14.0", "v0.15.0", false},
+		{"v0.19.0", "v0.19.10", false},
+		{"v0.19.9", "v0.20.0", true}, // updating to the first mandatory release
+		{"v0.20.0", "v0.20.1", true}, // clients from v0.20.0 always require it
+		{"v0.20.0-3-gabc1234", "v0.19.9", true},
 		{"v1.0.0", "v1.0.1", true},
 		{"v0.12.0", "not-a-version", true}, // unknown target fails closed
 		{"custom-build", "v0.13.0", false}, // unparseable current version doesn't force it
@@ -34,9 +34,9 @@ func TestSignatureRequired(t *testing.T) {
 	}
 }
 
-// Before v0.14.0 a release without a signature, or a build without a
+// Before v0.20.0 a release without a signature, or a build without a
 // configured key, falls back to SHA256SUMS alone. A signature that is present
-// but invalid is always rejected, and from v0.14.0 the signature is mandatory.
+// but invalid is always rejected, and from v0.20.0 the signature is mandatory.
 func TestVerifyChecksum_TransitionPolicy(t *testing.T) {
 	pub, priv := testKey(5)
 	_, otherPriv := testKey(6)
@@ -57,15 +57,15 @@ func TestVerifyChecksum_TransitionPolicy(t *testing.T) {
 		wantSigned bool
 		wantErr    string
 	}{
-		{name: "unsigned release falls back before v0.14.0", sig: nil, hash: hash},
-		{name: "signed release is verified before v0.14.0", sig: encodeSig(priv, sums), hash: hash, wantSigned: true},
-		{name: "invalid signature is rejected before v0.14.0", sig: encodeSig(otherPriv, sums), hash: hash, wantErr: "signature verification failed"},
-		{name: "no embedded key falls back before v0.14.0", noKey: true, sig: encodeSig(priv, sums), hash: hash},
+		{name: "unsigned release falls back before v0.20.0", sig: nil, hash: hash},
+		{name: "signed release is verified before v0.20.0", sig: encodeSig(priv, sums), hash: hash, wantSigned: true},
+		{name: "invalid signature is rejected before v0.20.0", sig: encodeSig(otherPriv, sums), hash: hash, wantErr: "signature verification failed"},
+		{name: "no embedded key falls back before v0.20.0", noKey: true, sig: encodeSig(priv, sums), hash: hash},
 		{name: "fallback still checks the checksum", sig: nil, hash: strings.Repeat("f", 64), wantErr: "checksum mismatch"},
 		{name: "signature server error is not treated as unsigned", sigStatus: http.StatusInternalServerError, hash: hash, wantErr: "HTTP 500"},
-		{name: "unsigned release is rejected from v0.14.0", required: true, sig: nil, hash: hash, wantErr: "SHA256SUMS.sig"},
-		{name: "no embedded key is rejected from v0.14.0", required: true, noKey: true, sig: encodeSig(priv, sums), hash: hash, wantErr: "no release signing key"},
-		{name: "signed release is accepted from v0.14.0", required: true, sig: encodeSig(priv, sums), hash: hash, wantSigned: true},
+		{name: "unsigned release is rejected from v0.20.0", required: true, sig: nil, hash: hash, wantErr: "SHA256SUMS.sig"},
+		{name: "no embedded key is rejected from v0.20.0", required: true, noKey: true, sig: encodeSig(priv, sums), hash: hash, wantErr: "no release signing key"},
+		{name: "signed release is accepted from v0.20.0", required: true, sig: encodeSig(priv, sums), hash: hash, wantSigned: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

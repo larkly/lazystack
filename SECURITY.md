@@ -42,8 +42,8 @@ package) and `SHA256SUMS.sig`, a detached Ed25519 signature of `SHA256SUMS`
 downloaded binary's SHA-256 against its line in `SHA256SUMS`. How
 `SHA256SUMS` itself is trusted depends on the versions involved.
 
-**From v0.14.0 (mandatory signatures).** When the release being installed
-or the running binary is v0.14.0 or later, the update is refused unless:
+**From v0.20.0 (mandatory signatures).** When the release being installed
+or the running binary is v0.20.0 or later, the update is refused unless:
 
 1. `SHA256SUMS.sig` exists next to `SHA256SUMS` in the release, and
 2. the signature verifies against the Ed25519 public key compiled into the
@@ -54,7 +54,7 @@ A release without a signature, with a malformed signature, or signed by any
 other key is rejected, and so is every such update from a build whose embedded
 key is still the empty placeholder.
 
-**Before v0.14.0 (transition).** While both versions are older than v0.14.0,
+**Before v0.20.0 (transition).** While both versions are older than v0.20.0,
 signing is being rolled out and older clients must be able to keep updating
 without a reinstall:
 
