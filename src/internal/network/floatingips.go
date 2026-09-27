@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/layer3/floatingips"
@@ -73,9 +74,14 @@ func AllocateFloatingIP(ctx context.Context, client *gophercloud.ServiceClient, 
 	}, nil
 }
 
-// AssociateFloatingIP associates a floating IP with a port.
+// AssociateFloatingIP associates a floating IP with a port. An empty port ID
+// is rejected: it would be sent as port_id:null and silently disassociate
+// the floating IP instead (use DisassociateFloatingIP for that).
 func AssociateFloatingIP(ctx context.Context, client *gophercloud.ServiceClient, fipID, portID string) error {
 	shared.Debugf("[network] associating floating IP %s with port %s", fipID, portID)
+	if strings.TrimSpace(portID) == "" {
+		return fmt.Errorf("associating floating IP %s: no port selected", fipID)
+	}
 	_, err := floatingips.Update(ctx, client, fipID, floatingips.UpdateOpts{
 		PortID: &portID,
 	}).Extract()
