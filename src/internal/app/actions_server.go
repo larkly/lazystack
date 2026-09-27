@@ -391,7 +391,7 @@ func (m Model) openAuditLog() (Model, tea.Cmd) {
 	m.view = viewAuditLog
 	m.statusBar.CurrentView = "auditlog"
 	m.statusBar.Hint = m.auditLog.Hints()
-	return m, m.openAuditLogCmd()
+	return m, tea.Batch(m.auditLog.Init(), m.openAuditLogCmd())
 }
 
 func (m Model) openAuditLogCmd() tea.Cmd {
