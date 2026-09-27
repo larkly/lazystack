@@ -83,24 +83,47 @@ sudo rpm -i lazystack-*.rpm
 
 ### Pre-built binaries
 
-Grab the latest release for your platform from the [releases page](https://github.com/larkly/lazystack/releases/latest).
+Each release publishes raw binaries named `lazystack-<os>-<arch>` for
+`linux-amd64`, `linux-arm64`, `darwin-amd64` and `darwin-arm64`, plus a
+`SHA256SUMS` manifest. Pick your asset, download it with its checksum, verify
+and install it (example for Linux on x86-64):
+
+```bash
+asset=lazystack-linux-amd64
+curl -fLO "https://github.com/larkly/lazystack/releases/latest/download/${asset}"
+curl -fLO "https://github.com/larkly/lazystack/releases/latest/download/SHA256SUMS"
+sha256sum --ignore-missing -c SHA256SUMS
+mkdir -p ~/.local/bin
+install -m 0755 "$asset" ~/.local/bin/lazystack
+lazystack --version
+```
+
+On macOS, check the hash with `shasum -a 256 "$asset"` against the matching
+line in `SHA256SUMS`. Any directory on your `PATH` works in place of
+`~/.local/bin`. Release signing is described in [SECURITY.md](SECURITY.md).
 
 ### From source
 
-```bash
-cd src
-make build
-```
-
-### With `go install`
+Requires Go 1.26+ and git. The Go module lives in `src/`:
 
 ```bash
-go install github.com/larkly/lazystack/cmd/lazystack@latest
+git clone https://github.com/larkly/lazystack.git
+cd lazystack/src
+make build                 # writes ./lazystack, version from git describe
+./lazystack --version
+mkdir -p ~/.local/bin
+install -m 0755 lazystack ~/.local/bin/lazystack
 ```
+
+`go build -o lazystack ./cmd/lazystack` from `src/` works too (the version is
+then reported as `dev`). Running `make build` from the repository root writes
+`bin/lazystack` instead. `go install github.com/larkly/lazystack/...@latest`
+is **not** supported: the module is not at the repository root, so the Go
+toolchain cannot resolve it.
 
 ### Requirements
 
-- Go 1.26+ (build only)
+- Go 1.26+ (build from source only)
 - OpenStack cloud with Keystone v3 and Nova v2.1+
 - A valid `clouds.yaml`
 

@@ -458,7 +458,7 @@
     <span class="eyebrow">Install</span>
     <h2 style="margin-top: 16px; max-width: 820px;">One binary. Any distro.</h2>
     <p style="font-size: 18px; margin-top: 14px; max-width: 620px;">
-      Single Go binary, statically linked. No runtime deps — just the compiled binary and your <code>clouds.yaml</code>.
+      Single Go binary. No runtime deps — just the compiled binary and your <code>clouds.yaml</code>. For a pre-built binary, swap <code>linux-amd64</code> for <code>linux-arm64</code>, <code>darwin-amd64</code> or <code>darwin-arm64</code>.
     </p>
 
     <div class="install-grid">
@@ -479,12 +479,15 @@
         <pre><span class="p">$</span>sudo rpm -i lazystack-*.rpm</pre>
       </div>
       <div class="install-card">
-        <div class="plat"><h4>go install</h4><span class="os">any</span></div>
-        <pre><span class="p">$</span>go install github.com/larkly/lazystack/cmd/lazystack@latest</pre>
+        <div class="plat"><h4>From source</h4><span class="os">Go 1.26+</span></div>
+        <pre><span class="p">$</span>git clone https://github.com/larkly/lazystack.git
+<span class="p">$</span>cd lazystack/src &amp;&amp; make build
+<span class="p">$</span>./lazystack --version</pre>
       </div>
       <div class="install-card">
-        <div class="plat"><h4>Pre-built binary</h4><span class="os">linux · darwin · arm64</span></div>
-        <pre><span class="p">$</span>curl -L github.com/larkly/lazystack/releases/latest</pre>
+        <div class="plat"><h4>Pre-built binary</h4><span class="os">linux · darwin · amd64 · arm64</span></div>
+        <pre><span class="p">$</span>curl -fLo lazystack https://github.com/larkly/lazystack/releases/latest/download/lazystack-linux-amd64
+<span class="p">$</span>chmod +x lazystack &amp;&amp; ./lazystack --version</pre>
       </div>
     </div>
 
