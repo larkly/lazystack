@@ -337,3 +337,23 @@ func TestPickerFilterAcceptsJK(t *testing.T) {
 		t.Fatalf("escape changed selection: open=%v selected=%d", m.pickerOpen, m.selectedImage)
 	}
 }
+
+// Cloning a multi-network server must preselect the same network every
+// time: the first of the source server's networks (in name order) that is
+// still available, never whichever map key happened to come out first.
+func TestClonePreselectsNetworkDeterministically(t *testing.T) {
+	nets := []network.Network{
+		{ID: "n-a", Name: "alpha"}, {ID: "n-b", Name: "bravo"}, {ID: "n-c", Name: "charlie"},
+		{ID: "n-d", Name: "delta"}, {ID: "n-e", Name: "echo"},
+	}
+	cfg := CloneConfig{NetworkNames: map[string][]string{
+		"echo": nil, "delta": nil, "charlie": nil, "bravo": nil, "gone": nil, "aardvark-deleted": nil,
+	}}
+	for i := 0; i < 50; i++ {
+		m := Model{networks: nets, cloneMode: true, cloneConfig: &cfg, selectedNetwork: -1}
+		m.applyClonePreFill()
+		if m.selectedNetwork != 1 {
+			t.Fatalf("iteration %d: selectedNetwork = %d, want 1 (bravo)", i, m.selectedNetwork)
+		}
+	}
+}

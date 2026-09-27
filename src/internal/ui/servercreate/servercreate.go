@@ -1179,15 +1179,22 @@ func (m *Model) applyClonePreFill() {
 		}
 	}
 
-	// Match network by name (first key from Networks map)
-	for netName := range cfg.NetworkNames {
+	// The form takes one network. Server.Networks is a map with no
+	// meaningful order, so pick the first of the source server's networks,
+	// in name order, that still exists; the choice is stable across runs.
+	netNames := make([]string, 0, len(cfg.NetworkNames))
+	for name := range cfg.NetworkNames {
+		netNames = append(netNames, name)
+	}
+	sort.Strings(netNames)
+matchNetwork:
+	for _, netName := range netNames {
 		for i, n := range m.networks {
 			if n.Name == netName {
 				m.selectedNetwork = i
-				break
+				break matchNetwork
 			}
 		}
-		break // use first network
 	}
 
 	// Match keypair by name
