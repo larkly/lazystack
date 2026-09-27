@@ -151,7 +151,10 @@ func (m Model) deleteServerCmd(action modal.ConfirmAction) tea.Cmd {
 // the outcome and lists every volume that could not be cleaned up.
 func (m Model) handleServerDeleted(msg serverDeletedMsg) (Model, tea.Cmd) {
 	m.statusBar.Error = ""
-	m.serverResize.Active = false
+	// The resize modal is left alone: it closes itself once its own resize
+	// is done, and a deletion finishing must not drop that resize's outcome.
+	// It cannot have submitted a resize of the deleted server, whose lock
+	// the delete held.
 	if m.view == viewServerDetail && m.serverDetail.ServerID() == msg.id {
 		m.returnToView = 0
 		m.view = viewServerList

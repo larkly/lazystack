@@ -108,7 +108,9 @@ func (m Model) handleBulkResult(r bulkResultMsg) (Model, tea.Cmd) {
 		}
 	}
 	if r.resource == "server" {
-		m.serverResize.Active = false
+		// The resize modal is left alone: it closes itself once its own
+		// resize is done, and an unrelated result closing it would drop
+		// that resize's outcome.
 		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
 	}
 	return m.forceRefreshActiveView()
