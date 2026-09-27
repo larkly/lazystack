@@ -1,6 +1,7 @@
 package help
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -33,243 +34,336 @@ type Model struct {
 
 type section struct {
 	name  string
-	binds []string
+	binds []bind
 }
+
+// bind is one help entry. Entries for shared key bindings reference the
+// binding so the overlay shows the keys actually bound (including any
+// rebinding from config.yaml); view-local keys use a literal.
+type bind struct {
+	key     string
+	binding *key.Binding
+	desc    string
+}
+
+func (b bind) keys() string {
+	if b.binding != nil {
+		return strings.Join(b.binding.Keys(), "/")
+	}
+	return b.key
+}
+
+// k is a help entry shown with the current keys of a shared binding.
+func k(b *key.Binding, desc string) bind { return bind{binding: b, desc: desc} }
+
+// l is a help entry with literal key text.
+func l(keys, desc string) bind { return bind{key: keys, desc: desc} }
 
 var allSections = []section{
 	{
 		name: "Global",
-		binds: []string{
-			"q / ctrl+c   quit",
-			"?            toggle help",
-			"C            switch cloud",
-			"P            switch project",
-			"1-5 / ←→     switch tab",
-			"Q             resource quotas",
-			"R             force refresh",
-			"pgup/pgdn    page up/down",
-			"s/S           sort / reverse sort",
-			"ctrl+k       configuration",
-			"ctrl+r       restart app",
+		binds: []bind{
+			k(&shared.Keys.Quit, "quit"),
+			k(&shared.Keys.Help, "help (again: all shortcuts)"),
+			k(&shared.Keys.CloudPick, "switch cloud"),
+			k(&shared.Keys.ProjectPick, "switch project"),
+			l("1-9 ←/→ h/l", "switch tab (list views)"),
+			k(&shared.Keys.Quota, "resource quotas"),
+			k(&shared.Keys.Refresh, "force refresh"),
+			l("pgup/pgdn", "page up/down"),
+			l("s/S", "sort / reverse sort"),
+			k(&shared.Keys.Copy, "copy field..."),
+			k(&shared.Keys.Hypervisors, "hypervisors (admin)"),
+			k(&shared.Keys.Browse, "service catalog"),
+			k(&shared.Keys.Config, "configuration"),
+			k(&shared.Keys.Restart, "restart app"),
 		},
 	},
 	{
 		name: "Server List",
-		binds: []string{
-			"↑/k ↓/j      navigate",
-			"enter         view detail",
-			"ctrl+n        create server",
-			"ctrl+d        delete server",
-			"ctrl+o        soft reboot",
-			"p             pause/unpause",
-			"ctrl+z        suspend/resume",
-			"ctrl+e        shelve/unshelve",
-			"o             stop/start",
-			"ctrl+l        lock/unlock",
-			"ctrl+f        resize",
-			"ctrl+g        rebuild",
-			"ctrl+s        snapshot",
-			"r             rename",
-			"ctrl+a        attach volume",
-			"ctrl+u        assign floating IP",
-			"c             clone server",
-			"x             SSH into server",
-			"y             copy SSH command",
-			"Y             copy field...",
-			"V             console URL (noVNC)",
-			"W             admin password",
-			"L             console log",
-			"T             audit trail",
-			"a             action history",
-			"space         select/deselect",
-			"/             filter",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			k(&shared.Keys.Enter, "view detail"),
+			k(&shared.Keys.Select, "select/deselect"),
+			k(&shared.Keys.Filter, "filter"),
+			k(&shared.Keys.SaveFilter, "save current filter"),
+			k(&shared.Keys.LoadFilter, "load next saved filter"),
+			l("esc", "clear filter / selection"),
+			k(&shared.Keys.Create, "create server"),
+			k(&shared.Keys.Delete, "delete server"),
+			k(&shared.Keys.Reboot, "soft reboot"),
+			k(&shared.Keys.HardReboot, "hard reboot"),
+			k(&shared.Keys.StopStart, "stop/start"),
+			k(&shared.Keys.Pause, "pause/unpause"),
+			k(&shared.Keys.Suspend, "suspend/resume"),
+			k(&shared.Keys.Shelve, "shelve/unshelve"),
+			k(&shared.Keys.Lock, "lock/unlock"),
+			k(&shared.Keys.Rescue, "rescue/unrescue"),
+			k(&shared.Keys.Resize, "resize"),
+			k(&shared.Keys.ConfirmResize, "confirm resize"),
+			k(&shared.Keys.RevertResize, "revert resize"),
+			k(&shared.Keys.Rebuild, "rebuild"),
+			k(&shared.Keys.Snapshot, "snapshot"),
+			k(&shared.Keys.Rename, "rename"),
+			k(&shared.Keys.Clone, "clone server"),
+			k(&shared.Keys.Attach, "attach volume"),
+			k(&shared.Keys.AssignFIP, "assign floating IP"),
+			k(&shared.Keys.SSH, "SSH into server"),
+			k(&shared.Keys.CopySSH, "copy SSH command"),
+			k(&shared.Keys.ConsoleURL, "console URL (noVNC)"),
+			k(&shared.Keys.GetPassword, "admin password"),
+			k(&shared.Keys.Console, "console log"),
+			k(&shared.Keys.Actions, "action history"),
+			k(&shared.Keys.AuditLog, "audit trail"),
+			k(&shared.Keys.AdminActions, "admin actions"),
+			k(&shared.Keys.Metadata, "metadata"),
+			k(&shared.Keys.UserManagement, "user management"),
+			k(&shared.Keys.ColumnPick, "choose columns"),
 		},
 	},
 	{
 		name: "Server Detail",
-		binds: []string{
-			"↑/k ↓/j      scroll",
-			"ctrl+d        delete server",
-			"ctrl+a        attach volume",
-			"ctrl+u        assign floating IP",
-			"ctrl+o        soft reboot",
-			"ctrl+p        hard reboot",
-			"p             pause/unpause",
-			"ctrl+z        suspend/resume",
-			"ctrl+e        shelve/unshelve",
-			"o             stop/start",
-			"ctrl+l        lock/unlock",
-			"ctrl+f        resize",
-			"ctrl+g        rebuild",
-			"ctrl+s        snapshot",
-			"r             rename",
-			"c             clone server",
-			"v             jump to volumes",
-			"g             jump to sec groups",
-			"N             jump to networks",
-			"x             SSH into server",
-			"y             copy SSH command",
-			"Y             copy field...",
-			"V             console URL (noVNC)",
-			"W             admin password",
-			"L             console log",
-			"T             audit trail",
-			"a             action history",
-			"esc           back to list",
+		binds: []bind{
+			l("↑/k ↓/j", "scroll / select in pane"),
+			l("tab/shift+tab", "cycle panes"),
+			l("enter", "open volume (volumes pane)"),
+			k(&shared.Keys.Detach, "detach volume (volumes pane)"),
+			k(&shared.Keys.Delete, "delete server"),
+			k(&shared.Keys.Reboot, "soft reboot"),
+			k(&shared.Keys.HardReboot, "hard reboot"),
+			k(&shared.Keys.StopStart, "stop/start"),
+			k(&shared.Keys.Pause, "pause/unpause"),
+			k(&shared.Keys.Suspend, "suspend/resume"),
+			k(&shared.Keys.Shelve, "shelve/unshelve"),
+			k(&shared.Keys.Lock, "lock/unlock"),
+			k(&shared.Keys.Rescue, "rescue/unrescue"),
+			k(&shared.Keys.Resize, "resize"),
+			k(&shared.Keys.ConfirmResize, "confirm resize"),
+			k(&shared.Keys.RevertResize, "revert resize"),
+			k(&shared.Keys.Rebuild, "rebuild"),
+			k(&shared.Keys.Snapshot, "snapshot"),
+			k(&shared.Keys.Rename, "rename"),
+			k(&shared.Keys.Clone, "clone server"),
+			k(&shared.Keys.Attach, "attach volume"),
+			k(&shared.Keys.AssignFIP, "assign floating IP"),
+			k(&shared.Keys.JumpVolumes, "jump to volumes"),
+			k(&shared.Keys.JumpSecGroups, "jump to sec groups"),
+			k(&shared.Keys.JumpNetworks, "jump to networks"),
+			l("g / G", "top / bottom (console pane)"),
+			k(&shared.Keys.SSH, "SSH into server"),
+			k(&shared.Keys.CopySSH, "copy SSH command"),
+			k(&shared.Keys.ConsoleURL, "console URL (noVNC)"),
+			k(&shared.Keys.GetPassword, "admin password"),
+			k(&shared.Keys.Console, "console log"),
+			k(&shared.Keys.Actions, "action history"),
+			k(&shared.Keys.AuditLog, "audit trail"),
+			k(&shared.Keys.AdminActions, "admin actions"),
+			k(&shared.Keys.Metadata, "metadata"),
+			k(&shared.Keys.UserManagement, "user management"),
+			k(&shared.Keys.Back, "back to list"),
 		},
 	},
 	{
 		name: "Console Log",
-		binds: []string{
-			"↑/k ↓/j      scroll",
-			"g             top",
-			"G             bottom",
-			"esc           back",
+		binds: []bind{
+			l("↑/k ↓/j", "scroll"),
+			l("g", "top"),
+			l("G", "bottom"),
+			l("esc", "back"),
 		},
 	},
 	{
 		name: "Create Form",
-		binds: []string{
-			"tab / ↓       next field",
-			"shift+tab / ↑ prev field",
-			"enter         open picker / activate button",
-			"ctrl+s        submit",
-			"esc           cancel",
+		binds: []bind{
+			l("tab / ↓", "next field"),
+			l("shift+tab / ↑", "prev field"),
+			l("enter", "open picker / activate button"),
+			l("ctrl+s", "submit"),
+			l("esc", "cancel"),
 		},
 	},
 	{
 		name: "Volume List",
-		binds: []string{
-			"↑/k ↓/j      navigate",
-			"enter         view detail",
-			"ctrl+n        create volume",
-			"ctrl+d        delete volume",
-			"ctrl+a        attach to server",
-			"ctrl+t        detach from server",
-			"Y             copy field...",
-			"/             filter",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			k(&shared.Keys.Enter, "view detail"),
+			k(&shared.Keys.Select, "select/deselect"),
+			k(&shared.Keys.Create, "create volume"),
+			k(&shared.Keys.Delete, "delete volume(s)"),
+			k(&shared.Keys.Attach, "attach to server"),
+			k(&shared.Keys.Detach, "detach from server"),
+			l("Y", "copy field..."),
 		},
 	},
 	{
 		name: "Volume Detail",
-		binds: []string{
-			"↑/k ↓/j      scroll",
-			"ctrl+d        delete volume",
-			"ctrl+a        attach to server",
-			"ctrl+t        detach from server",
-			"Y             copy field...",
-			"esc           back to list",
+		binds: []bind{
+			l("↑/k ↓/j", "scroll"),
+			k(&shared.Keys.Delete, "delete volume"),
+			k(&shared.Keys.Attach, "attach to server"),
+			k(&shared.Keys.Detach, "detach from server"),
+			l("Y", "copy field..."),
+			l("esc", "back to list"),
 		},
 	},
 	{
 		name: "Floating IPs",
-		binds: []string{
-			"↑/k ↓/j      navigate",
-			"ctrl+n        allocate new IP",
-			"ctrl+t        disassociate IP",
-			"ctrl+d        release floating IP",
-			"Y             copy field...",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			k(&shared.Keys.Allocate, "allocate new IP"),
+			k(&shared.Keys.Detach, "disassociate IP"),
+			k(&shared.Keys.Delete, "release floating IP"),
+			l("Y", "copy field..."),
 		},
 	},
 	{
 		name: "Security Groups",
-		binds: []string{
-			"↑/k ↓/j      navigate groups / rules",
-			"enter         expand / collapse group",
-			"ctrl+n        create group (or add rule in rules)",
-			"ctrl+d        delete group (or rule in rules)",
-			"Y             copy field...",
-			"esc           back to group list",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate groups / rules"),
+			l("enter", "expand / collapse group"),
+			l("ctrl+n", "create group (or add rule in rules)"),
+			l("ctrl+d", "delete group (or rule in rules)"),
+			l("Y", "copy field..."),
+			l("esc", "back to group list"),
 		},
 	},
 	{
 		name: "Networks",
-		binds: []string{
-			"↑/k ↓/j      navigate networks / subnets",
-			"enter         expand / collapse subnets",
-			"ctrl+n        create network (or subnet in subnets)",
-			"ctrl+d        delete network (or subnet in subnets)",
-			"Y             copy field...",
-			"esc           back to network list",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate networks / subnets"),
+			l("enter", "expand / collapse subnets"),
+			l("ctrl+n", "create network (or subnet in subnets)"),
+			l("ctrl+d", "delete network (or subnet in subnets)"),
+			l("Y", "copy field..."),
+			l("esc", "back to network list"),
 		},
 	},
 	{
 		name: "Routers",
-		binds: []string{
-			"↑/k ↓/j      navigate",
-			"tab/shift+tab cycle panes",
-			"enter         view detail (interfaces)",
-			"ctrl+n        create router",
-			"ctrl+d        delete router",
-			"ctrl+a        add interface (from detail)",
-			"ctrl+t        remove interface (from detail)",
-			"Y             copy field...",
-			"esc           back to list",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			l("tab/shift+tab", "cycle panes"),
+			l("enter", "view detail (interfaces)"),
+			l("ctrl+n", "create router"),
+			l("ctrl+d", "delete router"),
+			k(&shared.Keys.Attach, "add interface (from detail)"),
+			k(&shared.Keys.Detach, "remove interface (from detail)"),
+			l("Y", "copy field..."),
+			l("esc", "back to list"),
 		},
 	},
 	{
 		name: "Key Pairs",
-		binds: []string{
-			"↑/k ↓/j      navigate",
-			"enter         view detail (public key)",
-			"ctrl+n        create / import key pair",
-			"ctrl+d        delete key pair",
-			"Y             copy field...",
-			"esc           back to list",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			l("enter", "view detail (public key)"),
+			l("ctrl+n", "create / import key pair"),
+			l("ctrl+d", "delete key pair"),
+			l("Y", "copy field..."),
+			l("esc", "back to list"),
 		},
 	},
 	{
 		name: "LB List",
-		binds: []string{
-			"↑/k ↓/j      navigate",
-			"enter         view detail",
-			"ctrl+n        create load balancer",
-			"ctrl+d        delete load balancer",
-			"s/S           sort / reverse sort",
-			"Y             copy field...",
-			"/             filter",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			l("enter", "view detail"),
+			l("ctrl+n", "create load balancer"),
+			l("ctrl+d", "delete load balancer"),
+			l("s/S", "sort / reverse sort"),
+			l("Y", "copy field..."),
+			l("/", "filter"),
 		},
 	},
 	{
 		name: "LB Detail",
-		binds: []string{
-			"↑/k ↓/j      navigate in pane",
-			"tab/shift+tab cycle panes",
-			"enter         edit (context-sensitive)",
-			"ctrl+n        add listener/pool/member",
-			"ctrl+d        delete (context-sensitive)",
-			"ctrl+h        add/edit health monitor",
-			"o             enable/disable (admin state)",
-			"w             drain member (weight=0)",
-			"space         toggle member selection",
-			"x             select/deselect all members",
-			"Y             copy field...",
-			"esc           back to list",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate in pane"),
+			l("tab/shift+tab", "cycle panes"),
+			l("enter", "edit (context-sensitive)"),
+			l("ctrl+n", "add listener/pool/member"),
+			l("ctrl+d", "delete (context-sensitive)"),
+			l("ctrl+h", "add/edit health monitor"),
+			l("o", "enable/disable (admin state)"),
+			l("w", "drain member (weight=0)"),
+			l("space", "toggle member selection"),
+			l("x", "select/deselect all members"),
+			l("Y", "copy field..."),
+			l("esc", "back to list"),
 		},
 	},
 	{
 		name: "Images",
-		binds: []string{
-			"↑/k ↓/j      navigate",
-			"tab/shift+tab cycle panes",
-			"/             search/filter images",
-			"s/S           sort / reverse sort",
-			"enter         edit image / server detail",
-			"ctrl+n        upload image",
-			"ctrl+d        delete image",
-			"d             deactivate/reactivate",
-			"ctrl+g        download image",
-			"Y             copy field...",
-			"esc           clear filter",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			l("tab/shift+tab", "cycle panes"),
+			l("/", "search/filter images"),
+			l("s/S", "sort / reverse sort"),
+			k(&shared.Keys.Select, "select/deselect (bulk delete)"),
+			k(&shared.Keys.Create, "upload image (list pane)"),
+			k(&shared.Keys.Delete, "delete image(s)"),
+			k(&shared.Keys.Deactivate, "deactivate/reactivate (list/info pane)"),
+			l("ctrl+g", "download image (properties pane)"),
+			l("enter", "edit image (info pane) / open server (servers pane)"),
+			l("Y", "copy field..."),
+			l("esc", "clear filter / selection"),
+		},
+	},
+	{
+		name: "Hypervisors",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			l("pgup/pgdn", "page up/down"),
+			k(&shared.Keys.Refresh, "refresh"),
+			l("esc", "back"),
+		},
+	},
+	{
+		name: "Service Catalog",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			l("pgup/pgdn", "page up/down"),
+			l("esc", "back"),
+		},
+	},
+	{
+		name: "DNS",
+		binds: []bind{
+			l("↑/k ↓/j", "select zone (shows its records)"),
+			l("pgup/pgdn", "page up/down"),
+			k(&shared.Keys.Refresh, "refresh"),
+			l("esc", "back"),
+		},
+	},
+	{
+		name: "User Management",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			l("enter", "enable/disable user"),
+			l("d", "delete user (y confirms, n cancels)"),
+			k(&shared.Keys.Refresh, "refresh"),
+			l("esc", "back"),
+		},
+	},
+	{
+		name: "Audit Trail",
+		binds: []bind{
+			l("↑/k ↓/j", "navigate"),
+			l("a", "filter by action"),
+			l("r", "filter by resource"),
+			l("d", "filter by date"),
+			l("c", "clear filter"),
+			l("enter", "apply typed filter"),
+			l("esc", "cancel filter / back"),
 		},
 	},
 	{
 		name: "Modals",
-		binds: []string{
-			"y             confirm",
-			"n / esc       cancel",
-			"←/→ ↑/↓ tab  navigate buttons",
-			"enter         activate button",
+		binds: []bind{
+			l("y", "confirm"),
+			l("n / esc", "cancel"),
+			l("←/→ ↑/↓ tab", "navigate buttons"),
+			l("enter", "activate button"),
 		},
 	},
 }
@@ -296,6 +390,11 @@ var viewSections = map[string][]string{
 	"routerview":     {"Routers"},
 	"lbview":         {"LB List", "LB Detail"},
 	"imageview":      {"Images"},
+	"hypervisorlist": {"Hypervisors"},
+	"servicecatalog": {"Service Catalog"},
+	"dnslist":        {"DNS"},
+	"usermanagement": {"User Management"},
+	"auditlog":       {"Audit Trail"},
 	"cloudpicker":    {},
 }
 
@@ -344,8 +443,8 @@ func (m *Model) buildLines() {
 			Bold(true).
 			Foreground(shared.ColorSecondary).
 			Render(s.name))
-		for _, bind := range s.binds {
-			m.lines = append(m.lines, "  "+bind)
+		for _, b := range s.binds {
+			m.lines = append(m.lines, fmt.Sprintf("  %-14s %s", b.keys(), b.desc))
 		}
 		m.lines = append(m.lines, "")
 	}

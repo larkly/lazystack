@@ -79,8 +79,7 @@ func TestEnter_SelectsCloud(t *testing.T) {
 	// Move to "staging" (index 1)
 	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 
-	var cmd tea.Cmd
-	m, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
 	if cmd == nil {
 		t.Fatal("expected cmd from Enter")
