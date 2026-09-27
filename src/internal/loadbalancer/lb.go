@@ -447,8 +447,11 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 
 	if err := waitForPoolActive(ctx, client, p.ID, 60*time.Second); err != nil {
 		shared.Debugf("[lb] CreatePool: waiting for pool %s to become ACTIVE failed: %v, cleaning up", p.ID, err)
-		cleanupPool(ctx, client, p.ID)
-		return nil, fmt.Errorf("waiting for pool %s to become ACTIVE before creating health monitor: %w", p.ID, err)
+		origErr := fmt.Errorf("waiting for pool %s to become ACTIVE before creating health monitor: %w", p.ID, err)
+		if cleanupErr := cleanupPool(ctx, client, p.ID); cleanupErr != nil {
+			return nil, &PoolCleanupError{PoolID: p.ID, Err: origErr, CleanupErr: cleanupErr}
+		}
+		return nil, origErr
 	}
 
 	shared.Debugf("[lb] CreatePool: creating health monitor for pool %s", p.ID)
@@ -458,14 +461,11 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 	createdMon, err := monitors.Create(ctx, client, monOpts).Extract()
 	if err != nil {
 		shared.Debugf("[lb] CreatePool: health monitor creation failed: %v, cleaning up pool %s", err, p.ID)
-		if deleteErr := DeletePool(ctx, client, p.ID); deleteErr != nil {
-			if gophercloud.ResponseCodeIs(deleteErr, http.StatusConflict) || gophercloud.ResponseCodeIs(deleteErr, http.StatusNotFound) {
-				shared.Debugf("[lb] CreatePool: cleanup delete of pool %s returned tolerable status (already deleting or gone), not masking original error: %v", p.ID, deleteErr)
-			} else {
-				return nil, fmt.Errorf("creating health monitor for pool %s: %w (cleanup failed: %v)", p.ID, err, deleteErr)
-			}
+		origErr := fmt.Errorf("creating health monitor for pool %s: %w", p.ID, err)
+		if cleanupErr := cleanupPool(ctx, client, p.ID); cleanupErr != nil {
+			return nil, &PoolCleanupError{PoolID: p.ID, Err: origErr, CleanupErr: cleanupErr}
 		}
-		return nil, fmt.Errorf("creating health monitor for pool %s: %w", p.ID, err)
+		return nil, origErr
 	}
 
 	result.MonitorID = createdMon.ID
@@ -473,16 +473,63 @@ func CreatePool(ctx context.Context, client *gophercloud.ServiceClient, lbID, na
 	return result, nil
 }
 
-// cleanupPool deletes a pool, tolerating 409/404 responses (the pool may be
-// mid-delete or already gone).
-func cleanupPool(ctx context.Context, client *gophercloud.ServiceClient, poolID string) {
-	if err := DeletePool(ctx, client, poolID); err != nil {
-		if gophercloud.ResponseCodeIs(err, http.StatusConflict) || gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
-			shared.Debugf("[lb] cleanupPool: delete of pool %s returned tolerable status, ignoring: %v", poolID, err)
-			return
+// Bounds for rolling back a pool left behind by a failed CreatePool. Octavia
+// answers 409 while the pool (or its LB) is still PENDING_*, so deletion is
+// retried a few times before giving up.
+var (
+	poolCleanupAttempts = 10
+	poolCleanupInterval = 2 * time.Second
+	poolCleanupTimeout  = 30 * time.Second
+)
+
+// PoolCleanupError is returned by CreatePool when the operation failed after
+// the pool was created and the rollback could not confirm the pool was
+// deleted, so the pool may remain. Err is the original failure (also
+// reachable via Unwrap); CleanupErr is why the rollback did not complete.
+type PoolCleanupError struct {
+	PoolID     string
+	Err        error
+	CleanupErr error
+}
+
+func (e *PoolCleanupError) Error() string {
+	return fmt.Sprintf("%v (cleanup failed, pool %s may remain: %v)", e.Err, e.PoolID, e.CleanupErr)
+}
+
+func (e *PoolCleanupError) Unwrap() error { return e.Err }
+
+// cleanupPool rolls back a pool created by a failed CreatePool. It runs on
+// its own bounded context so a cancelled or expired caller context does not
+// skip the rollback. 404 means the pool is already gone; 409 (still
+// PENDING_*) is retried up to poolCleanupAttempts times. It returns nil once
+// the pool is deleted or gone, otherwise the last delete error.
+func cleanupPool(parent context.Context, client *gophercloud.ServiceClient, poolID string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), poolCleanupTimeout)
+	defer cancel()
+	var err error
+	for attempt := 1; attempt <= poolCleanupAttempts; attempt++ {
+		err = DeletePool(ctx, client, poolID)
+		switch {
+		case err == nil:
+			return nil
+		case gophercloud.ResponseCodeIs(err, http.StatusNotFound):
+			shared.Debugf("[lb] cleanupPool: pool %s already gone: %v", poolID, err)
+			return nil
+		case !gophercloud.ResponseCodeIs(err, http.StatusConflict):
+			shared.Debugf("[lb] cleanupPool: delete of pool %s failed: %v", poolID, err)
+			return err
 		}
-		shared.Debugf("[lb] cleanupPool: delete of pool %s failed: %v", poolID, err)
+		shared.Debugf("[lb] cleanupPool: pool %s busy (attempt %d/%d): %v", poolID, attempt, poolCleanupAttempts, err)
+		if attempt == poolCleanupAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w (gave up: %v)", err, ctx.Err())
+		case <-time.After(poolCleanupInterval):
+		}
 	}
+	return fmt.Errorf("pool %s still busy after %d delete attempts: %w", poolID, poolCleanupAttempts, err)
 }
 
 // waitForPoolActive polls the pool until its provisioning status is ACTIVE,

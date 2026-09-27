@@ -36,7 +36,7 @@ func TestSelectExistingOrAllocate(t *testing.T) {
 			}
 		}
 		m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-		if !m.submitting || cmd == nil || !strings.Contains(m.View(), "Assigning") {
+		if !m.submitting || cmd == nil || !strings.Contains(m.View(), "Finding server addresses") {
 			t.Fatal("not submitting")
 		}
 		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})

@@ -47,8 +47,10 @@ const allocateFixture = `{
   }
 }`
 
-func fakeNeutronClient(handler http.Handler) *gophercloud.ServiceClient {
+func fakeNeutronClient(t testing.TB, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -68,7 +70,7 @@ func TestListFloatingIPs(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNeutronClient(handler)
+	client := fakeNeutronClient(t, handler)
 	ctx := context.Background()
 
 	fips, err := ListFloatingIPs(ctx, client)
@@ -113,7 +115,7 @@ func TestAllocateFloatingIP(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNeutronClient(handler)
+	client := fakeNeutronClient(t, handler)
 	ctx := context.Background()
 
 	fip, err := AllocateFloatingIP(ctx, client, "a6917946-38ab-4ffd-a55a-26c0980ce5ee")
@@ -134,5 +136,23 @@ func TestAllocateFloatingIP(t *testing.T) {
 	}
 	if fip.Status != "ACTIVE" {
 		t.Errorf("unexpected status: %s", fip.Status)
+	}
+}
+
+// Fake clients must shut their test server down when the test that created
+// them finishes, so repeated tests do not accumulate listeners.
+func TestFakeClientsCloseWithTest(t *testing.T) {
+	var endpoints []string
+	t.Run("use", func(t *testing.T) {
+		endpoints = append(endpoints, fakeNeutronClient(t, http.NotFoundHandler()).Endpoint)
+		endpoints = append(endpoints, fakeNeutronClientNetworks(t, http.NotFoundHandler()).Endpoint)
+		endpoints = append(endpoints, fakeNeutronClientRouters(t, http.NotFoundHandler()).Endpoint)
+		endpoints = append(endpoints, fakeNeutronClientSubnets(t, http.NotFoundHandler()).Endpoint)
+	})
+	for _, ep := range endpoints {
+		if resp, err := http.Get(ep); err == nil {
+			resp.Body.Close()
+			t.Errorf("test server %s still running after its test finished", ep)
+		}
 	}
 }

@@ -61,6 +61,58 @@ func (m Model) viewName() string {
 	return ""
 }
 
+// activeViewContent renders the active resource view (without chrome).
+// It reports false when the active view has no render case.
+func (m Model) activeViewContent() (string, bool) {
+	switch m.view {
+	case viewServerList:
+		return m.serverList.View(), true
+	case viewServerDetail:
+		return m.serverDetail.View(), true
+	case viewServerCreate:
+		return m.serverCreate.View(), true
+	case viewConsoleLog:
+		return m.consoleLog.View(), true
+	case viewActionLog:
+		return m.actionLog.View(), true
+	case viewVolumeList:
+		return m.volumeList.View(), true
+	case viewVolumeDetail:
+		return m.volumeDetail.View(), true
+	case viewVolumeCreate:
+		return m.volumeCreate.View(), true
+	case viewFloatingIPList:
+		return m.floatingIPList.View(), true
+	case viewSecGroupView:
+		return m.secGroupView.View(), true
+	case viewKeypairList:
+		return m.keypairList.View(), true
+	case viewNetworkList:
+		return m.networkView.View(), true
+	case viewKeypairCreate:
+		return m.keypairCreate.View(), true
+	case viewKeypairDetail:
+		return m.keypairDetail.View(), true
+	case viewRouterView:
+		return m.routerView.View(), true
+	case viewLBView:
+		return m.lbView.View(), true
+	case viewImageView:
+		return m.imageView.View(), true
+	case viewHypervisorList:
+		return m.hypervisorList.View(), true
+	case viewServiceCatalog:
+		return m.serviceCatalog.View(), true
+	case viewDNSList:
+		return m.dnsList.View(), true
+	case viewUserManagement:
+		return m.userManagement.View(), true
+	case viewAuditLog:
+		return m.auditLog.View(), true
+	}
+	return "", false
+}
+
 // View renders the full UI.
 func (m Model) View() tea.View {
 	v := tea.NewView(m.viewContent())
@@ -92,55 +144,14 @@ func (m Model) viewContent() string {
 		return v
 	}
 
-	var content string
-	switch m.view {
-	case viewCloudPicker:
+	if m.view == viewCloudPicker {
 		if m.autoCloud != "" {
 			msg := shared.StyleModalTitle.Render("Connecting to " + m.autoCloud + "...")
 			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 		}
 		return m.cloudPicker.View()
-	case viewServerList:
-		content = m.serverList.View()
-	case viewServerDetail:
-		content = m.serverDetail.View()
-	case viewServerCreate:
-		content = m.serverCreate.View()
-	case viewConsoleLog:
-		content = m.consoleLog.View()
-	case viewActionLog:
-		content = m.actionLog.View()
-	case viewVolumeList:
-		content = m.volumeList.View()
-	case viewVolumeDetail:
-		content = m.volumeDetail.View()
-	case viewVolumeCreate:
-		content = m.volumeCreate.View()
-	case viewFloatingIPList:
-		content = m.floatingIPList.View()
-	case viewSecGroupView:
-		content = m.secGroupView.View()
-	case viewKeypairList:
-		content = m.keypairList.View()
-	case viewNetworkList:
-		content = m.networkView.View()
-	case viewKeypairCreate:
-		content = m.keypairCreate.View()
-	case viewKeypairDetail:
-		content = m.keypairDetail.View()
-	case viewRouterView:
-		content = m.routerView.View()
-	case viewLBView:
-		content = m.lbView.View()
-	case viewImageView:
-		content = m.imageView.View()
-	case viewServiceCatalog:
-		content = m.serviceCatalog.View()
-	case viewUserManagement:
-		content = m.userManagement.View()
-	case viewAuditLog:
-		content = m.auditLog.View()
 	}
+	content, _ := m.activeViewContent()
 
 	// Add tab bar for top-level views
 	if m.isTopLevelView() {

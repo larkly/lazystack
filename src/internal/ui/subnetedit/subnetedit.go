@@ -291,7 +291,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	dnsRaw := strings.TrimSpace(m.dnsInput.Value())
-	var dns []string
+	dns := []string{}
 	if dnsRaw != "" {
 		for _, s := range strings.Split(dnsRaw, ",") {
 			s = strings.TrimSpace(s)
@@ -311,7 +311,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		return m, nil
 	}
 	if !poolsEqual(pools, m.subnet.AllocationPools) {
-		opts.AllocationPools = pools
+		if pools == nil {
+			pools = []network.AllocationPool{}
+		}
+		opts.AllocationPools = &pools
 	}
 
 	routesRaw := strings.TrimSpace(m.hostRouteInput.Value())
@@ -330,7 +333,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	id := m.subnetID
 	displayName := name
 	if displayName == "" {
-		displayName = id[:8]
+		displayName = shared.ShortID(id)
 	}
 
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {

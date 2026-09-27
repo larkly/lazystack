@@ -9,7 +9,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
 	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
@@ -121,7 +120,12 @@ type delayedDetailRefreshMsg struct {
 	id string
 }
 
+// serverDetailRefreshedMsg carries a delayed refresh for the detail view
+// instance inst; seq orders overlapping refreshes so an older response
+// never overwrites a newer one.
 type serverDetailRefreshedMsg struct {
+	inst   uint64
+	seq    uint64
 	server *compute.Server
 }
 
@@ -189,6 +193,7 @@ type Model struct {
 	lbMemberCreate      lbmembercreate.Model
 	lbMonitorCreate     lbmonitorcreate.Model
 	cloneProgress       cloneprogress.Model
+	cloneBackground     []cloneprogress.Model // dismissed clones still running
 	statusBar           statusbar.Model
 	tabs                []TabDef
 	activeTab           int
@@ -208,6 +213,13 @@ type Model struct {
 	currentProjectID    string
 	cloudName           string
 	autoCloud           string
+	connGen             uint64     // bumped on every successful connect
+	tickGen             uint64     // identifies the live refresh tick chain
+	connectSeq          uint64     // identifies the latest connect attempt
+	detailReqSeq        uint64     // last delayed server-detail refresh issued
+	detailReqApplied    uint64     // newest delayed server-detail refresh applied
+	cloudListSeq        uint64     // latest asynchronous clouds.yaml read
+	copySeq             uint64     // latest asynchronous clipboard write
 	returnToView        activeView // cross-resource navigation back-nav
 	nav                 *NavStack  // local drill-down/overlay back-nav
 	refreshInterval     time.Duration
@@ -224,6 +236,7 @@ type Model struct {
 	downloadURL         string
 	checksumsURL        string
 	updateCheckInterval time.Duration
+	actions             *actionState // in-flight mutation locks, shared across model copies
 }
 
 // ShouldRestart returns true if the app quit due to a restart request.
@@ -280,6 +293,7 @@ func New(opts Options) Model {
 			tabInited:           make([]bool, len(tabs)),
 			nav:                 &NavStack{},
 			auditLogger:         audit.NewLogger(audit.DefaultPath(), opts.Config.Audit.Enabled),
+			actions:             newActionState(),
 		}
 	}
 
@@ -302,6 +316,7 @@ func New(opts Options) Model {
 		tabInited:           make([]bool, len(tabs)),
 		nav:                 &NavStack{},
 		auditLogger:         audit.NewLogger(audit.DefaultPath(), opts.Config.Audit.Enabled),
+		actions:             newActionState(),
 	}
 }
 
@@ -341,14 +356,71 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// Update handles all messages.
+// isForceQuit reports whether msg is the unconditional exit key (ctrl+c).
+// Plain "q" is only a quit key where no text input has focus.
+func isForceQuit(msg tea.KeyMsg) bool {
+	return msg.String() == "ctrl+c"
+}
+
+// isCreateFormView reports whether the active view is a full-page create
+// form, which owns every printable key.
+func (m Model) isCreateFormView() bool {
+	return m.view == viewServerCreate || m.view == viewVolumeCreate || m.view == viewKeypairCreate
+}
+
+// textInputFocused reports whether the active view has a focused filter or
+// search input that must receive every key before global shortcuts do.
+func (m Model) textInputFocused() bool {
+	switch m.view {
+	case viewServerList:
+		return m.serverList.IsFiltering()
+	case viewLBView:
+		return m.lbView.IsSearching()
+	case viewImageView:
+		return m.imageView.IsSearching()
+	}
+	return false
+}
+
+// Update handles all messages. Every returned command is scoped to the
+// current connection generation (see connscope.go), so its result is
+// dropped if a newer cloud/project connection exists when it arrives.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	nm := next.(Model)
+	if nm.connGen == 0 {
+		// Before the first connection there are no cloud clients, so no
+		// command can belong to a previous connection.
+		return nm, cmd
+	}
+	return nm, scopeCmd(nm.connGen, cmd)
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case connScopedMsg:
+		if msg.gen != m.connGen {
+			shared.Debugf("[app] dropping %T from connection %d (current %d)", msg.msg, msg.gen, m.connGen)
+			return m, nil
+		}
+		return m.update(msg.msg)
+
+	case connectResultMsg:
+		return m.applyConnectResult(msg)
+
+	case refreshTickMsg:
+		if msg.gen != m.tickGen {
+			shared.Debugf("[app] ignoring tick from superseded chain %d (current %d)", msg.gen, m.tickGen)
+			return m, nil
+		}
+		return m.update(shared.TickMsg{})
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.tooSmall = m.width < m.minWidth || m.height < m.minHeight
 		m.cloudPicker.SetSize(m.width, m.height)
+		m.setSizeAllViews(m.width, m.height)
 		m.setSizeAllModals(m.width, m.height)
 		m.help.Width = m.width
 		m.help.Height = m.height
@@ -360,12 +432,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateActiveView(msg)
 
 	case tea.KeyMsg:
+		// Ctrl+C always exits, whatever has focus: create forms, text
+		// inputs, overlays, pickers and the idle-paused state. Shutdown is
+		// immediate: requests already sent complete server-side, but their
+		// results and any background clone/download tracking are abandoned.
+		if isForceQuit(msg) {
+			return m, tea.Quit
+		}
 		m.lastActivity = time.Now()
 		m.statusBar.StickyHint = ""
 		if m.idlePaused {
 			m.idlePaused = false
 			m.statusBar.Hint = ""
 			shared.Debugf("[app] resuming from idle, restarting tick")
+			m.tickGen++ // the resumed chain replaces any earlier one
 			return m, m.refreshTickCmd()
 		}
 
@@ -407,7 +487,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		if m.view != viewServerCreate && m.view != viewVolumeCreate && m.view != viewKeypairCreate {
+		if !m.isCreateFormView() {
+			// Filter/search input mode (server list filter, LB and image
+			// search): every keystroke belongs to the input — never let
+			// global handlers see them (typing "q" would otherwise quit the
+			// app, digits would switch tabs). Ctrl+C is handled above.
+			if m.textInputFocused() {
+				return m.updateActiveView(msg)
+			}
+			// Server list: esc clears selection when items are selected
+			if m.view == viewServerList && m.serverList.SelectionCount() > 0 && key.Matches(msg, shared.Keys.Back) {
+				m.serverList.ClearSelection()
+				m.statusBar.Hint = m.serverList.Hints()
+				return m, nil
+			}
 			// Volume list: esc clears selection when items are selected
 			if m.view == viewVolumeList && m.volumeList.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
 				m.volumeList.ClearSelection()
@@ -417,13 +510,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == viewImageView && m.imageView.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
 				m.imageView.ClearSelection()
 				return m, nil
-			}
-			// Server list filter mode: every keystroke belongs to the filter
-			// input — never let global handlers see them (typing "q" would
-			// otherwise quit the app). Quit (ctrl+c) stays global so the
-			// app can always be exited.
-			if m.view == viewServerList && m.serverList.IsFiltering() && !key.Matches(msg, shared.Keys.Quit) {
-				return m.updateActiveView(msg)
 			}
 
 			switch {
@@ -451,9 +537,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.configView.Height = m.height
 				m.configView.Open()
 				return m, nil
-			case key.Matches(msg, shared.Keys.Hypervisors) && m.view != viewCloudPicker:
+			case key.Matches(msg, shared.Keys.Hypervisors) && m.view != viewCloudPicker && m.view != viewHypervisorList:
 				return m.openHypervisorList()
-			case key.Matches(msg, shared.Keys.Browse) && m.view != viewCloudPicker:
+			case key.Matches(msg, shared.Keys.Browse) && m.view != viewCloudPicker && m.view != viewServiceCatalog:
 				return m.openServiceCatalog()
 			}
 
@@ -474,31 +560,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if s := msg.String(); len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
 					idx := int(s[0] - '1')
 					if idx < len(m.tabs) {
-						m.returnToView = 0 // clear cross-resource back-nav
+						m.clearBackNav() // explicit tab choice starts fresh
 						return m.switchTab(idx)
 					}
 				}
 				switch {
 				case key.Matches(msg, shared.Keys.Right):
-					m.returnToView = 0
+					m.clearBackNav()
 					next := (m.activeTab + 1) % len(m.tabs)
 					return m.switchTab(next)
 				case key.Matches(msg, shared.Keys.Left):
-					m.returnToView = 0
+					m.clearBackNav()
 					prev := (m.activeTab - 1 + len(m.tabs)) % len(m.tabs)
 					return m.switchTab(prev)
 				}
 			}
 		}
 
-		// Global force refresh
-		if key.Matches(msg, shared.Keys.Refresh) && m.view != viewCloudPicker {
-			return m.forceRefreshActiveView()
-		}
-
-		// Global copy-field picker
-		if key.Matches(msg, shared.Keys.Copy) && m.view != viewCloudPicker {
-			return m.openCopyPicker()
+		// Global force refresh and copy-field picker. Create forms are
+		// full-page text entry, so R and Y must reach their inputs.
+		if m.view != viewCloudPicker && !m.isCreateFormView() {
+			if key.Matches(msg, shared.Keys.Refresh) {
+				return m.forceRefreshActiveView()
+			}
+			if key.Matches(msg, shared.Keys.Copy) {
+				return m.openCopyPicker()
+			}
 		}
 
 		if m.view == viewServerList || m.view == viewServerDetail {
@@ -628,7 +715,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Volume list: Enter to open detail, ctrl+d to delete, ctrl+n to create, ctrl+a attach, ctrl+t detach
+		// Volume list: Enter to open detail, ctrl+d to delete, ctrl+n to create, attach, ctrl+t detach
 		if m.view == viewVolumeList {
 			if key.Matches(msg, shared.Keys.Enter) {
 				return m.openVolumeDetail()
@@ -653,7 +740,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Volume detail: ctrl+d delete, ctrl+a attach, ctrl+t detach
+		// Volume detail: ctrl+d delete, attach, ctrl+t detach
 		if m.view == viewVolumeDetail {
 			if key.Matches(msg, shared.Keys.Delete) {
 				return m.openVolumeDeleteConfirm()
@@ -694,7 +781,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if pane == secgroupview.FocusRules && m.secGroupView.SelectedRuleID() != "" {
 					return m.openSGRuleDeleteConfirm()
 				}
-				if (pane == secgroupview.FocusSelector || pane == secgroupview.FocusRules) && m.secGroupView.SelectedGroupName() != "default" {
+				// Whole-group delete only from the selector: an empty or stale
+				// Rules pane must never fall back to deleting the group.
+				if pane == secgroupview.FocusSelector && m.secGroupView.SelectedGroupName() != "default" {
 					return m.openSGDeleteConfirm()
 				}
 			case key.Matches(msg, shared.Keys.Create):
@@ -934,15 +1023,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case shared.CloudSelectedMsg:
 		m.lastActivity = time.Now()
-		m.cloudName = msg.CloudName
 		m.statusBar.Hint = "Connecting..."
-		return m, m.connectToCloud(msg.CloudName)
+		// The cloud name is committed only when this attempt succeeds.
+		m.connectSeq++
+		return m, connectCmd(m.connectSeq, msg.CloudName, "", "", m.connectToCloud(msg.CloudName))
 
 	case shared.CloudConnectedMsg:
 		m.lastActivity = time.Now()
 		m.idlePaused = false
-		// Reset any cross-resource back-nav from a previous cloud/project.
-		m.returnToView = 0
+		// Reset back-navigation and drill-down views from the previous
+		// cloud/project so nothing can restore models bound to old clients.
+		m.clearBackNav()
+		m.resetConnectionViews()
+		// New connection generation: results of commands issued for the
+		// previous connection are dropped, and its tick chain dies.
+		m.connGen++
+		m.tickGen++
+		// Project identity comes from the new token's scope, never from
+		// the previous connection; the project list is refetched below.
+		m.projects = nil
+		m.currentProjectID, m.statusBar.ProjectName = tokenProject(msg.ProviderClient)
+		m.quotaView.SetProjectID(m.currentProjectID)
 		m.client = &cloud.Client{
 			CloudName:      m.cloudName,
 			Compute:        msg.ComputeClient,
@@ -982,6 +1083,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = viewServerList
 		m.statusBar.CurrentView = "serverlist"
 		m.statusBar.Hint = m.serverList.Hints()
+		// Shown once per connect (until the next key press), never on refresh.
+		m.statusBar.StickyHint = msg.Warning
 		cmds := []tea.Cmd{m.serverList.Init(), m.refreshTickCmd()}
 		// Background-fetch accessible projects for project switching
 		if msg.ProviderClient != nil {
@@ -992,43 +1095,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				defer cancel()
 				projs, err := cloud.ListAccessibleProjects(ctx, pc, eo)
 				if err != nil {
-					return nil
+					return projectsLoadErrMsg{err: err}
 				}
 				var infos []shared.ProjectInfo
 				for _, p := range projs {
 					infos = append(infos, shared.ProjectInfo{ID: p.ID, Name: p.Name})
 				}
-				// Extract current project ID from the auth token scope
-				currentID := ""
-				if ar, ok := pc.GetAuthResult().(interface {
-					ExtractProject() (*tokens.Project, error)
-				}); ok {
-					if proj, err := ar.ExtractProject(); err == nil && proj != nil {
-						currentID = proj.ID
-					}
-				}
+				currentID, _ := tokenProject(pc)
 				return shared.ProjectsLoadedMsg{Projects: infos, CurrentID: currentID}
 			})
 		}
 		return m, tea.Batch(cmds...)
 
 	case shared.ProjectsLoadedMsg:
+		// Only reaches here for the current connection (connection scope).
 		m.projects = msg.Projects
-		// Find current project name for status bar
-		for _, p := range msg.Projects {
-			if p.ID == msg.CurrentID {
-				m.statusBar.ProjectName = p.Name
-				m.currentProjectID = p.ID
-				break
+		// The token scope set on connect wins; fall back to the list only
+		// when the token carried no project.
+		if m.currentProjectID == "" {
+			for _, p := range msg.Projects {
+				if p.ID == msg.CurrentID {
+					m.currentProjectID = p.ID
+					break
+				}
+			}
+			if m.currentProjectID == "" && len(msg.Projects) == 1 {
+				m.currentProjectID = msg.Projects[0].ID
 			}
 		}
-		// If we couldn't identify the current project but have only one, use it
-		if m.statusBar.ProjectName == "" && len(msg.Projects) == 1 {
-			m.statusBar.ProjectName = msg.Projects[0].Name
-			m.currentProjectID = msg.Projects[0].ID
-		}
-		// If we have a current project ID set from project switching, preserve the name
-		if m.currentProjectID != "" && m.statusBar.ProjectName == "" {
+		if m.statusBar.ProjectName == "" {
 			for _, p := range msg.Projects {
 				if p.ID == m.currentProjectID {
 					m.statusBar.ProjectName = p.Name
@@ -1041,15 +1136,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case projectsLoadErrMsg:
+		m.statusBar.StickyHint = "Project list unavailable (project switching disabled): " + msg.err.Error()
+		return m, nil
+
 	case shared.ProjectSelectedMsg:
 		m.lastActivity = time.Now()
 		m.projectPicker.Active = false
 		m.statusBar.Hint = fmt.Sprintf("Switching to project %s...", msg.ProjectName)
-		m.currentProjectID = msg.ProjectID
-		m.statusBar.ProjectName = msg.ProjectName
+		// Identity (and the audit scope derived from it) switches only when
+		// the new connection succeeds; until then the old clients are live.
 		cloudName := m.cloudName
 		projectID := msg.ProjectID
-		return m, func() tea.Msg {
+		m.connectSeq++
+		return m, connectCmd(m.connectSeq, cloudName, projectID, msg.ProjectName, func() tea.Msg {
 			ctx, cancel := actionCtxLong()
 			defer cancel()
 			client, err := cloud.ConnectWithProject(ctx, cloudName, projectID)
@@ -1066,8 +1166,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ProviderClient:     client.ProviderClient,
 				EndpointOpts:       client.EndpointOpts,
 				Region:             client.Region,
+				Warning:            client.CapabilityWarning,
 			}
-		}
+		})
 
 	case shared.CloudConnectErrMsg:
 		m.errModal = modal.NewError("Cloud Connection", msg.Err)
@@ -1103,16 +1204,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modal.ConfirmAction:
 		m.activeModal = modalNone
 		if msg.Confirm {
-			return m.executeAction(msg)
+			return m.runConfirmedAction(msg)
 		}
 		return m, nil
+
+	case actionResultMsg:
+		return m.handleActionResult(msg)
 
 	case modal.ErrorDismissedMsg:
 		m.activeModal = modalNone
 		return m, nil
 
 	case copypicker.ChosenMsg:
-		return m.copyToClipboard(msg.Label, msg.Value), nil
+		return m.copyToClipboard(msg.Label, msg.Value)
+
+	case clipboardResultMsg:
+		return m.applyClipboardResult(msg)
+
+	case cloudsListedMsg:
+		return m.applyCloudList(msg)
 
 	case copypicker.CancelledMsg:
 		return m, nil
@@ -1121,8 +1231,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cfg := m.configView.Cfg()
 		if cfg != nil {
 			cfg.Columns = msg.Columns
-			_ = cfg.Save()
 			m.serverList.SetColumns(cfg.Columns)
+			if err := cfg.Save(); err != nil {
+				m.statusBar.StickyHint = "Column layout applied but not saved: " + err.Error()
+			}
 		}
 		return m, nil
 
@@ -1170,62 +1282,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case shared.ServerActionMsg:
-		m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
-		m.statusBar.Error = ""
-		// Ensure resize modal is dismissed
-		m.serverResize.Active = false
-		// Navigate back to server list if on a sub-view, or after delete
-		if m.view == viewConsoleLog || (m.view == viewServerDetail && msg.Action == "Delete") {
-			m.returnToView = 0
-			m.view = viewServerList
-			m.statusBar.CurrentView = "serverlist"
-			return m, func() tea.Msg { return shared.RefreshServersMsg{} }
-		}
-		// If on detail view, refresh — but skip rapid polling for
-		// confirm/revert resize since those use optimistic updates
-		if m.view == viewServerDetail {
-			if msg.Action == "Confirm resize" || msg.Action == "Revert resize" {
-				// Just refresh the server list, let the normal tick update detail
-				return m, func() tea.Msg { return shared.RefreshServersMsg{} }
-			}
-			id := m.serverDetail.ServerID()
-			return m, tea.Batch(
-				func() tea.Msg { return shared.RefreshServersMsg{} },
-				tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
-					return delayedDetailRefreshMsg{id: id}
-				}),
-				tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-					return delayedDetailRefreshMsg{id: id}
-				}),
-			)
-		}
-		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
+		return m.handleServerActionMsg(msg)
+
+	case serverDeletedMsg:
+		return m.handleServerDeleted(msg)
+
+	case credentialsMsg:
+		return m.handleCredentials(msg)
+
+	case bulkResultMsg:
+		return m.handleBulkResult(msg)
+
+	case actionWarningMsg:
+		return m.handleActionWarning(msg)
+
+	case serveradminact.ActionRequestMsg:
+		return m.executeAdminAction(msg)
 
 	case shared.ResourceActionMsg:
-		m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
-		m.statusBar.Error = ""
-		// Navigate back to list view if we were on a detail view
-		m.returnToView = 0
-		if m.view == viewVolumeDetail {
-			m.view = viewVolumeList
-			m.statusBar.CurrentView = "volumelist"
-		}
-		if m.view == viewKeypairDetail {
-			m.view = viewKeypairList
-			m.statusBar.CurrentView = "keypairlist"
-		}
-		if m.view == viewLBView {
-			m.statusBar.CurrentView = "lbview"
-			return m, m.lbView.ForceRefresh()
-		}
-		if m.view == viewImageView {
-			m.statusBar.CurrentView = "imageview"
-			return m, m.imageView.ForceRefresh()
-		}
-		if m.view == viewSecGroupView {
-			return m, m.secGroupView.ForceRefresh()
-		}
-		return m, nil
+		return m.handleResourceActionMsg(msg)
 
 	case shared.ResourceActionErrMsg:
 		m.errModal = modal.NewError(
@@ -1267,6 +1342,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 
+		// A clone still running in the background keeps being tracked so
+		// its remaining steps, completion or rollback are not lost.
+		if m.cloneProgress.Running() {
+			m.cloneProgress.Active = false
+			m.cloneBackground = append(m.cloneBackground, m.cloneProgress)
+		}
 		m.cloneProgress = cloneprogress.New(m.client.Compute, m.client.BlockStorage, msg.Server.ID, msg.Server.Name, ops)
 		m.cloneProgress.SetSize(m.width, m.height)
 		return m, tea.Batch(
@@ -1275,13 +1356,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case cloneprogress.AllCompleteMsg:
-		m.cloneProgress.Active = false
-		m.statusBar.StickyHint = fmt.Sprintf("✓ Clone complete — all volumes attached to %s", m.cloneProgress.ServerName())
+		if !m.finishClone(msg.Op) {
+			return m, nil
+		}
+		m.statusBar.StickyHint = fmt.Sprintf("✓ Clone complete — all volumes attached to %s", msg.ServerName)
 		return m, nil
 
 	case cloneprogress.RollbackCompleteMsg:
-		m.cloneProgress.Active = false
-		m.errModal = modal.NewError("Clone Failed", msg.Cause)
+		if !m.finishClone(msg.Op) {
+			return m, nil
+		}
+		cause := msg.Cause
+		if cause == nil {
+			cause = fmt.Errorf("clone failed")
+		}
+		if len(msg.Leftover) > 0 {
+			cause = fmt.Errorf("%w; cleanup left behind: %s", cause, strings.Join(msg.Leftover, ", "))
+		}
+		m.errModal = modal.NewError("Clone Failed", cause)
 		m.errModal.SetSize(m.width, m.height)
 		m.activeModal = modalError
 		return m, nil
@@ -1290,6 +1382,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewServerDetail && m.serverDetail.ServerID() == msg.id {
 			client := m.client.Compute
 			id := msg.id
+			inst := m.serverDetail.Instance()
+			m.detailReqSeq++
+			seq := m.detailReqSeq
 			return m, func() tea.Msg {
 				ctx, cancel := actionCtx()
 				defer cancel()
@@ -1297,18 +1392,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err != nil {
 					return shared.ErrMsg{Err: err}
 				}
-				return serverDetailRefreshedMsg{server: srv}
+				return serverDetailRefreshedMsg{inst: inst, seq: seq, server: srv}
 			}
 		}
 		return m, nil
 
 	case serverDetailRefreshedMsg:
-		if m.view == viewServerDetail && msg.server != nil {
+		// Apply only to the detail view that requested it, and never let an
+		// older overlapping refresh overwrite a newer one.
+		if m.view == viewServerDetail && msg.server != nil &&
+			msg.inst == m.serverDetail.Instance() && msg.seq > m.detailReqApplied {
+			m.detailReqApplied = msg.seq
 			m.serverDetail.SetServer(msg.server)
 		}
 		return m, nil
 
 	default:
+		// Clone progress messages go to the clone operation that issued
+		// them, whether it is on screen or running in the background.
+		if op, ok := cloneprogress.OpID(msg); ok {
+			return m, m.updateClone(op, msg)
+		}
 		// Idle timeout: swallow ticks when paused, or pause if idle too long
 		if _, ok := msg.(shared.TickMsg); ok {
 			if m.idlePaused {

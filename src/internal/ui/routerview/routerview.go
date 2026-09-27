@@ -75,7 +75,6 @@ type Model struct {
 	spinner         spinner.Model
 	err             string
 	refreshInterval time.Duration
-	highlightNames  map[string]bool
 }
 
 // New creates a router view model.
@@ -172,6 +171,17 @@ func (m Model) SelectedInterface() *network.RouterInterface {
 	return &m.interfaces[m.interfaceCursor]
 }
 
+// InterfaceCount returns the number of subnet interfaces loaded for the
+// selected router. ok is false while that router's detail is not (yet)
+// loaded, so callers do not report a count for a different router.
+func (m Model) InterfaceCount() (n int, ok bool) {
+	r := m.selectedRouter()
+	if r == nil || m.detailLoading || m.lastDetailID != r.ID {
+		return 0, false
+	}
+	return len(m.interfaces), true
+}
+
 // InterfacesOnPort returns how many interfaces share the same port as the selected interface.
 func (m Model) InterfacesOnPort(portID string) int {
 	count := 0
@@ -249,7 +259,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.routers) && len(m.routers) > 0 {
 			m.cursor = len(m.routers) - 1
 		}
-		m.applyHighlightNames()
 		if r := m.selectedRouter(); r != nil && r.ID != m.lastDetailID {
 			shared.Debugf("[routerview] routersLoaded: new selection %.8s, fetching detail", r.ID)
 			m.lastDetailID = r.ID
@@ -724,8 +733,8 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		name := r.Name
-		if name == "" && len(r.ID) > 8 {
-			name = r.ID[:8] + "..."
+		if name == "" {
+			name = shared.AbbrevID(r.ID)
 		}
 
 		statusStyle := lipgloss.NewStyle().Foreground(shared.ColorSuccess)
@@ -749,9 +758,7 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		line := prefix + nameStyle.Render(name) + shared.StyleHelp.Render(meta+adminStr) + "  " + statusStr
-		if lipgloss.Width(line) > maxWidth+2 {
-			line = line[:maxWidth+1]
-		}
+		line = shared.TruncateCells(line, maxWidth+2)
 		lines = append(lines, line)
 	}
 
@@ -823,9 +830,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 			continue
 		}
 		val := p.value
-		if lipgloss.Width(val) > valW {
-			val = val[:valW-1] + "\u2026"
-		}
+		val = shared.TruncateCells(val, valW)
 		rendered := valueStyle.Render(val)
 		if p.label == "Status" {
 			statusColor := shared.ColorSuccess
@@ -853,7 +858,7 @@ func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
 		return lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.detailErr)
 	}
 	if len(m.interfaces) == 0 && !m.detailLoading {
-		return shared.StyleHelp.Render("No interfaces \u2014 Ctrl+A to add")
+		return shared.StyleHelp.Render("No interfaces \u2014 " + shared.Keys.Attach.Help().Key + " to add")
 	}
 
 	const gap = 2
@@ -914,14 +919,10 @@ func (m Model) renderInterfacesContent(maxWidth, maxHeight int) string {
 		}
 
 		netName := m.resolveInterfaceNetwork(iface)
-		if len(netName) > netW {
-			netName = netName[:netW-1] + "\u2026"
-		}
+		netName = shared.TruncateCells(netName, netW)
 
 		ip := iface.IPAddress
-		if len(ip) > ipW {
-			ip = ip[:ipW-1] + "\u2026"
-		}
+		ip = shared.TruncateCells(ip, ipW)
 
 		portShort := iface.PortID
 		if len(portShort) > portW {
@@ -947,10 +948,7 @@ func (m Model) resolveInterfaceNetwork(iface network.RouterInterface) string {
 		}
 	}
 	// Fall back to subnet ID
-	if len(iface.SubnetID) > 8 {
-		return iface.SubnetID[:8] + "\u2026"
-	}
-	return iface.SubnetID
+	return shared.AbbrevID(iface.SubnetID)
 }
 
 // --- Routes rendering ---
@@ -1014,13 +1012,9 @@ func (m Model) renderRoutesContent(maxWidth, maxHeight int) string {
 		}
 
 		dest := route.DestinationCIDR
-		if len(dest) > destW {
-			dest = dest[:destW-1] + "\u2026"
-		}
+		dest = shared.TruncateCells(dest, destW)
 		hop := route.NextHop
-		if len(hop) > hopW {
-			hop = hop[:hopW-1] + "\u2026"
-		}
+		hop = shared.TruncateCells(hop, hopW)
 
 		line := fmt.Sprintf("%s%-*s%s%s", prefix, destW, dest, sep, hop)
 
@@ -1057,7 +1051,7 @@ func (m Model) renderActionBar() string {
 		buttons = append(buttons, btn("^n", "New Router"))
 		buttons = append(buttons, btn("^d", "Delete Router"))
 	case FocusInterfaces:
-		buttons = append(buttons, btn("^a", "Add Interface"))
+		buttons = append(buttons, btn(shared.Keys.Attach.Help().Key, "Add Interface"))
 		if m.SelectedInterfaceSubnetID() != "" {
 			buttons = append(buttons, btn("^t", "Remove Interface"))
 		}
@@ -1112,38 +1106,11 @@ func (m *Model) SetSize(w, h int) {
 	m.height = h
 }
 
-// ScrollToNames positions the cursor on the first matching router name.
-func (m *Model) ScrollToNames(names []string) {
-	m.highlightNames = make(map[string]bool, len(names))
-	for _, n := range names {
-		m.highlightNames[n] = true
-	}
-	m.applyHighlightNames()
-}
-
-func (m *Model) applyHighlightNames() {
-	if len(m.highlightNames) == 0 {
-		return
-	}
-	for i, r := range m.routers {
-		if m.highlightNames[r.Name] {
-			m.cursor = i
-			m.ensureSelectorCursorVisible()
-			m.highlightNames = nil
-			if r.ID != m.lastDetailID {
-				m.lastDetailID = r.ID
-				m.resetDetailState()
-			}
-			return
-		}
-	}
-}
-
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
 	switch m.focus {
 	case FocusInterfaces:
-		return "\u2191\u2193 navigate \u2022 ^a add interface \u2022 ^t remove \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 " + shared.Keys.Attach.Help().Key + " add interface \u2022 ^t remove \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
 	case focusRoutes:
 		return "\u2191\u2193 navigate \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
 	case focusInfo:

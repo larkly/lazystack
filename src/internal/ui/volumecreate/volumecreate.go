@@ -321,12 +321,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focusField = (m.focusField + 1) % numFields
 		m.updateFocus()
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		filtered := m.filteredPickerItems(items)
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
@@ -351,7 +351,7 @@ func (m Model) pickerItems() []pickerItem {
 	case fieldType:
 		items := make([]pickerItem, len(m.volumeTypes))
 		for i, vt := range m.volumeTypes {
-			items[i] = pickerItem{id: i, name: vt.Name, desc: vt.ID[:8]}
+			items[i] = pickerItem{id: i, name: vt.Name, desc: shared.ShortID(vt.ID)}
 		}
 		return items
 	case fieldAZ:

@@ -119,6 +119,7 @@ var keybindingFieldMap = map[string]func(b key.Binding){
 	"config":          func(b key.Binding) { shared.Keys.Config = b },
 	"hypervisors":     func(b key.Binding) { shared.Keys.Hypervisors = b },
 	"user_management": func(b key.Binding) { shared.Keys.UserManagement = b },
+	"column_pick":     func(b key.Binding) { shared.Keys.ColumnPick = b },
 }
 
 // defaultHelpText maps config keybinding names to their help descriptions.
@@ -180,6 +181,7 @@ var defaultHelpText = map[string]string{
 	"config":          "config",
 	"hypervisors":     "hypervisors",
 	"user_management": "user management",
+	"column_pick":     "columns",
 }
 
 // ApplyKeybindings sets shared.Keys fields from the config map.
@@ -192,6 +194,7 @@ func ApplyKeybindings(kb map[string]string) {
 	for name, keys := range kb {
 		setter, ok := keybindingFieldMap[name]
 		if !ok {
+			shared.Debugf("[config] ApplyKeybindings: unknown binding %q, ignoring", name)
 			continue
 		}
 		keyList := strings.Split(keys, ",")

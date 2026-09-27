@@ -32,10 +32,15 @@ var knownServices = []knownService{
 	{Type: "image", Name: "Image (Glance)", NewFunc: openstack.NewImageV2},
 	{Type: "network", Name: "Network (Neutron)", NewFunc: openstack.NewNetworkV2},
 	{Type: "identity", Name: "Identity (Keystone)", NewFunc: openstack.NewIdentityV3},
+	// Same v3 -> v2 -> v1 ("volume") order as the connection fallback in
+	// cloud.tryBlockStorage, so the catalog agrees with what is usable.
 	{Type: "block-storage", Name: "Block Storage (Cinder)", NewFunc: func(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) (*gophercloud.ServiceClient, error) {
 		sc, err := openstack.NewBlockStorageV3(pc, eo)
 		if err != nil {
 			sc, err = openstack.NewBlockStorageV2(pc, eo)
+		}
+		if err != nil {
+			sc, err = openstack.NewBlockStorageV1(pc, eo)
 		}
 		return sc, err
 	}},

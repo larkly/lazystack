@@ -38,12 +38,15 @@ type Model struct {
 	filterCursor int
 }
 
-// New creates an audit log viewer.
+// New creates an audit log viewer. It starts in the loading state because
+// the viewer is always opened together with the fetch of its entries;
+// SetEntries or SetError ends it.
 func New() Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	return Model{
 		spinner: s,
+		loading: true,
 	}
 }
 
@@ -66,9 +69,8 @@ func (m *Model) SetSize(w, h int) {
 	m.height = h
 }
 
-// Init starts loading.
+// Init starts the loading spinner.
 func (m Model) Init() tea.Cmd {
-	m.loading = true
 	return m.spinner.Tick
 }
 

@@ -55,20 +55,20 @@ func FindKeyPath(keyName string) string {
 }
 
 // ChooseIP selects the best IP for SSH connection.
-// Priority: floating IP → IPv6 → IPv4.
+// Priority: floating IP → IPv6 → IPv4. Blank entries are skipped, so an
+// empty value never shadows a usable address in the same or a later class.
 func ChooseIP(floatingIPs, ipv6, ipv4 []string) string {
 	shared.Debugf("[ssh] ChooseIP: start floatingIPs=%v ipv6=%v ipv4=%v", floatingIPs, ipv6, ipv4)
-	if len(floatingIPs) > 0 {
-		shared.Debugf("[ssh] ChooseIP: selected floating IP %s", floatingIPs[0])
-		return floatingIPs[0]
-	}
-	if len(ipv6) > 0 {
-		shared.Debugf("[ssh] ChooseIP: selected IPv6 %s", ipv6[0])
-		return ipv6[0]
-	}
-	if len(ipv4) > 0 {
-		shared.Debugf("[ssh] ChooseIP: selected IPv4 %s", ipv4[0])
-		return ipv4[0]
+	for _, class := range []struct {
+		name  string
+		addrs []string
+	}{{"floating IP", floatingIPs}, {"IPv6", ipv6}, {"IPv4", ipv4}} {
+		for _, addr := range class.addrs {
+			if addr = strings.TrimSpace(addr); addr != "" {
+				shared.Debugf("[ssh] ChooseIP: selected %s %s", class.name, addr)
+				return addr
+			}
+		}
 	}
 	shared.Debugf("[ssh] ChooseIP: no IP available")
 	return ""

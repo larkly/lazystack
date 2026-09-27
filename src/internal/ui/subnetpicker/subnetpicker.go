@@ -293,7 +293,7 @@ func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, rout
 
 		if existing != nil {
 			shared.Debugf("[subnetpicker] router %s already has port %s on network %s, adding fixed IP", routerID, existing.ID, sub.NetworkID)
-			err = network.AddFixedIPToPort(ctx, client, existing.ID, existing.FixedIPs, sub.ID, ipStr)
+			err = network.AddFixedIPToPort(ctx, client, existing.ID, sub.ID, ipStr)
 			if err != nil {
 				shared.Debugf("[subnetpicker] error adding fixed IP to port %s: %v", existing.ID, err)
 				return interfaceAddErrMsg{err: err}
@@ -387,7 +387,7 @@ func (m Model) viewList() string {
 			}
 			name := sub.Name
 			if name == "" {
-				name = sub.ID[:8]
+				name = shared.ShortID(sub.ID)
 			}
 			cidr := lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(" " + sub.CIDR)
 			lines = append(lines, fmt.Sprintf("%s%s%s", cursor, style.Render(name), cidr))
@@ -422,7 +422,7 @@ func (m Model) viewConfirm() string {
 
 	subName := m.selectedSubnet.Name
 	if subName == "" {
-		subName = m.selectedSubnet.ID[:8]
+		subName = shared.ShortID(m.selectedSubnet.ID)
 	}
 	subLine := lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true).Render(subName)
 	subLine += lipgloss.NewStyle().Foreground(shared.ColorMuted).Render(" " + m.selectedSubnet.CIDR)

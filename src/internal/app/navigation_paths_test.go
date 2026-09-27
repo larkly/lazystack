@@ -158,7 +158,7 @@ func TestServerConfirmModalCapturesSelectionAndBulkClearsIt(t *testing.T) {
 	if next.serverList.SelectionCount() != 0 {
 		t.Fatal("bulk execute did not clear selection")
 	}
-	if _, ok := cmd().(shared.ServerActionMsg); !ok {
+	if r, ok := cmd().(bulkResultMsg); !ok || len(r.failed) != 0 || len(r.succeeded) != 2 {
 		t.Fatal("bulk action failed")
 	}
 }

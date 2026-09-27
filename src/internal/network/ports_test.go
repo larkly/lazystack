@@ -74,7 +74,7 @@ func TestListPorts(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNeutronClient(handler)
+	client := fakeNeutronClient(t, handler)
 	ctx := context.Background()
 
 	ports, err := ListPorts(ctx, client, "net-uuid-001")

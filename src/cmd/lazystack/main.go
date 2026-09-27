@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -65,9 +66,7 @@ func main() {
 	}
 
 	cfg, cfgErr := config.Load()
-	if cfgErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to load config: %v\n", cfgErr)
-	}
+	reportConfigLoad(os.Stderr, cfg, cfgErr)
 
 	// Detect which CLI flags were explicitly set
 	var cliFlags config.CLIFlags
@@ -123,11 +122,45 @@ func main() {
 	}
 
 	if fm, ok := finalModel.(app.Model); ok && fm.ShouldRestart() {
-		exe, err := os.Executable()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "restart failed: %v\n", err)
-			os.Exit(1)
-		}
-		syscall.Exec(exe, os.Args, os.Environ())
+		// Only returns if the restart failed.
+		os.Exit(restartOrReport(os.Stderr))
+	}
+}
+
+// executable is a variable so tests can point the restart at a binary that
+// cannot be executed.
+var executable = os.Executable
+
+// restartSelf replaces the current process with a fresh copy of the running
+// binary. On success it never returns.
+func restartSelf() error {
+	exe, err := executable()
+	if err != nil {
+		return fmt.Errorf("locating executable: %w", err)
+	}
+	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+		return fmt.Errorf("exec %s: %w", exe, err)
+	}
+	return nil
+}
+
+// restartOrReport restarts lazystack; if that fails it reports why on w and
+// returns a nonzero exit status instead of letting main exit successfully.
+func restartOrReport(w io.Writer) int {
+	if err := restartSelf(); err != nil {
+		fmt.Fprintf(w, "restart failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// reportConfigLoad prints config load problems (a failed load, or values
+// that were rejected and replaced by defaults) as warnings.
+func reportConfigLoad(w io.Writer, cfg config.Config, err error) {
+	if err != nil {
+		fmt.Fprintf(w, "Warning: failed to load config: %v\n", err)
+	}
+	for _, warning := range cfg.Warnings {
+		fmt.Fprintf(w, "Warning: config: %s\n", warning)
 	}
 }

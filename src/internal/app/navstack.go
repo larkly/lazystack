@@ -91,3 +91,12 @@ func (m *Model) popNav() (NavEntry, bool) {
 	}
 	return m.nav.Pop()
 }
+
+// clearBackNav forgets both kinds of back-navigation: the cross-resource
+// origin and the local drill-down/overlay stack.
+func (m *Model) clearBackNav() {
+	m.returnToView = 0
+	if m.nav != nil {
+		m.nav.Clear()
+	}
+}

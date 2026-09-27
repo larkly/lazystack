@@ -108,9 +108,10 @@ func (m Model) SelectedServer() *compute.Server {
 	return nil
 }
 
-// IsFiltering reports whether the list is currently in filter input mode.
+// IsFiltering reports whether the list is currently in filter input mode,
+// including naming a filter to save.
 func (m Model) IsFiltering() bool {
-	return m.filtering
+	return m.filtering || m.namingFilter
 }
 
 // CopyEntries returns the title and copyable fields for the selected server.
@@ -286,6 +287,10 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.cursor = 0
 		}
 		m.ensureVisible()
+	case key.Matches(msg, shared.Keys.Back):
+		if len(m.selected) > 0 {
+			m.ClearSelection()
+		}
 	case key.Matches(msg, shared.Keys.Filter):
 		m.filtering = true
 		m.filter.Focus()
@@ -937,6 +942,17 @@ func (m Model) SelectedServers() []compute.Server {
 // ClearSelection clears all selected servers.
 func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
+}
+
+// SelectIDs adds the given IDs to the bulk selection (e.g. to keep failed
+// targets of a bulk action selected for a retry).
+func (m *Model) SelectIDs(ids []string) {
+	if m.selected == nil {
+		m.selected = make(map[string]bool)
+	}
+	for _, id := range ids {
+		m.selected[id] = true
+	}
 }
 
 // SelectionCount returns the number of selected servers.

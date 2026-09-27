@@ -2,6 +2,7 @@ package lbpoolcreate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -261,6 +262,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case poolCreateErrMsg:
 		m.submitting = false
 		m.err = shared.SanitizeAPIError(msg.err)
+		var cleanupErr *loadbalancer.PoolCleanupError
+		if errors.As(msg.err, &cleanupErr) && !strings.Contains(m.err, "may remain") {
+			m.err += fmt.Sprintf(" Rollback failed: pool %s may remain and need manual deletion.", cleanupErr.PoolID)
+		}
 		if msg.partial != "" {
 			// The pool exists but the binding does not: say so explicitly.
 			m.err = msg.partial + ": " + m.err

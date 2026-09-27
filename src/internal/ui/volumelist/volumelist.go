@@ -214,6 +214,30 @@ func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
 }
 
+// SelectedIDs returns every selected volume ID, including selections that
+// are currently hidden or not yet loaded, in sorted order.
+func (m Model) SelectedIDs() []string {
+	ids := make([]string, 0, len(m.selected))
+	for id, on := range m.selected {
+		if on {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// SelectIDs adds the given IDs to the bulk selection (e.g. to keep failed
+// targets of a bulk action selected for a retry).
+func (m *Model) SelectIDs(ids []string) {
+	if m.selected == nil {
+		m.selected = make(map[string]bool)
+	}
+	for _, id := range ids {
+		m.selected[id] = true
+	}
+}
+
 // pruneSelection drops selected IDs of volumes that no longer exist.
 func (m *Model) pruneSelection() {
 	if len(m.selected) == 0 {
@@ -490,10 +514,7 @@ func (m Model) serverName(id string) string {
 	if name, ok := m.serverNames[id]; ok {
 		return name
 	}
-	if len(id) > 8 {
-		return id[:8] + "…"
-	}
-	return id
+	return shared.AbbrevID(id)
 }
 
 // View renders the volume list.
@@ -554,8 +575,8 @@ func (m Model) View() string {
 		cursor := i == m.cursor
 
 		name := v.Name
-		if name == "" && len(v.ID) > 8 {
-			name = v.ID[:8] + "…"
+		if name == "" {
+			name = shared.AbbrevID(v.ID)
 		}
 
 		attached := ""
@@ -565,10 +586,7 @@ func (m Model) View() string {
 			device = v.AttachedDevice
 		}
 
-		shortID := v.ID
-		if len(shortID) > 8 {
-			shortID = shortID[:8]
-		}
+		shortID := shared.ShortID(v.ID)
 
 		values := map[string]string{
 			"name":     name,
@@ -618,9 +636,7 @@ func (m Model) renderDataRow(values map[string]string, status string, cursor boo
 		}
 		val := values[col.Key]
 		w := col.width
-		if len(val) > w && w > 1 {
-			val = val[:w-1] + "…"
-		}
+		val = shared.TruncateCells(val, w)
 
 		style := lipgloss.NewStyle().Width(w)
 		if col.Key == "status" {
@@ -772,5 +788,5 @@ func (m Model) Hints() string {
 	if n := m.SelectionCount(); n > 0 {
 		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^t detach • esc clear • ? help", n)
 	}
-	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • ^a attach • ^t detach • R refresh • 1-5/←→ switch tab • ? help"
+	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • " + shared.Keys.Attach.Help().Key + " attach • ^t detach • R refresh • 1-9/←→ switch tab • ? help"
 }

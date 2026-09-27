@@ -18,7 +18,7 @@ import (
 func TestMicroversionBoundaries(t *testing.T) {
 	for _, tc := range []struct{ a, b, want string }{
 		{"1.999", "2.0", "1.999"}, {"2.10", "2.9", "2.9"},
-		{"2.01", "2.1", "2.01"}, {"2.1.9", "2.1.1", "2.1.9"},
+		{"2.100", "2.99", "2.99"}, {"3.0", "2.100", "2.100"},
 	} {
 		t.Run(tc.a+"/"+tc.b, func(t *testing.T) {
 			if got := minMicroversion(tc.a, tc.b); got != tc.want {
@@ -26,20 +26,13 @@ func TestMicroversionBoundaries(t *testing.T) {
 			}
 		})
 	}
-	for _, v := range []string{"2.", " 2.1", "2.1 ", "999999999999999999999999999999.1", "2.999999999999999999999999999999"} {
+	for _, v := range []string{"2.", " 2.1", "2.1 ", "999999999999999999999999999999.1", "2.999999999999999999999999999999", "02.001", "2.1.extra", "2.1.3.4"} {
 		t.Run(v, func(t *testing.T) {
 			ma, mi, err := parseMicroversion(v)
 			if err == nil || ma != 0 || mi != 0 {
 				t.Fatalf("got (%d,%d,%v), want zero values and error", ma, mi, err)
 			}
 		})
-	}
-	// Characterize the parser's two-component comparison, not strict semver validation.
-	for _, v := range []string{"02.001", "2.1.extra", "2.1.3.4"} {
-		ma, mi, err := parseMicroversion(v)
-		if err != nil || ma != 2 || mi != 1 {
-			t.Errorf("parse %q = %d,%d,%v", v, ma, mi, err)
-		}
 	}
 }
 
@@ -48,13 +41,13 @@ func TestNovaDiscoveryDocumentFallbacks(t *testing.T) {
 		name, body, max, used string
 		warning               bool
 	}{
-		{"empty document", `{}`, "unknown", "2.100", false},
-		{"null document", `null`, "unknown", "2.100", false},
-		{"unrelated version", `{"versions":[{"id":"v2.0","version":"2.80"}]}`, "unknown", "2.100", false},
-		{"empty max", `{"versions":[{"id":"v2.1","version":""}]}`, "unknown", "2.100", false},
+		{"empty document", `{}`, "unknown", "2.1", true},
+		{"null document", `null`, "unknown", "2.1", true},
+		{"unrelated version", `{"versions":[{"id":"v2.0","version":"2.80"}]}`, "unknown", "2.1", true},
+		{"empty max", `{"versions":[{"id":"v2.1","version":""}]}`, "unknown", "2.1", true},
 		{"singular fallback", `{"versions":[{"id":"v2.1","version":""}],"version":{"version":"2.90"}}`, "2.90", "2.90", true},
 		{"array preferred", `{"versions":[{"id":"v2.1","version":"2.100"}],"version":{"version":"2.90"}}`, "2.100", "2.100", false},
-		{"wrong field type", `{"versions":"invalid"}`, "unknown", "2.100", false},
+		{"wrong field type", `{"versions":"invalid"}`, "unknown", "2.1", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sc, closeFn := fakeComputeClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tc.body) }))
@@ -63,7 +56,7 @@ func TestNovaDiscoveryDocumentFallbacks(t *testing.T) {
 			if max != tc.max || used != tc.used || (warn != "") != tc.warning {
 				t.Fatalf("got (%q,%q,%q), want (%q,%q,warning=%v)", max, used, warn, tc.max, tc.used, tc.warning)
 			}
-			if tc.warning && (!strings.Contains(warn, tc.used) || !strings.Contains(warn, "2.100")) {
+			if tc.warning && !strings.Contains(warn, tc.used) {
 				t.Errorf("warning lacks versions: %s", warn)
 			}
 		})
@@ -76,7 +69,7 @@ func TestNovaDiscoveryCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	max, used, warn := negotiateNovaMicroversion(ctx, sc)
-	if max != "unknown" || used != "2.100" || warn != "" {
+	if max != "unknown" || used != "2.1" || warn == "" {
 		t.Fatalf("got %q,%q,%q", max, used, warn)
 	}
 }

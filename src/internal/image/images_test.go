@@ -198,8 +198,10 @@ const imageDetailFixture = `{
   "updated_at": "2026-02-20T14:22:00Z"
 }`
 
-func fakeGlanceClient(handler http.Handler) *gophercloud.ServiceClient {
+func fakeGlanceClient(t testing.TB, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -219,7 +221,7 @@ func TestListImages(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeGlanceClient(handler)
+	client := fakeGlanceClient(t, handler)
 	ctx := context.Background()
 
 	imgs, err := ListImages(ctx, client)
@@ -293,7 +295,7 @@ func TestGetImage(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeGlanceClient(handler)
+	client := fakeGlanceClient(t, handler)
 	ctx := context.Background()
 
 	img, err := GetImage(ctx, client, "8a8a2d36-3f39-4e3a-b3da-2e4a4f2c3f61")
@@ -342,11 +344,26 @@ func TestDeleteImage(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeGlanceClient(handler)
+	client := fakeGlanceClient(t, handler)
 	ctx := context.Background()
 
 	err := DeleteImage(ctx, client, "img-to-delete")
 	if err != nil {
 		t.Fatalf("DeleteImage() error: %v", err)
+	}
+}
+
+// Fake clients must shut their test server down when the test that created
+// them finishes, so repeated tests do not accumulate listeners.
+func TestFakeClientsCloseWithTest(t *testing.T) {
+	var endpoints []string
+	t.Run("use", func(t *testing.T) {
+		endpoints = append(endpoints, fakeGlanceClient(t, http.NotFoundHandler()).Endpoint)
+	})
+	for _, ep := range endpoints {
+		if resp, err := http.Get(ep); err == nil {
+			resp.Body.Close()
+			t.Errorf("test server %s still running after its test finished", ep)
+		}
 	}
 }

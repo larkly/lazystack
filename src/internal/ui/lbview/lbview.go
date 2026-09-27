@@ -149,6 +149,9 @@ func (m Model) FocusedPane() FocusPane { return m.focus }
 // InSelector returns true if the selector pane is focused.
 func (m Model) InSelector() bool { return m.focus == FocusSelector }
 
+// IsSearching reports whether the search input has focus.
+func (m Model) IsSearching() bool { return m.searchActive }
+
 // SelectedLB returns the load balancer under the selector cursor.
 func (m Model) SelectedLB() *loadbalancer.LoadBalancer {
 	visible := m.visibleLBs()
@@ -384,6 +387,17 @@ func (m Model) SelectedMemberIDs() []string {
 		}
 	}
 	return ids
+}
+
+// SelectedMembers returns the selected members of the current pool.
+func (m Model) SelectedMembers() []loadbalancer.Member {
+	var out []loadbalancer.Member
+	for _, mem := range m.selectedPoolMembers() {
+		if m.selectedMembers[mem.ID] {
+			out = append(out, mem)
+		}
+	}
+	return out
 }
 
 // SelectedMemberCount returns the number of selected members in the current pool.
@@ -1314,12 +1328,10 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		name := lb.Name
-		if name == "" && len(lb.ID) > 8 {
-			name = lb.ID[:8] + "..."
+		if name == "" {
+			name = shared.AbbrevID(lb.ID)
 		}
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		provIcon := shared.StatusIcon(lb.ProvisioningStatus)
 		operIcon := shared.StatusIcon(lb.OperatingStatus)
@@ -1426,9 +1438,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 		}
 		label := labelStyle.Render(p.label)
 		val := p.value
-		if lipgloss.Width(val) > valW {
-			val = val[:valW-1] + "\u2026"
-		}
+		val = shared.TruncateCells(val, valW)
 		var value string
 		if p.style != nil {
 			value = p.style(p.value).Render(shared.StatusIcon(p.value) + val)
@@ -1537,20 +1547,16 @@ func (m Model) renderListenersContent(maxWidth, maxHeight int) string {
 		if name == "" {
 			name = l.Protocol
 		}
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		pool := poolNames[l.DefaultPoolID]
 		if pool == "" && l.DefaultPoolID != "" {
-			pool = l.DefaultPoolID[:min(8, len(l.DefaultPoolID))] + "\u2026"
+			pool = shared.AbbrevID(l.DefaultPoolID)
 		}
 		if pool == "" {
 			pool = "\u2014"
 		}
-		if len(pool) > poolW {
-			pool = pool[:poolW-1] + "\u2026"
-		}
+		pool = shared.TruncateCells(pool, poolW)
 
 		line := fmt.Sprintf("%s%-*s%s%-*s%s%-*d%s%s",
 			prefix, nameW, name, sep, protoW, l.Protocol, sep, portW, l.ProtocolPort, sep, pool)
@@ -1633,14 +1639,10 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 		}
 
 		name := p.Name
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		method := p.LBMethod
-		if len(method) > methodW {
-			method = method[:methodW-1] + "\u2026"
-		}
+		method = shared.TruncateCells(method, methodW)
 
 		health := "\u2014"
 		if p.MonitorID != "" && m.monitorErrs[p.MonitorID] != "" {
@@ -1654,9 +1656,7 @@ func (m Model) renderPoolsContent(maxWidth, maxHeight int) string {
 			if maxHW < 4 {
 				maxHW = 4
 			}
-			if len(health) > maxHW {
-				health = health[:maxHW-1] + "\u2026"
-			}
+			health = shared.TruncateCells(health, maxHW)
 		}
 
 		countText := fmt.Sprintf(" [%d]", len(m.members[p.ID]))
@@ -1799,14 +1799,10 @@ func (m Model) renderMembersContent(maxWidth, maxHeight int) string {
 		if name == "" {
 			name = "\u2014"
 		}
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		addr := fmt.Sprintf("%s:%d", mem.Address, mem.ProtocolPort)
-		if len(addr) > addrW {
-			addr = addr[:addrW-1] + "\u2026"
-		}
+		addr = shared.TruncateCells(addr, addrW)
 
 		var weight string
 		if mem.Weight == 0 {

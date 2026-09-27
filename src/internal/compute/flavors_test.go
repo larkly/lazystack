@@ -37,8 +37,10 @@ const flavorsFixture = `{
   ]
 }`
 
-func fakeNovaClient(handler http.Handler) *gophercloud.ServiceClient {
+func fakeNovaClient(t testing.TB, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -58,7 +60,7 @@ func TestListFlavors(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNovaClient(handler)
+	client := fakeNovaClient(t, handler)
 	ctx := context.Background()
 
 	flavors, err := ListFlavors(ctx, client)
@@ -100,5 +102,20 @@ func TestListFlavors(t *testing.T) {
 	}
 	if f3.Disk != 80 {
 		t.Errorf("unexpected Disk for m1.large: %d", f3.Disk)
+	}
+}
+
+// Fake clients must shut their test server down when the test that created
+// them finishes, so repeated tests do not accumulate listeners.
+func TestFakeClientsCloseWithTest(t *testing.T) {
+	var endpoints []string
+	t.Run("use", func(t *testing.T) {
+		endpoints = append(endpoints, fakeNovaClient(t, http.NotFoundHandler()).Endpoint)
+	})
+	for _, ep := range endpoints {
+		if resp, err := http.Get(ep); err == nil {
+			resp.Body.Close()
+			t.Errorf("test server %s still running after its test finished", ep)
+		}
 	}
 }
