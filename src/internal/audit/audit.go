@@ -2,7 +2,9 @@ package audit
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +87,14 @@ type Entry struct {
 	Details      json.RawMessage `json:"details,omitempty"`
 }
 
+// File operations are variables so tests can inject failures.
+var (
+	writeRecord = func(f *os.File, b []byte) (int, error) { return f.Write(b) }
+	renameFile  = os.Rename
+	removeFile  = os.Remove
+	chmodLog    = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
+)
+
 // Logger writes structured audit entries to a rotating JSON log file.
 type Logger struct {
 	mu       sync.Mutex
@@ -128,6 +138,13 @@ func (l *Logger) IsEnabled() bool {
 }
 
 // Log writes an audit entry.
+//
+// Rotation and the append run under an exclusive advisory lock on
+// "<path>.lock", so several lazystack processes (or Loggers) sharing one log
+// never rotate over each other or interleave records, and each record is
+// written with a single write call. A rotation failure does not drop the
+// entry: it is still appended to the current file and the rotation error is
+// returned afterwards so the caller can warn.
 func (l *Logger) Log(entry Entry) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -139,40 +156,70 @@ func (l *Logger) Log(entry Entry) error {
 		entry.Timestamp = time.Now().UTC()
 	}
 
-	if err := l.rotateIfNeeded(); err != nil {
-		return fmt.Errorf("audit rotate: %w", err)
-	}
-
-	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		// The parent directory may be missing on fresh installs; create it
-		// once and retry before giving up.
-		if mkErr := os.MkdirAll(filepath.Dir(l.path), 0o700); mkErr != nil {
-			return fmt.Errorf("audit mkdir: %w", mkErr)
-		}
-		if f, err = os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err != nil {
-			return fmt.Errorf("audit open: %w", err)
-		}
-	}
-	defer f.Close()
-
 	b, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("audit marshal: %w", err)
 	}
-	if _, err := f.Write(b); err != nil {
-		return fmt.Errorf("audit write: %w", err)
+	b = append(b, '\n')
+
+	// The parent directory may be missing on fresh installs. An existing
+	// directory's permissions are left alone.
+	if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
+		return fmt.Errorf("audit mkdir: %w", err)
 	}
-	if _, err := f.WriteString("\n"); err != nil {
-		return fmt.Errorf("audit newline: %w", err)
+
+	lock, err := os.OpenFile(l.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("audit lock: %w", err)
 	}
-	return nil
+	defer lock.Close()
+	if err := lockFile(lock); err != nil {
+		return fmt.Errorf("audit lock: %w", err)
+	}
+	defer unlockFile(lock)
+
+	var rotateErr error
+	if err := l.rotateIfNeeded(); err != nil {
+		rotateErr = fmt.Errorf("audit rotate: %w", err)
+	}
+
+	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return errors.Join(fmt.Errorf("audit open: %w", err), rotateErr)
+	}
+	defer f.Close()
+
+	// OpenFile's mode only applies to new files; a log created by an older
+	// version (or by hand) may be group/world readable.
+	if err := ensurePrivate(f); err != nil {
+		return errors.Join(fmt.Errorf("audit permissions: %w", err), rotateErr)
+	}
+
+	if _, err := writeRecord(f, b); err != nil {
+		return errors.Join(fmt.Errorf("audit write: %w", err), rotateErr)
+	}
+	return rotateErr
+}
+
+// ensurePrivate restricts an open log file to mode 0600.
+func ensurePrivate(f *os.File) error {
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Mode().Perm() == 0o600 {
+		return nil
+	}
+	return chmodLog(f, 0o600)
 }
 
 // rotateIfNeeded renames existing log files when the current exceeds maxSize.
+// Missing backups are normal. Any other failure is returned; if a backup
+// cannot be shifted, rotation stops there so no retained file is overwritten
+// and the active log simply keeps growing until rotation succeeds.
 func (l *Logger) rotateIfNeeded() error {
 	info, err := os.Stat(l.path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
@@ -182,18 +229,34 @@ func (l *Logger) rotateIfNeeded() error {
 		return nil
 	}
 
+	var errs []error
+
 	// Remove oldest if it exists
 	oldest := fmt.Sprintf("%s.%d", l.path, l.maxFiles)
-	_ = os.Remove(oldest)
+	if err := removeFile(oldest); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		errs = append(errs, fmt.Errorf("removing %s: %w", oldest, err))
+	}
 
 	// Shift existing backups
 	for i := l.maxFiles - 1; i >= 1; i-- {
 		oldPath := fmt.Sprintf("%s.%d", l.path, i)
 		newPath := fmt.Sprintf("%s.%d", l.path, i+1)
-		_ = os.Rename(oldPath, newPath)
+		if err := renameFile(oldPath, newPath); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			errs = append(errs, fmt.Errorf("shifting %s: %w", oldPath, err))
+			return errors.Join(errs...)
+		}
+		if err := os.Chmod(newPath, 0o600); err != nil {
+			errs = append(errs, fmt.Errorf("securing %s: %w", newPath, err))
+		}
 	}
 
-	return os.Rename(l.path, l.path+".1")
+	if err := renameFile(l.path, l.path+".1"); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 // ReadEntries reads up to limit entries in reverse chronological order (newest first).
