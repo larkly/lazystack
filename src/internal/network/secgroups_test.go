@@ -93,7 +93,7 @@ func TestListSecurityGroups(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNeutronClient(handler)
+	client := fakeNeutronClient(t, handler)
 	ctx := context.Background()
 
 	sgs, err := ListSecurityGroups(ctx, client)
