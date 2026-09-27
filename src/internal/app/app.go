@@ -1183,6 +1183,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case serverDeletedMsg:
 		return m.handleServerDeleted(msg)
 
+	case credentialsMsg:
+		return m.handleCredentials(msg)
+
 	case shared.ResourceActionMsg:
 		return m.handleResourceActionMsg(msg)
 

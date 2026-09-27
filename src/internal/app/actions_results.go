@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/vmpassword"
 )
 
 // popNavIfTop pops the local back-navigation entry that brought us into a
@@ -18,6 +19,31 @@ func (m *Model) popNavIfTop(dest activeView) {
 	if top, ok := m.nav.Peek(); ok && top.View == dest {
 		m.popNav()
 	}
+}
+
+// credentialsMsg pairs an action result with transient secrets (rescue or
+// evacuation admin passwords). The secrets never enter labels, the status
+// bar or the audit log; they are only shown in the masked credentials
+// modal, which reveals them on explicit request.
+type credentialsMsg struct {
+	result tea.Msg
+	title  string
+	note   string
+	creds  []vmpassword.Credential
+}
+
+func (m Model) handleCredentials(msg credentialsMsg) (Model, tea.Cmd) {
+	var cmd tea.Cmd
+	if msg.result != nil {
+		var next tea.Model
+		next, cmd = m.Update(msg.result)
+		m = next.(Model)
+	}
+	if len(msg.creds) > 0 {
+		m.vmPassword = vmpassword.NewCredentials(msg.title, msg.note, msg.creds)
+		m.vmPassword.SetSize(m.width, m.height)
+	}
+	return m, cmd
 }
 
 // handleServerActionMsg reports a successful server action and refreshes

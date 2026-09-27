@@ -34,6 +34,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/servicecatalog"
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
 	"github.com/larkly/lazystack/internal/ui/usermanagement"
+	"github.com/larkly/lazystack/internal/ui/vmpassword"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
@@ -840,10 +841,15 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			shared.Debugf("[action] rescued server %s", action.Name)
 			m.logAudit(audit.ActionRescue, "server", action.ServerID, action.Name, "success", "")
 			msg := shared.ServerActionMsg{Action: "Rescue", Name: action.Name}
-			if adminPass != "" {
-				msg.Action = fmt.Sprintf("Rescue (password: %s)", adminPass)
+			if adminPass == "" {
+				return msg
 			}
-			return msg
+			return credentialsMsg{
+				result: msg,
+				title:  "Rescue Password",
+				note:   "Temporary rescue-mode password; it is not stored anywhere.",
+				creds:  []vmpassword.Credential{{Server: action.Name, Secret: adminPass}},
+			}
 		}
 	case "unrescue":
 		return m, func() tea.Msg {
@@ -1240,7 +1246,7 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 	counts := countBulkActions(targets, act)
 	return func() tea.Msg {
 		var errs []string
-		var passwords []string
+		var passwords []vmpassword.Credential
 		for _, s := range targets {
 			serverAction := s.Action
 			if serverAction == "" {
@@ -1294,7 +1300,7 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 				var adminPass string
 				adminPass, err = compute.RescueServer(ctx, client, s.ID)
 				if err == nil && adminPass != "" {
-					passwords = append(passwords, fmt.Sprintf("%s: %s", s.Name, adminPass))
+					passwords = append(passwords, vmpassword.Credential{Server: s.Name, Secret: adminPass})
 				}
 			case "unrescue":
 				auditAction = audit.ActionUnrescue
@@ -1324,7 +1330,12 @@ func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal
 			Name:   fmt.Sprintf("%d servers", len(targets)),
 		}
 		if len(passwords) > 0 {
-			msg.Action = fmt.Sprintf("%s (passwords: %s)", label, strings.Join(passwords, ", "))
+			return credentialsMsg{
+				result: msg,
+				title:  "Rescue Passwords",
+				note:   "Temporary rescue-mode passwords; they are not stored anywhere.",
+				creds:  passwords,
+			}
 		}
 		return msg
 	}

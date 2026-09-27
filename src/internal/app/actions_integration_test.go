@@ -51,7 +51,7 @@ var serverActionCases = []serverActionCase{
 	{"start", `{"os-start":null}`, "Start", audit.ActionStart},
 	{"lock", `{"lock":null}`, "Lock", audit.ActionLock},
 	{"unlock", `{"unlock":null}`, "Unlock", audit.ActionUnlock},
-	{"rescue", `{"rescue":{}}`, "Rescue (password: fixture-password)", audit.ActionRescue},
+	{"rescue", `{"rescue":{}}`, "Rescue", audit.ActionRescue},
 	{"unrescue", `{"unrescue":null}`, "Unrescue", audit.ActionUnrescue},
 }
 
@@ -153,6 +153,14 @@ func TestConfirmedServerActionsHTTPAndAudit(t *testing.T) {
 							t.Fatalf("result=%#v", msg)
 						}
 					} else {
+						if c, ok := msg.(credentialsMsg); ok {
+							if tc.action != "rescue" || len(c.creds) != 1 || c.creds[0].Server != "name" || c.creds[0].Secret != "fixture-password" {
+								t.Fatalf("credentials=%#v", c)
+							}
+							msg = c.result
+						} else if tc.action == "rescue" {
+							t.Fatalf("rescue password not delivered: %#v", msg)
+						}
 						s, ok := msg.(shared.ServerActionMsg)
 						if !ok {
 							t.Fatalf("result=%#v", msg)
@@ -160,9 +168,6 @@ func TestConfirmedServerActionsHTTPAndAudit(t *testing.T) {
 						label, name := tc.label, "name"
 						if bulk {
 							label, name = tc.action, "1 servers"
-							if tc.action == "rescue" {
-								label = "rescue (passwords: name: fixture-password)"
-							}
 						}
 						if s.Action != label || s.Name != name {
 							t.Errorf("result=%+v want %s/%s", s, label, name)
