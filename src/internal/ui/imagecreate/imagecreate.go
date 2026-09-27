@@ -108,6 +108,7 @@ func New(client *gophercloud.ServiceClient) Model {
 	ni.Placeholder = "image name"
 	ni.CharLimit = 128
 	ni.SetWidth(40)
+	ni.Focus()
 
 	pi := textinput.New()
 	pi.Prompt = ""
@@ -138,14 +139,15 @@ func New(client *gophercloud.ServiceClient) Model {
 		minDiskInput: mdi,
 		minRAMInput:  mri,
 		spinner:      s,
+		focusField:   fieldName,
 	}
 }
 
-// Init returns initial commands.
+// Init returns initial commands. Focus is set up in New: Init has a value
+// receiver, so state changed here would be lost.
 func (m Model) Init() tea.Cmd {
 	shared.Debugf("[imagecreate] Init()")
-	m.focusField = fieldName
-	return m.nameInput.Focus()
+	return textinput.Blink
 }
 
 func (m Model) isTextInput() bool {
