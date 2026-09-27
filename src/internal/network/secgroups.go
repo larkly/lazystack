@@ -208,7 +208,7 @@ func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, 
 	}
 	for _, r := range src.Rules {
 		// Skip default egress-allow-all rules — OpenStack creates these automatically
-		if r.Direction == "egress" && r.Protocol == "" && r.RemoteIPPrefix == "" && r.RemoteGroupID == "" && r.PortRangeMin == 0 && r.PortRangeMax == 0 {
+		if r.Direction == "egress" && r.Protocol == "" && r.RemoteIPPrefix == "" && r.RemoteGroupID == "" && r.RemoteAddressGroupID == "" && r.PortRangeMin == 0 && r.PortRangeMax == 0 {
 			continue
 		}
 		opts := rules.CreateOpts{
@@ -220,6 +220,9 @@ func CloneSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, 
 			PortRangeMax:   r.PortRangeMax,
 			RemoteIPPrefix: r.RemoteIPPrefix,
 			RemoteGroupID:  r.RemoteGroupID,
+			// Keep address-group restrictions; dropping them would open
+			// the cloned rule to any source.
+			RemoteAddressGroupID: r.RemoteAddressGroupID,
 		}
 		_, err := CreateSecurityGroupRule(ctx, client, opts)
 		if err != nil {
