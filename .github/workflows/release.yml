@@ -180,33 +180,48 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
+          path: dist
           merge-multiple: true
 
+      # One line per released file, each listed exactly once; the manifest
+      # never lists itself.
       - name: Generate checksums
-        run: sha256sum lazystack-* *.deb *.rpm *.pkg.tar.zst > SHA256SUMS
+        working-directory: dist
+        run: |
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS*' -printf '%P\n' \
+            | LC_ALL=C sort \
+            | xargs -r -d '\n' sha256sum -- > SHA256SUMS
+          if [ ! -s SHA256SUMS ]; then
+            echo "::error::No release assets to checksum"
+            exit 1
+          fi
+          dupes=$(awk '{print $2}' SHA256SUMS | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "::error::Duplicate SHA256SUMS entries: $dupes"
+            exit 1
+          fi
+          sha256sum -c --strict --quiet SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.validate.outputs.version }}
           generate_release_notes: true
-          files: |
-            lazystack-*
-            *.deb
-            *.rpm
-            *.pkg.tar.zst
-            SHA256SUMS
+          files: dist/*
 
       - name: Parse checksums
         id: shas
+        working-directory: dist
         run: |
-          sum() { awk -v f="$1" '$2 == f { print $1 }' SHA256SUMS; }
-          {
-            echo "darwin_arm64=$(sum lazystack-darwin-arm64)"
-            echo "darwin_amd64=$(sum lazystack-darwin-amd64)"
-            echo "linux_arm64=$(sum lazystack-linux-arm64)"
-            echo "linux_amd64=$(sum lazystack-linux-amd64)"
-          } >> "$GITHUB_OUTPUT"
+          for platform in darwin_arm64 darwin_amd64 linux_arm64 linux_amd64; do
+            asset="lazystack-${platform/_/-}"
+            hash=$(awk -v f="$asset" '$2 == f { print $1 }' SHA256SUMS)
+            if [ -z "$hash" ]; then
+              echo "::error::No checksum for $asset"
+              exit 1
+            fi
+            echo "${platform}=${hash}" >> "$GITHUB_OUTPUT"
+          done
 
       - name: Compute source tarball checksum
         id: src_sha
