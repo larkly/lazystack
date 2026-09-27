@@ -225,17 +225,14 @@ func (m Model) SelectedImage() *img.Image {
 	return nil
 }
 
-// SelectedImages returns all selected images, or the cursor image if none selected.
+// SelectedImages returns the selected images that are currently visible, or
+// the cursor image when no visible image is selected. Selections hidden by
+// the search filter are kept (they return when the filter is cleared) but
+// are never acted on, so the count, confirm dialog and action always refer
+// to the same images.
 func (m Model) SelectedImages() []img.Image {
-	visible := m.visibleImages()
-	if len(m.selected) > 0 {
-		var result []img.Image
-		for _, im := range visible {
-			if m.selected[im.ID] {
-				result = append(result, im)
-			}
-		}
-		return result
+	if sel := m.visibleSelection(); len(sel) > 0 {
+		return sel
 	}
 	if i := m.SelectedImage(); i != nil {
 		return []img.Image{*i}
@@ -243,14 +240,44 @@ func (m Model) SelectedImages() []img.Image {
 	return nil
 }
 
-// SelectionCount returns the number of selected images.
+// SelectionCount returns the number of selected images that bulk actions
+// would target (selected and visible).
 func (m Model) SelectionCount() int {
-	return len(m.selected)
+	return len(m.visibleSelection())
+}
+
+func (m Model) visibleSelection() []img.Image {
+	if len(m.selected) == 0 {
+		return nil
+	}
+	var result []img.Image
+	for _, im := range m.visibleImages() {
+		if m.selected[im.ID] {
+			result = append(result, im)
+		}
+	}
+	return result
 }
 
 // ClearSelection clears all selected images.
 func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
+}
+
+// pruneSelection drops selected IDs of images that no longer exist.
+func (m *Model) pruneSelection() {
+	if len(m.selected) == 0 {
+		return
+	}
+	present := make(map[string]bool, len(m.images))
+	for _, im := range m.images {
+		present[im.ID] = true
+	}
+	for id := range m.selected {
+		if !present[id] {
+			delete(m.selected, id)
+		}
+	}
 }
 
 // ImageID returns the selected image ID.
@@ -320,6 +347,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.images = msg.images
 		m.err = ""
+		m.pruneSelection()
 		m.sortImages()
 		if cursorID != "" {
 			for i, im := range m.visibleImages() {
@@ -648,6 +676,11 @@ func (m *Model) sortImages() {
 	asc := m.sortAsc
 	sort.SliceStable(m.images, func(i, j int) bool {
 		a, b := m.images[i], m.images[j]
+		// Descending swaps the operands so equal keys still compare false
+		// and keep their relative order.
+		if !asc {
+			a, b = b, a
+		}
 		var less bool
 		switch colKey {
 		case "name":
@@ -666,9 +699,6 @@ func (m *Model) sortImages() {
 			less = a.CreatedAt.Before(b.CreatedAt)
 		default:
 			less = false
-		}
-		if !asc {
-			return !less
 		}
 		return less
 	})
@@ -1530,8 +1560,8 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) Hints() string {
 	switch m.focus {
 	case FocusSelector:
-		if len(m.selected) > 0 {
-			return fmt.Sprintf("(%d selected) space toggle • ^d delete • esc clear • ? help", len(m.selected))
+		if n := m.SelectionCount(); n > 0 {
+			return fmt.Sprintf("(%d selected) space toggle • ^d delete • esc clear • ? help", n)
 		}
 		return "\u2191\u2193 navigate \u2022 / search \u2022 S sort \u2022 ^n upload \u2022 d deactivate \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 ? help"
 	case FocusInfo:
