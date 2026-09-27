@@ -18,7 +18,9 @@ import (
 	"github.com/larkly/lazystack/internal/volume"
 )
 
-const pollInterval = 3 * time.Second
+// pollInterval is how often volume and server status are polled. It is a
+// variable so tests can shorten it.
+var pollInterval = 3 * time.Second
 
 // VolumeOp tracks the state of a single volume clone+attach operation.
 type VolumeOp struct {
@@ -259,34 +261,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.volumes[msg.idx].CloneVolID = msg.volID
 		m.volumes[msg.idx].Status = "creating"
 		shared.Debugf("[cloneprogress] volume created idx=%d volID=%s", msg.idx, msg.volID)
-		// Only schedule poll if not already polling
-		if !m.polling {
-			m.polling = true
-			return m, m.schedulePoll()
-		}
-		return m, nil
+		return m, m.ensurePolling()
 
 	case pollTickMsg:
-		if m.failed || m.rollingBack {
-			m.polling = false
+		// This tick is consumed; ensurePolling below schedules the next one
+		// only while some step still waits on a status poll.
+		m.polling = false
+		if m.failed || m.rollingBack || !m.running {
 			return m, nil
 		}
-		var cmds []tea.Cmd
-		if cmd := m.pollVolumes(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		cmds := m.pollVolumes()
 		// Also check server readiness if we have pending attaches
 		if !m.serverReady && len(m.pendingAttach) > 0 {
 			cmds = append(cmds, m.checkServerReady())
 		}
-		if len(cmds) == 0 {
-			m.polling = false
-			return m, nil
-		}
+		cmds = append(cmds, m.ensurePolling())
 		return m, tea.Batch(cmds...)
 
 	case volumeStatusMsg:
 		if !m.validIdx(msg.idx) || !m.running || m.failed {
+			return m, nil
+		}
+		// Only volumes still being created are polled; a late duplicate
+		// reply must not attach a volume twice.
+		if m.volumes[msg.idx].Status != "creating" {
 			return m, nil
 		}
 		if msg.err != nil {
@@ -303,20 +301,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.volumes[msg.idx].Err = fmt.Errorf("volume entered error state")
 			return m.startRollback()
 		}
-		// Still creating — schedule next poll cycle
-		if m.hasCreatingVolumes() && !m.polling {
-			m.polling = true
-			return m, m.schedulePoll()
-		}
+		// Still creating — the running poll chain checks it again.
 		return m, nil
 
 	case serverReadyMsg:
-		if !m.running || m.failed {
+		if !m.running || m.failed || m.serverReady {
 			return m, nil
 		}
 		if msg.err != nil {
-			// Non-fatal — retry on next poll
-			return m, m.schedulePoll()
+			// Non-fatal — the running poll chain retries.
+			return m, nil
 		}
 		if msg.ready {
 			m.serverReady = true
@@ -330,14 +324,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				cmds = append(cmds, m.attachVolume(idx))
 			}
 			m.pendingAttach = nil
-			if m.hasCreatingVolumes() && !m.polling {
-				m.polling = true
-				cmds = append(cmds, m.schedulePoll())
-			}
 			return m, tea.Batch(cmds...)
 		}
-		// Not ready yet — poll again
-		return m, m.schedulePoll()
+		// Not ready yet — the running poll chain checks it again. Never
+		// schedule a tick here: that would start a second chain.
+		return m, nil
 
 	case volumeAttachedMsg:
 		if !m.validIdx(msg.idx) || !m.running || m.failed {
@@ -468,8 +459,24 @@ func (m Model) schedulePoll() tea.Cmd {
 	})
 }
 
-func (m Model) pollVolumes() tea.Cmd {
-	// Poll all volumes in "creating" state
+// needsPoll reports whether any step is waiting on a status poll.
+func (m Model) needsPoll() bool {
+	return m.hasCreatingVolumes() || (!m.serverReady && len(m.pendingAttach) > 0)
+}
+
+// ensurePolling schedules the next poll tick unless one is already pending
+// or nothing needs polling. It is the only place poll ticks are scheduled,
+// so each clone has at most one poll chain.
+func (m *Model) ensurePolling() tea.Cmd {
+	if m.polling || m.failed || !m.running || !m.needsPoll() {
+		return nil
+	}
+	m.polling = true
+	return m.schedulePoll()
+}
+
+// pollVolumes returns one status request per volume still being created.
+func (m Model) pollVolumes() []tea.Cmd {
 	var cmds []tea.Cmd
 	for i, op := range m.volumes {
 		if op.Status == "creating" && op.CloneVolID != "" {
@@ -486,19 +493,7 @@ func (m Model) pollVolumes() tea.Cmd {
 			})
 		}
 	}
-	if len(cmds) > 0 {
-		// Also schedule the next poll tick
-		cmds = append(cmds, m.schedulePoll())
-		return tea.Batch(cmds...)
-	}
-	// If no volumes are in "creating" state but some are pending,
-	// keep polling (they may transition soon)
-	for _, op := range m.volumes {
-		if op.Status == "pending" {
-			return m.schedulePoll()
-		}
-	}
-	return nil
+	return cmds
 }
 
 func (m Model) hasCreatingVolumes() bool {
@@ -513,20 +508,16 @@ func (m Model) hasCreatingVolumes() bool {
 func (m Model) tryAttach(idx int) (Model, tea.Cmd) {
 	if m.serverReady {
 		m.volumes[idx].Status = "attaching"
-		cmds := []tea.Cmd{m.attachVolume(idx)}
-		if m.hasCreatingVolumes() && !m.polling {
-			m.polling = true
-			cmds = append(cmds, m.schedulePoll())
-		}
-		return m, tea.Batch(cmds...)
+		return m, m.attachVolume(idx)
 	}
 	// Server not ready yet — queue this volume and check server status
 	m.pendingAttach = append(m.pendingAttach, idx)
+	cmds := []tea.Cmd{m.ensurePolling()}
 	if len(m.pendingAttach) == 1 {
-		// First pending — start checking server
-		return m, m.checkServerReady()
+		// First pending — check the server right away
+		cmds = append(cmds, m.checkServerReady())
 	}
-	return m, nil
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) checkServerReady() tea.Cmd {

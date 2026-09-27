@@ -2,6 +2,7 @@ package cloneprogress
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -176,5 +177,130 @@ func TestRollbackRunsOnceAndOnlyForOwnResources(t *testing.T) {
 	// A late failure after rollback finished must not start another one.
 	if _, cmd := b.Update(volumeStatusMsg{op: b.op, idx: 0, err: errBoom}); cmd != nil {
 		t.Fatal("finished clone reacted to a late message")
+	}
+}
+
+// statusBackend serves fixed server and volume statuses.
+func statusBackend(serverStatus string, volumeStatus map[string]string) *recorder {
+	return &recorder{handle: func(w http.ResponseWriter, r *http.Request) bool {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet {
+			return false
+		}
+		if strings.HasPrefix(r.URL.Path, "/servers/") {
+			fmt.Fprintf(w, `{"server":{"id":"B-server","name":"b","status":%q,"flavor":{"id":"f"}}}`, serverStatus)
+			return true
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/volumes/")
+		if st, ok := volumeStatus[id]; ok {
+			fmt.Fprintf(w, `{"volume":{"id":%q,"status":%q}}`, id, st)
+			return true
+		}
+		return false
+	}}
+}
+
+func withFastPoll(t *testing.T) {
+	t.Helper()
+	old := pollInterval
+	pollInterval = time.Millisecond
+	t.Cleanup(func() { pollInterval = old })
+}
+
+// pollRounds delivers poll ticks round by round and returns how many ticks
+// each round scheduled for the next one.
+func pollRounds(t *testing.T, m Model, rounds int) (Model, []int) {
+	t.Helper()
+	pending := []tea.Msg{pollTickMsg{op: m.op}}
+	var counts []int
+	for r := 0; r < rounds && len(pending) > 0; r++ {
+		queue := pending
+		pending = nil
+		for len(queue) > 0 {
+			msg := queue[0]
+			queue = queue[1:]
+			var cmd tea.Cmd
+			m, cmd = m.Update(msg)
+			for _, out := range run(cmd) {
+				if _, ok := out.(pollTickMsg); ok {
+					pending = append(pending, out)
+				} else {
+					queue = append(queue, out)
+				}
+			}
+		}
+		counts = append(counts, len(pending))
+	}
+	return m, counts
+}
+
+func TestPollKeepsASingleChainWhileServerBoots(t *testing.T) {
+	withFastPoll(t)
+	rec := statusBackend("BUILD", map[string]string{"v0": "available", "v1": "creating"})
+	client, cleanup := testutil.FakeServiceClient(rec)
+	t.Cleanup(cleanup)
+	m := New(client, client, "B-server", "b", []VolumeOp{
+		{CloneName: "b-0", CloneVolID: "v0", Status: "available"},
+		{CloneName: "b-1", CloneVolID: "v1", Status: "creating"},
+	})
+	m.pendingAttach = []int{0}
+	m.polling = true
+	m, counts := pollRounds(t, m, 5)
+	for i, c := range counts {
+		if c != 1 {
+			t.Fatalf("round %d scheduled %d poll ticks, want exactly 1 (all rounds: %v)", i, c, counts)
+		}
+	}
+	if !m.Running() || m.failed {
+		t.Fatal("clone should still be waiting for the server")
+	}
+}
+
+func TestPollChainStopsOnceClonesAreAttached(t *testing.T) {
+	withFastPoll(t)
+	rec := statusBackend("ACTIVE", map[string]string{"v0": "available"})
+	inner := rec.handle
+	rec.handle = func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/os-volume_attachments") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"volumeAttachment":{"id":"att","volumeId":"v0","serverId":"B-server"}}`)
+			return true
+		}
+		return inner(w, r)
+	}
+	client, cleanup := testutil.FakeServiceClient(rec)
+	t.Cleanup(cleanup)
+	m := New(client, client, "B-server", "b", []VolumeOp{{CloneName: "b-0", Status: "pending"}})
+	m, cmd := m.Update(volumeCreatedMsg{op: m.op, idx: 0, volID: "v0"})
+	if cmd == nil || !m.polling {
+		t.Fatal("created volume should start polling")
+	}
+	var completed bool
+	queue := []tea.Msg{pollTickMsg{op: m.op}}
+	for len(queue) > 0 {
+		inFlight := 0
+		for _, q := range queue {
+			if _, ok := q.(pollTickMsg); ok {
+				inFlight++
+			}
+		}
+		if inFlight > 1 {
+			t.Fatalf("%d poll ticks in flight at once", inFlight)
+		}
+		msg := queue[0]
+		queue = queue[1:]
+		if _, ok := msg.(AllCompleteMsg); ok {
+			completed = true
+			continue
+		}
+		var out tea.Cmd
+		m, out = m.Update(msg)
+		queue = append(queue, run(out)...)
+	}
+	if !completed || m.Running() {
+		t.Fatal("clone did not complete")
+	}
+	if m.polling {
+		t.Fatal("poll chain kept running after completion")
 	}
 }
