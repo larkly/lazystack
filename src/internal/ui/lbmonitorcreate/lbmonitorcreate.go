@@ -3,7 +3,6 @@ package lbmonitorcreate
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -337,41 +336,20 @@ func (m *Model) updateFocusInputs() {
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
-	delayStr := strings.TrimSpace(m.delayInput.Value())
-	if delayStr == "" {
-		delayStr = "5"
-	}
-	delay, err := strconv.Atoi(delayStr)
-	if err != nil || delay < 1 {
-		m.err = "Delay must be a positive number (seconds)"
+	timing, err := loadbalancer.ParseMonitorTiming(m.delayInput.Value(), m.timeoutInput.Value(), m.retriesInput.Value())
+	if err != nil {
+		m.err = err.Error()
 		return m, nil
 	}
-	timeoutStr := strings.TrimSpace(m.timeoutInput.Value())
-	if timeoutStr == "" {
-		timeoutStr = "3"
-	}
-	timeout, err := strconv.Atoi(timeoutStr)
-	if err != nil || timeout < 1 {
-		m.err = "Timeout must be a positive number (seconds)"
-		return m, nil
-	}
-	retriesStr := strings.TrimSpace(m.retriesInput.Value())
-	if retriesStr == "" {
-		retriesStr = "3"
-	}
-	retries, err := strconv.Atoi(retriesStr)
-	if err != nil || retries < 1 || retries > 10 {
-		m.err = "Max retries must be a number between 1 and 10"
-		return m, nil
-	}
+	delay, timeout, retries := timing.Delay, timing.Timeout, timing.MaxRetries
 
 	urlPath := strings.TrimSpace(m.urlPathInput.Value())
 	codes := strings.TrimSpace(m.codesInput.Value())
 	httpMethod := httpMethodOpts[m.selectedHTTPMethod]
 
-	if m.isHTTPType() && codes != "" {
-		if !validExpectedCodes(codes) {
-			m.err = "Expected codes: single (200), list (200,201), or range (200-299)"
+	if m.isHTTPType() {
+		if codes, err = loadbalancer.NormalizeExpectedCodes(codes); err != nil {
+			m.err = err.Error()
 			return m, nil
 		}
 	}
@@ -404,9 +382,6 @@ func (m Model) submit() (Model, tea.Cmd) {
 	if m.isHTTPType() {
 		if urlPath == "" {
 			urlPath = "/"
-		}
-		if codes == "" {
-			codes = "200"
 		}
 	} else {
 		urlPath = ""
@@ -510,10 +485,4 @@ func (m Model) View() string {
 	content := title + "\n\n" + strings.Join(rows, "\n")
 	box := shared.StyleModal.Width(55).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
-}
-
-var expectedCodesRe = regexp.MustCompile(`^[1-5][0-9]{2}([,-][1-5][0-9]{2})*$`)
-
-func validExpectedCodes(s string) bool {
-	return expectedCodesRe.MatchString(s)
 }

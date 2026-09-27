@@ -3,7 +3,6 @@ package lbpoolcreate
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -397,52 +396,33 @@ func (m Model) submit() (Model, tea.Cmd) {
 	if m.hasMonitor() {
 		monType := monTypeOpts[m.selectedMonType]
 
-		delayStr := strings.TrimSpace(m.monDelayInput.Value())
-		if delayStr == "" {
-			delayStr = "5"
-		}
-		delay, err := strconv.Atoi(delayStr)
-		if err != nil || delay < 1 {
-			m.err = "Delay must be a positive number (seconds)"
-			return m, nil
-		}
-		timeoutStr := strings.TrimSpace(m.monTimeoutInput.Value())
-		if timeoutStr == "" {
-			timeoutStr = "3"
-		}
-		timeout, err := strconv.Atoi(timeoutStr)
-		if err != nil || timeout < 1 {
-			m.err = "Timeout must be a positive number (seconds)"
-			return m, nil
-		}
-		retriesStr := strings.TrimSpace(m.monRetriesInput.Value())
-		if retriesStr == "" {
-			retriesStr = "3"
-		}
-		retries, err := strconv.Atoi(retriesStr)
-		if err != nil || retries < 1 || retries > 10 {
-			m.err = "Max retries must be a number between 1 and 10"
+		// Validate everything before the pool POST so a bad monitor
+		// setting cannot leave a pool behind without its monitor.
+		timing, err := loadbalancer.ParseMonitorTiming(m.monDelayInput.Value(), m.monTimeoutInput.Value(), m.monRetriesInput.Value())
+		if err != nil {
+			m.err = err.Error()
 			return m, nil
 		}
 
 		monOpts = &monitors.CreateOpts{
 			Type:       monType,
-			Delay:      delay,
-			Timeout:    timeout,
-			MaxRetries: retries,
+			Delay:      timing.Delay,
+			Timeout:    timing.Timeout,
+			MaxRetries: timing.MaxRetries,
 		}
 
 		if m.hasHTTPMonitor() {
+			codes, err := loadbalancer.NormalizeExpectedCodes(m.monCodesInput.Value())
+			if err != nil {
+				m.err = err.Error()
+				return m, nil
+			}
 			urlPath := strings.TrimSpace(m.monURLInput.Value())
 			if urlPath == "" {
 				urlPath = "/"
 			}
 			monOpts.URLPath = urlPath
 			monOpts.HTTPMethod = "GET"
-			codes := strings.TrimSpace(m.monCodesInput.Value())
-			if codes == "" {
-				codes = "200"
-			}
 			monOpts.ExpectedCodes = codes
 		}
 	}
