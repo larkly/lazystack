@@ -91,3 +91,38 @@ func TestFetchErrorEmptyAndCancel(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterAcceptsJK(t *testing.T) {
+	m := New(nil, nil, "server-id", "web")
+	m.SetSize(80, 20)
+	items := []volume.Volume{{ID: "1", Name: "alpha"}, {ID: "2", Name: "jack"}, {ID: "3", Name: "kube-a"}, {ID: "4", Name: "kube-b"}}
+	m, _ = m.Update(volumesLoadedMsg{volumes: items})
+	for _, r := range "jack" {
+		m, _ = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if m.filter != "jack" || len(m.filtered) != 1 || m.filtered[0].Name != "jack" {
+		t.Fatalf("filter=%q filtered=%+v", m.filter, m.filtered)
+	}
+	for range "jack" {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	for _, r := range "kube" {
+		m, _ = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if m.filter != "kube" || len(m.filtered) != 2 {
+		t.Fatalf("filter=%q filtered=%+v", m.filter, m.filtered)
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.cursor != 1 {
+		t.Fatalf("down arrow cursor=%d", m.cursor)
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil || !m.submitting {
+		t.Fatal("enter did not submit the visible filtered row")
+	}
+	if m.filtered[m.cursor].Name != "kube-b" {
+		t.Fatalf("selected %q", m.filtered[m.cursor].Name)
+	}
+}
