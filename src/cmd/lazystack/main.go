@@ -57,9 +57,13 @@ func main() {
 			return
 		}
 		fmt.Printf("Updating lazystack %s → %s...\n", version, latest)
-		if err := selfupdate.Apply(ctx, downloadURL, checksumsURL); err != nil {
+		signed, err := selfupdate.Apply(ctx, version, latest, downloadURL, checksumsURL)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
 			os.Exit(1)
+		}
+		if !signed {
+			fmt.Fprintf(os.Stderr, "Warning: %s was verified against its SHA256SUMS only, without a release signature. Signatures are required from %s.\n", latest, selfupdate.SignatureRequiredFrom)
 		}
 		fmt.Printf("Successfully updated to %s.\n", latest)
 		return

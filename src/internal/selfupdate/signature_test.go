@@ -133,7 +133,7 @@ func TestVerifyChecksum_RequiresValidSignature(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			url := releaseServer(t, tc.sums, tc.sig)
-			err := verifyChecksum(context.Background(), url, tc.hash)
+			_, err := verifyChecksum(context.Background(), url, tc.hash, true)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
