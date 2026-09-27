@@ -645,61 +645,7 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 
 	switch action.Action {
 	case "delete":
-		bsClient := m.client.BlockStorage
-		computeC := m.client.Compute
-		deleteVols := action.DeleteVolumes
-		volIDs := action.VolumeIDs
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtxLong()
-			defer cancel()
-			shared.Debugf("[action] deleting server %s", action.Name)
-			// Detach volumes before deleting the server
-			var volErrs []string
-			if deleteVols && bsClient != nil {
-				for _, vid := range volIDs {
-					if err := volume.DetachVolume(ctx, computeC, action.ServerID, vid); err != nil {
-						volErrs = append(volErrs, fmt.Sprintf("detach %s: %v", vid, err))
-					}
-				}
-				// Wait for volumes to detach (up to 30s)
-				for range 10 {
-					allDetached := true
-					for _, vid := range volIDs {
-						v, err := volume.GetVolume(ctx, bsClient, vid)
-						if err == nil && v.Status != "available" {
-							allDetached = false
-							break
-						}
-					}
-					if allDetached {
-						break
-					}
-					time.Sleep(3 * time.Second)
-				}
-			}
-
-			err := compute.DeleteServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] delete server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionDelete, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Delete", Name: action.Name, Err: err}
-			}
-
-			if deleteVols && bsClient != nil {
-				for _, vid := range volIDs {
-					if err := volume.DeleteVolume(ctx, bsClient, vid); err != nil {
-						volErrs = append(volErrs, fmt.Sprintf("delete %s: %v", vid, err))
-					}
-				}
-			}
-			shared.Debugf("[action] deleted server %s", action.Name)
-			m.logAudit(audit.ActionDelete, "server", action.ServerID, action.Name, "success", "")
-			msg := shared.ServerActionMsg{Action: "Delete", Name: action.Name}
-			if len(volErrs) > 0 {
-				msg.Action = fmt.Sprintf("Delete (warning: %d volume error(s))", len(volErrs))
-			}
-			return msg
-		}
+		return m, m.deleteServerCmd(action)
 	case "soft reboot":
 		return m, func() tea.Msg {
 			ctx, cancel := actionCtx()

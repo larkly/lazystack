@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"time"
 
 	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/shared"
@@ -17,6 +18,44 @@ func (m *Model) popNavIfTop(dest activeView) {
 	if top, ok := m.nav.Peek(); ok && top.View == dest {
 		m.popNav()
 	}
+}
+
+// handleServerActionMsg reports a successful server action and refreshes
+// the server data. Deletions arrive as serverDeletedMsg instead, so no
+// decision here depends on the (decorated) action label.
+func (m Model) handleServerActionMsg(msg shared.ServerActionMsg) (Model, tea.Cmd) {
+	m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
+	m.statusBar.Error = ""
+	// Ensure resize modal is dismissed
+	m.serverResize.Active = false
+	refreshServers := func() tea.Msg { return shared.RefreshServersMsg{} }
+	// Navigate back to the server list from the console log sub-view.
+	if m.view == viewConsoleLog {
+		m.popNav()
+		m.returnToView = 0
+		m.view = viewServerList
+		m.statusBar.CurrentView = "serverlist"
+		return m, refreshServers
+	}
+	// If on detail view, refresh — but skip rapid polling for
+	// confirm/revert resize since those use optimistic updates
+	if m.view == viewServerDetail {
+		if msg.Action == "Confirm resize" || msg.Action == "Revert resize" {
+			// Just refresh the server list, let the normal tick update detail
+			return m, refreshServers
+		}
+		id := m.serverDetail.ServerID()
+		return m, tea.Batch(
+			refreshServers,
+			tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+				return delayedDetailRefreshMsg{id: id}
+			}),
+			tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+				return delayedDetailRefreshMsg{id: id}
+			}),
+		)
+	}
+	return m, refreshServers
 }
 
 // handleResourceActionMsg reports a successful non-server mutation, leaves

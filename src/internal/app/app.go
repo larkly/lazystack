@@ -1172,36 +1172,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case shared.ServerActionMsg:
-		m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
-		m.statusBar.Error = ""
-		// Ensure resize modal is dismissed
-		m.serverResize.Active = false
-		// Navigate back to server list if on a sub-view, or after delete
-		if m.view == viewConsoleLog || (m.view == viewServerDetail && msg.Action == "Delete") {
-			m.returnToView = 0
-			m.view = viewServerList
-			m.statusBar.CurrentView = "serverlist"
-			return m, func() tea.Msg { return shared.RefreshServersMsg{} }
-		}
-		// If on detail view, refresh — but skip rapid polling for
-		// confirm/revert resize since those use optimistic updates
-		if m.view == viewServerDetail {
-			if msg.Action == "Confirm resize" || msg.Action == "Revert resize" {
-				// Just refresh the server list, let the normal tick update detail
-				return m, func() tea.Msg { return shared.RefreshServersMsg{} }
-			}
-			id := m.serverDetail.ServerID()
-			return m, tea.Batch(
-				func() tea.Msg { return shared.RefreshServersMsg{} },
-				tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
-					return delayedDetailRefreshMsg{id: id}
-				}),
-				tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-					return delayedDetailRefreshMsg{id: id}
-				}),
-			)
-		}
-		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
+		return m.handleServerActionMsg(msg)
+
+	case serverDeletedMsg:
+		return m.handleServerDeleted(msg)
 
 	case shared.ResourceActionMsg:
 		return m.handleResourceActionMsg(msg)
