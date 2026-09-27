@@ -10,8 +10,10 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 )
 
-func fakeNovaClient(handler http.Handler) *gophercloud.ServiceClient {
+func fakeNovaClient(t testing.TB, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -20,8 +22,10 @@ func fakeNovaClient(handler http.Handler) *gophercloud.ServiceClient {
 	}
 }
 
-func fakeNeutronClient(handler http.Handler) *gophercloud.ServiceClient {
+func fakeNeutronClient(t testing.TB, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -30,8 +34,10 @@ func fakeNeutronClient(handler http.Handler) *gophercloud.ServiceClient {
 	}
 }
 
-func fakeCinderClient(handler http.Handler) *gophercloud.ServiceClient {
+func fakeCinderClient(t testing.TB, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -186,7 +192,7 @@ func TestGetComputeQuotas(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeNovaClient(handler)
+	client := fakeNovaClient(t, handler)
 	ctx := context.Background()
 
 	quotas, err := GetComputeQuotas(ctx, client, "project-uuid")
@@ -264,7 +270,7 @@ func TestGetNetworkQuotas(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeNeutronClient(handler)
+	client := fakeNeutronClient(t, handler)
 	ctx := context.Background()
 
 	quotas, err := GetNetworkQuotas(ctx, client, "project-uuid")
@@ -353,7 +359,7 @@ func TestGetVolumeQuotas(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeCinderClient(handler)
+	client := fakeCinderClient(t, handler)
 	ctx := context.Background()
 
 	quotas, err := GetVolumeQuotas(ctx, client, "project-uuid")
@@ -414,7 +420,7 @@ func TestGetComputeQuotas_InvalidProjectID(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeNovaClient(handler)
+	client := fakeNovaClient(t, handler)
 	ctx := context.Background()
 
 	_, err := GetComputeQuotas(ctx, client, "")
@@ -431,7 +437,7 @@ func TestGetNetworkQuotas_InvalidProjectID(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeNeutronClient(handler)
+	client := fakeNeutronClient(t, handler)
 	ctx := context.Background()
 
 	_, err := GetNetworkQuotas(ctx, client, "")
@@ -448,7 +454,7 @@ func TestGetVolumeQuotas_InvalidProjectID(t *testing.T) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
-	client := fakeCinderClient(handler)
+	client := fakeCinderClient(t, handler)
 	ctx := context.Background()
 
 	_, err := GetVolumeQuotas(ctx, client, "")
@@ -489,5 +495,22 @@ func TestNilClientGuards(t *testing.T) {
 				t.Errorf("error = %q, want %q", err.Error(), tt.wantMsg)
 			}
 		})
+	}
+}
+
+// Fake clients must shut their test server down when the test that created
+// them finishes, so repeated tests do not accumulate listeners.
+func TestFakeClientsCloseWithTest(t *testing.T) {
+	var endpoints []string
+	t.Run("use", func(t *testing.T) {
+		endpoints = append(endpoints, fakeNovaClient(t, http.NotFoundHandler()).Endpoint)
+		endpoints = append(endpoints, fakeNeutronClient(t, http.NotFoundHandler()).Endpoint)
+		endpoints = append(endpoints, fakeCinderClient(t, http.NotFoundHandler()).Endpoint)
+	})
+	for _, ep := range endpoints {
+		if resp, err := http.Get(ep); err == nil {
+			resp.Body.Close()
+			t.Errorf("test server %s still running after its test finished", ep)
+		}
 	}
 }

@@ -79,7 +79,7 @@ func TestUserOperationsHTTP(t *testing.T) {
 					methods = append(methods, r.Method)
 					w.Header().Set("Content-Type", "application/json")
 					if fail {
-						http.Error(w, "denied", 403)
+						http.Error(w, "denied", http.StatusForbidden)
 						return
 					}
 					switch r.Method {

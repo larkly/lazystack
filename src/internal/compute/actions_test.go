@@ -45,7 +45,7 @@ func TestListActions(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNovaClient(handler)
+	client := fakeNovaClient(t, handler)
 	ctx := context.Background()
 
 	actions, err := ListActions(ctx, client, "server-001")
@@ -94,7 +94,7 @@ func TestListActions_EmptyServer(t *testing.T) {
 		w.Write([]byte(`{"instanceActions": []}`))
 	})
 
-	client := fakeNovaClient(handler)
+	client := fakeNovaClient(t, handler)
 	ctx := context.Background()
 
 	actions, err := ListActions(ctx, client, "server-empty")

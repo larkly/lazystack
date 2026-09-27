@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/testutil"
 	"net/http"
@@ -139,10 +140,19 @@ func TestNetworkMutationsHTTP(t *testing.T) {
 }
 
 func TestCloneSecurityGroupPartialFailureHTTP(t *testing.T) {
-	for _, stage := range []string{"source", "create", "second rule", "success"} {
+	// Rules as they must be sent for the clone "dst": the default egress rule
+	// is skipped, CIDR/protocol/port/ethertype are kept, a foreign remote group
+	// stays as is and a self-reference to "src" is remapped to "dst".
+	wantRules := []map[string]any{
+		{"security_group_id": "dst", "direction": "ingress", "ethertype": "IPv4", "protocol": "tcp", "port_range_min": float64(22), "port_range_max": float64(22), "remote_ip_prefix": "10.0.0.0/24"},
+		{"security_group_id": "dst", "direction": "ingress", "ethertype": "IPv6", "protocol": "udp", "port_range_min": float64(53), "port_range_max": float64(53), "remote_group_id": "remote"},
+		{"security_group_id": "dst", "direction": "ingress", "ethertype": "IPv6", "protocol": "tcp", "port_range_min": float64(443), "port_range_max": float64(443), "remote_group_id": "dst"},
+	}
+	for _, stage := range []string{"source", "create", "second rule", "second rule, rollback fails", "success"} {
 		t.Run(stage, func(t *testing.T) {
 			var calls []string
 			ruleCalls := 0
+			ruleFails := strings.HasPrefix(stage, "second rule")
 			client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls = append(calls, r.Method+" "+r.URL.Path)
 				w.Header().Set("Content-Type", "application/json")
@@ -152,7 +162,7 @@ func TestCloneSecurityGroupPartialFailureHTTP(t *testing.T) {
 						w.WriteHeader(404)
 						return
 					}
-					w.Write([]byte(`{"security_group":{"id":"src","security_group_rules":[{"direction":"egress","ethertype":"IPv4"},{"direction":"ingress","ethertype":"IPv4","protocol":"tcp","port_range_min":22,"port_range_max":22,"remote_ip_prefix":"10.0.0.0/24"},{"direction":"ingress","ethertype":"IPv6","protocol":"udp","port_range_min":53,"port_range_max":53,"remote_group_id":"remote"}]}}`))
+					w.Write([]byte(`{"security_group":{"id":"src","security_group_rules":[{"direction":"egress","ethertype":"IPv4"},{"direction":"ingress","ethertype":"IPv4","protocol":"tcp","port_range_min":22,"port_range_max":22,"remote_ip_prefix":"10.0.0.0/24"},{"direction":"ingress","ethertype":"IPv6","protocol":"udp","port_range_min":53,"port_range_max":53,"remote_group_id":"remote"},{"direction":"ingress","ethertype":"IPv6","protocol":"tcp","port_range_min":443,"port_range_max":443,"remote_group_id":"src"}]}}`))
 				case "POST /security-groups":
 					var body map[string]map[string]any
 					json.NewDecoder(r.Body).Decode(&body)
@@ -171,23 +181,27 @@ func TestCloneSecurityGroupPartialFailureHTTP(t *testing.T) {
 					if e := json.NewDecoder(r.Body).Decode(&body); e != nil {
 						t.Error(e)
 					}
-					rule := body["security_group_rule"]
-					want := map[string]any{"security_group_id": "dst", "direction": "ingress", "ethertype": "IPv4", "protocol": "tcp", "port_range_min": float64(22), "port_range_max": float64(22), "remote_ip_prefix": "10.0.0.0/24"}
-					if ruleCalls == 2 {
-						want = map[string]any{"security_group_id": "dst", "direction": "ingress", "ethertype": "IPv6", "protocol": "udp", "port_range_min": float64(53), "port_range_max": float64(53), "remote_group_id": "remote"}
+					if ruleCalls > len(wantRules) {
+						t.Errorf("unexpected rule %v", body)
+					} else if rule := body["security_group_rule"]; !reflect.DeepEqual(rule, wantRules[ruleCalls-1]) {
+						t.Errorf("rule=%v want=%v", rule, wantRules[ruleCalls-1])
 					}
-					if !reflect.DeepEqual(rule, want) {
-						t.Errorf("rule=%v want=%v", rule, want)
-					}
-					if stage == "second rule" && ruleCalls == 2 {
+					if ruleFails && ruleCalls == 2 {
 						w.WriteHeader(409)
 						return
 					}
 					w.WriteHeader(201)
 					w.Write([]byte(`{"security_group_rule":{"id":"created"}}`))
+				case "DELETE /security-groups/dst":
+					if stage == "second rule, rollback fails" {
+						w.WriteHeader(500)
+						return
+					}
+					w.WriteHeader(204)
 				case "GET /security-groups/dst":
 					w.Write([]byte(`{"security_group":{"id":"dst","name":"copy","description":"new desc","security_group_rules":[{"id":"created","direction":"ingress","ethertype":"IPv4","protocol":"tcp","port_range_min":22,"port_range_max":22}]}}`))
 				default:
+					// Includes DELETE /security-groups/src: the source must never be touched.
 					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 					w.WriteHeader(500)
 				}
@@ -198,11 +212,11 @@ func TestCloneSecurityGroupPartialFailureHTTP(t *testing.T) {
 			if stage != "source" {
 				want = append(want, "POST /security-groups")
 			}
-			if stage == "second rule" || stage == "success" {
-				want = append(want, "POST /security-group-rules", "POST /security-group-rules")
+			if ruleFails {
+				want = append(want, "POST /security-group-rules", "POST /security-group-rules", "DELETE /security-groups/dst")
 			}
 			if stage == "success" {
-				want = append(want, "GET /security-groups/dst")
+				want = append(want, "POST /security-group-rules", "POST /security-group-rules", "POST /security-group-rules", "GET /security-groups/dst")
 			}
 			if !reflect.DeepEqual(calls, want) {
 				t.Errorf("calls=%v want=%v", calls, want)
@@ -211,15 +225,31 @@ func TestCloneSecurityGroupPartialFailureHTTP(t *testing.T) {
 				if err != nil || got == nil || got.ID != "dst" || len(got.Rules) != 1 || got.Rules[0].PortRangeMin != 22 {
 					t.Fatalf("got=%+v err=%v", got, err)
 				}
-			} else {
-				if err == nil || got != nil {
-					t.Fatalf("got=%v err=%v", got, err)
-				}
-				if stage == "second rule" && !strings.Contains(err.Error(), "cloning rule") {
-					t.Fatal(err)
-				}
+				return
 			}
-			// Current contract stops on a failed rule without deleting the partially created group.
+			if err == nil || got != nil {
+				t.Fatalf("got=%v err=%v", got, err)
+			}
+			if !ruleFails {
+				return
+			}
+			// The original rule failure is always retained.
+			if !strings.Contains(err.Error(), "cloning rule") || !gophercloud.ResponseCodeIs(err, 409) {
+				t.Fatalf("original error lost: %v", err)
+			}
+			var ce *SecurityGroupCloneError
+			if stage == "second rule" {
+				if errors.As(err, &ce) || strings.Contains(err.Error(), "remains") {
+					t.Fatalf("rolled back clone reported as leftover: %v", err)
+				}
+				return
+			}
+			if !errors.As(err, &ce) || ce.NewGroupID != "dst" || ce.RulesCopied != 1 || !gophercloud.ResponseCodeIs(ce.CleanupErr, 500) {
+				t.Fatalf("leftover not described: %#v", ce)
+			}
+			if msg := err.Error(); !strings.Contains(msg, "dst") || !strings.Contains(msg, "1 copied rule") {
+				t.Fatalf("leftover not named in message: %v", err)
+			}
 		})
 	}
 }

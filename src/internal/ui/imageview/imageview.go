@@ -248,6 +248,17 @@ func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
 }
 
+// SelectIDs adds the given IDs to the bulk selection (e.g. to keep failed
+// targets of a bulk action selected for a retry).
+func (m *Model) SelectIDs(ids []string) {
+	if m.selected == nil {
+		m.selected = make(map[string]bool)
+	}
+	for _, id := range ids {
+		m.selected[id] = true
+	}
+}
+
 // ImageID returns the selected image ID.
 func (m Model) ImageID() string {
 	if i := m.SelectedImage(); i != nil {
@@ -993,8 +1004,8 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		isBulkSelected := m.selected[im.ID]
 
 		name := im.Name
-		if name == "" && len(im.ID) > 8 {
-			name = im.ID[:8] + "..."
+		if name == "" {
+			name = shared.AbbrevID(im.ID)
 		}
 
 		values := map[string]string{
@@ -1024,9 +1035,7 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 			}
 			val := values[col.Key]
 			w := col.width
-			if len(val) > w && w > 1 {
-				val = val[:w-1] + "\u2026"
-			}
+			val = shared.TruncateCells(val, w)
 
 			style := lipgloss.NewStyle().Width(w)
 			if col.Key == "status" {
@@ -1113,9 +1122,7 @@ func (m Model) renderInfoContent(maxWidth int) string {
 		}
 		label := labelStyle.Render(p.label)
 		val := p.value
-		if lipgloss.Width(val) > valW {
-			val = val[:valW-1] + "\u2026"
-		}
+		val = shared.TruncateCells(val, valW)
 		var value string
 		if p.style != nil {
 			value = p.style(p.value).Render(shared.StatusIcon(p.value) + val)
@@ -1184,9 +1191,7 @@ func (m Model) renderPropertiesContent(maxWidth int) string {
 		}
 		label := labelStyle.Render(p.label)
 		val := p.value
-		if lipgloss.Width(val) > valW {
-			val = val[:valW-1] + "\u2026"
-		}
+		val = shared.TruncateCells(val, valW)
 		rows = append(rows, label+valueStyle.Render(val))
 	}
 
@@ -1255,9 +1260,7 @@ func (m Model) renderServersContent(maxWidth, maxHeight int) string {
 		}
 
 		name := s.Name
-		if len(name) > nameW {
-			name = name[:nameW-1] + "\u2026"
-		}
+		name = shared.TruncateCells(name, nameW)
 
 		// Prefer IPv6 address
 		addr := ""
@@ -1325,9 +1328,7 @@ func (m Model) renderServersCompact(srvs []compute.Server, maxWidth, visibleLine
 			}
 
 			name := s.Name
-			if len(name) > nameW {
-				name = name[:nameW-1] + "\u2026"
-			}
+			name = shared.TruncateCells(name, nameW)
 
 			statusIcon := shared.StatusIcon(s.Status)
 			statusStyle := lipgloss.NewStyle().Foreground(shared.ColorFg)

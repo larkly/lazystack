@@ -2,9 +2,9 @@ package app
 
 import (
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
@@ -33,6 +33,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/servicecatalog"
 	"github.com/larkly/lazystack/internal/ui/sshprompt"
 	"github.com/larkly/lazystack/internal/ui/usermanagement"
+	"github.com/larkly/lazystack/internal/ui/vmpassword"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
@@ -477,120 +478,6 @@ func (m Model) openResize() (Model, tea.Cmd) {
 	return m, m.serverResize.Init()
 }
 
-func (m Model) doConfirmResize() (Model, tea.Cmd) {
-	// Bulk confirm
-	if m.view == viewServerList && m.serverList.SelectionCount() > 0 {
-		srvs := m.serverList.SelectedServers()
-		ids := make([]string, 0, len(srvs))
-		for _, s := range srvs {
-			if s.Status == "VERIFY_RESIZE" {
-				ids = append(ids, s.ID)
-			}
-		}
-		if len(ids) == 0 {
-			return m, nil
-		}
-		m.serverList.ClearSelection()
-		m.statusBar.Hint = fmt.Sprintf("✓ Confirm resize %d servers", len(ids))
-		client := m.client.Compute
-		return m, func() tea.Msg {
-			var errs []string
-			for _, id := range ids {
-				ctx, cancel := actionCtx()
-				err := compute.ConfirmResize(ctx, client, id)
-				cancel()
-				if err != nil {
-					errs = append(errs, err.Error())
-				}
-			}
-			if len(errs) > 0 {
-				return shared.ServerActionErrMsg{
-					Action: "Confirm resize",
-					Name:   fmt.Sprintf("%d servers", len(ids)),
-					Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-				}
-			}
-			return shared.ServerActionMsg{Action: "Confirm resize", Name: fmt.Sprintf("%d servers", len(ids))}
-		}
-	}
-
-	id, name := m.getSelectedServerInfo()
-	if id == "" {
-		return m, nil
-	}
-	if m.view == viewServerDetail {
-		m.serverDetail.SetPendingAction("Resize confirmed")
-	}
-	m.statusBar.Hint = fmt.Sprintf("✓ Confirm resize %s", name)
-	client := m.client.Compute
-	return m, func() tea.Msg {
-		ctx, cancel := actionCtx()
-		defer cancel()
-		err := compute.ConfirmResize(ctx, client, id)
-		if err != nil {
-			return shared.ServerActionErrMsg{Action: "Confirm resize", Name: name, Err: err}
-		}
-		return shared.ServerActionMsg{Action: "Confirm resize", Name: name}
-	}
-}
-
-func (m Model) doRevertResize() (Model, tea.Cmd) {
-	// Bulk revert
-	if m.view == viewServerList && m.serverList.SelectionCount() > 0 {
-		srvs := m.serverList.SelectedServers()
-		ids := make([]string, 0, len(srvs))
-		for _, s := range srvs {
-			if s.Status == "VERIFY_RESIZE" {
-				ids = append(ids, s.ID)
-			}
-		}
-		if len(ids) == 0 {
-			return m, nil
-		}
-		m.serverList.ClearSelection()
-		m.statusBar.Hint = fmt.Sprintf("✓ Revert resize %d servers", len(ids))
-		client := m.client.Compute
-		return m, func() tea.Msg {
-			var errs []string
-			for _, id := range ids {
-				ctx, cancel := actionCtx()
-				err := compute.RevertResize(ctx, client, id)
-				cancel()
-				if err != nil {
-					errs = append(errs, err.Error())
-				}
-			}
-			if len(errs) > 0 {
-				return shared.ServerActionErrMsg{
-					Action: "Revert resize",
-					Name:   fmt.Sprintf("%d servers", len(ids)),
-					Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-				}
-			}
-			return shared.ServerActionMsg{Action: "Revert resize", Name: fmt.Sprintf("%d servers", len(ids))}
-		}
-	}
-
-	id, name := m.getSelectedServerInfo()
-	if id == "" {
-		return m, nil
-	}
-	if m.view == viewServerDetail {
-		m.serverDetail.SetPendingAction("Resize reverted")
-	}
-	m.statusBar.Hint = fmt.Sprintf("✓ Revert resize %s", name)
-	client := m.client.Compute
-	return m, func() tea.Msg {
-		ctx, cancel := actionCtx()
-		defer cancel()
-		err := compute.RevertResize(ctx, client, id)
-		if err != nil {
-			return shared.ServerActionErrMsg{Action: "Revert resize", Name: name, Err: err}
-		}
-		return shared.ServerActionMsg{Action: "Revert resize", Name: name}
-	}
-}
-
 func (m Model) doAllocateAndAssociateFIP() (Model, tea.Cmd) {
 	var serverID, serverName string
 	switch m.view {
@@ -610,19 +497,6 @@ func (m Model) doAllocateAndAssociateFIP() (Model, tea.Cmd) {
 	return m, m.fipPicker.Init()
 }
 
-func (m Model) getSelectedServerInfo() (id, name string) {
-	switch m.view {
-	case viewServerList:
-		if s := m.serverList.SelectedServer(); s != nil {
-			id, name = s.ID, s.Name
-		}
-	case viewServerDetail:
-		id = m.serverDetail.ServerID()
-		name = m.serverDetail.ServerName()
-	}
-	return
-}
-
 func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 	client := m.client.Compute
 
@@ -634,6 +508,9 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		return m, m.executeDetachVolumesBulk(action.Servers)
 	case "delete_images_bulk":
 		return m, m.executeDeleteImagesBulk(action.Servers)
+	case "delete_lb_members_bulk":
+		m.lbView.ClearMemberSelection()
+		return m, m.executeDeleteLBMembersBulk(action)
 	}
 
 	// Bulk actions (server-only)
@@ -644,61 +521,7 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 
 	switch action.Action {
 	case "delete":
-		bsClient := m.client.BlockStorage
-		computeC := m.client.Compute
-		deleteVols := action.DeleteVolumes
-		volIDs := action.VolumeIDs
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtxLong()
-			defer cancel()
-			shared.Debugf("[action] deleting server %s", action.Name)
-			// Detach volumes before deleting the server
-			var volErrs []string
-			if deleteVols && bsClient != nil {
-				for _, vid := range volIDs {
-					if err := volume.DetachVolume(ctx, computeC, action.ServerID, vid); err != nil {
-						volErrs = append(volErrs, fmt.Sprintf("detach %s: %v", vid, err))
-					}
-				}
-				// Wait for volumes to detach (up to 30s)
-				for range 10 {
-					allDetached := true
-					for _, vid := range volIDs {
-						v, err := volume.GetVolume(ctx, bsClient, vid)
-						if err == nil && v.Status != "available" {
-							allDetached = false
-							break
-						}
-					}
-					if allDetached {
-						break
-					}
-					time.Sleep(3 * time.Second)
-				}
-			}
-
-			err := compute.DeleteServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] delete server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionDelete, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Delete", Name: action.Name, Err: err}
-			}
-
-			if deleteVols && bsClient != nil {
-				for _, vid := range volIDs {
-					if err := volume.DeleteVolume(ctx, bsClient, vid); err != nil {
-						volErrs = append(volErrs, fmt.Sprintf("delete %s: %v", vid, err))
-					}
-				}
-			}
-			shared.Debugf("[action] deleted server %s", action.Name)
-			m.logAudit(audit.ActionDelete, "server", action.ServerID, action.Name, "success", "")
-			msg := shared.ServerActionMsg{Action: "Delete", Name: action.Name}
-			if len(volErrs) > 0 {
-				msg.Action = fmt.Sprintf("Delete (warning: %d volume error(s))", len(volErrs))
-			}
-			return msg
-		}
+		return m, m.deleteServerCmd(action)
 	case "soft reboot":
 		return m, func() tea.Msg {
 			ctx, cancel := actionCtx()
@@ -893,10 +716,15 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			shared.Debugf("[action] rescued server %s", action.Name)
 			m.logAudit(audit.ActionRescue, "server", action.ServerID, action.Name, "success", "")
 			msg := shared.ServerActionMsg{Action: "Rescue", Name: action.Name}
-			if adminPass != "" {
-				msg.Action = fmt.Sprintf("Rescue (password: %s)", adminPass)
+			if adminPass == "" {
+				return msg
 			}
-			return msg
+			return credentialsMsg{
+				result: msg,
+				title:  "Rescue Password",
+				note:   "Temporary rescue-mode password; it is not stored anywhere.",
+				creds:  []vmpassword.Credential{{Server: action.Name, Secret: adminPass}},
+			}
 		}
 	case "unrescue":
 		return m, func() tea.Msg {
@@ -1012,6 +840,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			shared.Debugf("[action] deleting router %s", name)
 			err := network.DeleteRouter(ctx, netClient, id)
 			if err != nil {
+				// Not wrapped with %w: the generic 409 text ("resource is busy")
+				// would otherwise replace this actionable message in the modal.
+				if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
+					err = fmt.Errorf("router still in use; remove its interfaces first (Interfaces pane, %s): %v", shared.Keys.Detach.Help().Key, err)
+				}
 				shared.Debugf("[action] delete router %s failed: %s", name, err)
 				m.logAudit(audit.ActionDeleteRouter, "router", id, name, "error", err.Error())
 				return shared.ResourceActionErrMsg{Action: "Delete router", Name: name, Err: err}
@@ -1021,39 +854,11 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			return shared.ResourceActionMsg{Action: "Deleted router", Name: name}
 		}
 	case "remove_router_interface":
-		netClient := m.client.Network
-		routerID := action.ServerID
-		name := action.Name
-		iface := m.routerView.SelectedInterface()
-		if iface == nil {
+		target, ok := decodeRouterInterfaceTarget(action.ServerID)
+		if !ok {
 			return m, nil
 		}
-		subnetID := iface.SubnetID
-		portID := iface.PortID
-		portIPCount := m.routerView.InterfacesOnPort(portID)
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			if portIPCount > 1 {
-				// Multi-IP port: remove just this fixed IP, keep the port.
-				shared.Debugf("[action] removing fixed IP (subnet %s) from port %s on router %s", subnetID, portID, name)
-				err := network.RemoveFixedIPFromPort(ctx, netClient, portID, subnetID)
-				if err != nil {
-					shared.Debugf("[action] remove fixed IP from port %s failed: %s", portID, err)
-					return shared.ResourceActionErrMsg{Action: "Remove interface", Name: name, Err: err}
-				}
-			} else {
-				// Single-IP port: detach the whole interface.
-				shared.Debugf("[action] removing router interface from %s", name)
-				err := network.RemoveRouterInterface(ctx, netClient, routerID, subnetID)
-				if err != nil {
-					shared.Debugf("[action] remove router interface from %s failed: %s", name, err)
-					return shared.ResourceActionErrMsg{Action: "Remove interface", Name: name, Err: err}
-				}
-			}
-			shared.Debugf("[action] removed interface (subnet %s) from %s", subnetID, name)
-			return shared.ResourceActionMsg{Action: "Removed interface from", Name: name}
-		}
+		return m, m.removeRouterInterfaceCmd(target, action.Name)
 	case "delete_port":
 		netClient := m.client.Network
 		id := action.ServerID
@@ -1230,43 +1035,6 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			m.logAudit(audit.ActionDeleteLB, "lb_member", memberID, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted member", Name: name}
 		}
-	case "delete_lb_members_bulk":
-		lbClient := m.client.LoadBalancer
-		poolID := action.ServerID
-		lbID := ""
-		if lb := m.lbView.LB(); lb != nil {
-			lbID = lb.ID
-		}
-		ids := m.lbView.SelectedMemberIDs()
-		count := len(ids)
-		m.lbView.ClearMemberSelection()
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtxLong()
-			defer cancel()
-			var failed int
-			for i, memberID := range ids {
-				if i > 0 && lbID != "" {
-					if err := loadbalancer.WaitForActive(ctx, lbClient, lbID, 60*time.Second); err != nil {
-						shared.Debugf("[action] bulk delete wait failed: %s", err)
-						failed += len(ids) - i
-						break
-					}
-				}
-				shared.Debugf("[action] bulk deleting member %s from pool %s (%d/%d)", memberID, poolID, i+1, count)
-				if err := loadbalancer.DeleteMember(ctx, lbClient, poolID, memberID); err != nil {
-					shared.Debugf("[action] bulk delete member %s failed: %s", memberID, err)
-					failed++
-				}
-			}
-			if failed > 0 {
-				return shared.ResourceActionErrMsg{
-					Action: "Bulk delete",
-					Name:   fmt.Sprintf("%d of %d members", failed, count),
-					Err:    fmt.Errorf("%d members failed to delete", failed),
-				}
-			}
-			return shared.ResourceActionMsg{Action: fmt.Sprintf("Deleted %d members from", count), Name: "pool"}
-		}
 	case "delete_keypair":
 		computeC := m.client.Compute
 		name := action.ServerID // keypair name is stored in ServerID
@@ -1308,102 +1076,6 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		return m, m.doReactivateImage(action.ServerID, action.Name)
 	}
 	return m, nil
-}
-
-func (m Model) executeBulkAction(client *gophercloud.ServiceClient, action modal.ConfirmAction) tea.Cmd {
-	targets := action.Servers
-	act := action.Action
-	counts := countBulkActions(targets, act)
-	return func() tea.Msg {
-		var errs []string
-		var passwords []string
-		for _, s := range targets {
-			serverAction := s.Action
-			if serverAction == "" {
-				serverAction = act
-			}
-			var err error
-			var auditAction audit.ActionType
-			ctx, cancel := actionCtx()
-			switch serverAction {
-			case "delete":
-				auditAction = audit.ActionDelete
-				err = compute.DeleteServer(ctx, client, s.ID)
-			case "soft reboot":
-				auditAction = audit.ActionReboot
-				err = compute.RebootServer(ctx, client, s.ID, servers.SoftReboot)
-			case "hard reboot":
-				auditAction = audit.ActionReboot
-				err = compute.RebootServer(ctx, client, s.ID, servers.HardReboot)
-			case "pause":
-				auditAction = audit.ActionPause
-				err = compute.PauseServer(ctx, client, s.ID)
-			case "unpause":
-				auditAction = audit.ActionUnpause
-				err = compute.UnpauseServer(ctx, client, s.ID)
-			case "suspend":
-				auditAction = audit.ActionSuspend
-				err = compute.SuspendServer(ctx, client, s.ID)
-			case "resume":
-				auditAction = audit.ActionResume
-				err = compute.ResumeServer(ctx, client, s.ID)
-			case "shelve":
-				auditAction = audit.ActionShelve
-				err = compute.ShelveServer(ctx, client, s.ID)
-			case "unshelve":
-				auditAction = audit.ActionUnshelve
-				err = compute.UnshelveServer(ctx, client, s.ID)
-			case "stop":
-				auditAction = audit.ActionStop
-				err = compute.StopServer(ctx, client, s.ID)
-			case "start":
-				auditAction = audit.ActionStart
-				err = compute.StartServer(ctx, client, s.ID)
-			case "lock":
-				auditAction = audit.ActionLock
-				err = compute.LockServer(ctx, client, s.ID)
-			case "unlock":
-				auditAction = audit.ActionUnlock
-				err = compute.UnlockServer(ctx, client, s.ID)
-			case "rescue":
-				auditAction = audit.ActionRescue
-				var adminPass string
-				adminPass, err = compute.RescueServer(ctx, client, s.ID)
-				if err == nil && adminPass != "" {
-					passwords = append(passwords, fmt.Sprintf("%s: %s", s.Name, adminPass))
-				}
-			case "unrescue":
-				auditAction = audit.ActionUnrescue
-				err = compute.UnrescueServer(ctx, client, s.ID)
-			}
-			cancel()
-			if err != nil {
-				m.logAudit(auditAction, "server", s.ID, s.Name, "error", err.Error())
-				errs = append(errs, fmt.Sprintf("%s (%s): %v", s.Name, serverAction, err))
-			} else {
-				m.logAudit(auditAction, "server", s.ID, s.Name, "success", "")
-			}
-		}
-		label := act
-		if len(counts) > 1 {
-			label = fmt.Sprintf("mixed action (%s)", formatActionCounts(counts))
-		}
-		if len(errs) > 0 {
-			return shared.ServerActionErrMsg{
-				Action: label,
-				Name:   fmt.Sprintf("%d servers", len(targets)),
-				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-			}
-		}
-		msg := shared.ServerActionMsg{
-			Action: label,
-			Name:   fmt.Sprintf("%d servers", len(targets)),
-		}
-		if len(passwords) > 0 {
-			msg.Action = fmt.Sprintf("%s (passwords: %s)", label, strings.Join(passwords, ", "))
-		}
-		return msg
-	}
 }
 
 func (m Model) getServerSSHInfo() (name, keyName string, floatingIPs, ipv6, ipv4 []string) {
@@ -1540,7 +1212,7 @@ func (m Model) openAdminActions() (Model, tea.Cmd) {
 	if id == "" {
 		return m, nil
 	}
-	m.serverAdminAct = serveradminact.New(m.client.Compute, id, name)
+	m.serverAdminAct = serveradminact.New(id, name)
 	m.serverAdminAct.SetSize(m.width, m.height)
 	return m, m.serverAdminAct.Init()
 }
@@ -1565,110 +1237,4 @@ func (m Model) openServerMetadata() (Model, tea.Cmd) {
 	m.serverMetadata = servermetadata.New(m.client.Compute, id, name, meta)
 	m.serverMetadata.SetSize(m.width, m.height)
 	return m, m.serverMetadata.Init()
-}
-
-func (m Model) executeDeleteVolumesBulk(refs []modal.ServerRef) tea.Cmd {
-	bsClient := m.client.BlockStorage
-	if bsClient == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		var errs []string
-		for _, ref := range refs {
-			shared.Debugf("[action] deleting volume %s", ref.Name)
-			ctx, cancel := actionCtx()
-			err := volume.DeleteVolume(ctx, bsClient, ref.ID)
-			cancel()
-			if err != nil {
-				shared.Debugf("[action] delete volume %s failed: %s", ref.Name, err)
-				errs = append(errs, fmt.Sprintf("%s: %v", ref.Name, err))
-			}
-		}
-		if len(errs) > 0 {
-			return shared.ResourceActionErrMsg{
-				Action: "Delete volumes",
-				Name:   fmt.Sprintf("%d volumes", len(refs)),
-				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-			}
-		}
-		return shared.ResourceActionMsg{
-			Action: "Deleted volumes",
-			Name:   fmt.Sprintf("%d volumes", len(refs)),
-		}
-	}
-}
-
-func (m Model) executeDetachVolumesBulk(refs []modal.ServerRef) tea.Cmd {
-	computeC := m.client.Compute
-	bsClient := m.client.BlockStorage
-	if bsClient == nil || computeC == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		var errs []string
-		for _, ref := range refs {
-			shared.Debugf("[action] detaching volume %s", ref.Name)
-			ctx, cancel := actionCtx()
-			vol, err := volume.GetVolume(ctx, bsClient, ref.ID)
-			if err != nil {
-				cancel()
-				shared.Debugf("[action] detach volume %s failed: %s", ref.Name, err)
-				errs = append(errs, fmt.Sprintf("%s: %v", ref.Name, err))
-				continue
-			}
-			if !vol.IsAttached() {
-				cancel()
-				continue
-			}
-			for _, att := range vol.Attachments {
-				if err := volume.DetachVolume(ctx, computeC, att.ServerID, ref.ID); err != nil {
-					shared.Debugf("[action] detach volume %s from server %s failed: %s", ref.Name, att.ServerID, err)
-					errs = append(errs, fmt.Sprintf("%s from %s: %v", ref.Name, att.ServerID, err))
-				}
-			}
-			cancel()
-		}
-		if len(errs) > 0 {
-			return shared.ResourceActionErrMsg{
-				Action: "Detach volumes",
-				Name:   fmt.Sprintf("%d volumes", len(refs)),
-				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-			}
-		}
-		return shared.ResourceActionMsg{
-			Action: "Detached volumes",
-			Name:   fmt.Sprintf("%d volumes", len(refs)),
-		}
-	}
-}
-
-func (m Model) executeDeleteImagesBulk(refs []modal.ServerRef) tea.Cmd {
-	imgClient := m.client.Image
-	if imgClient == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		var errs []string
-		for _, ref := range refs {
-			shared.Debugf("[action] deleting image %s", ref.Name)
-			ctx, cancel := actionCtx()
-			err := image.DeleteImage(ctx, imgClient, ref.ID)
-			cancel()
-			if err != nil {
-				shared.Debugf("[action] delete image %s failed: %s", ref.Name, err)
-				errs = append(errs, fmt.Sprintf("%s: %v", ref.Name, err))
-			}
-		}
-		if len(errs) > 0 {
-			return shared.ResourceActionErrMsg{
-				Action: "Delete images",
-				Name:   fmt.Sprintf("%d images", len(refs)),
-				Err:    fmt.Errorf("%s", strings.Join(errs, "; ")),
-			}
-		}
-		return shared.ResourceActionMsg{
-			Action: "Deleted images",
-			Name:   fmt.Sprintf("%d images", len(refs)),
-		}
-	}
 }

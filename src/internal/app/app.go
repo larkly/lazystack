@@ -224,6 +224,7 @@ type Model struct {
 	downloadURL         string
 	checksumsURL        string
 	updateCheckInterval time.Duration
+	actions             *actionState // in-flight mutation locks, shared across model copies
 }
 
 // ShouldRestart returns true if the app quit due to a restart request.
@@ -280,6 +281,7 @@ func New(opts Options) Model {
 			tabInited:           make([]bool, len(tabs)),
 			nav:                 &NavStack{},
 			auditLogger:         audit.NewLogger(audit.DefaultPath(), opts.Config.Audit.Enabled),
+			actions:             newActionState(),
 		}
 	}
 
@@ -302,6 +304,7 @@ func New(opts Options) Model {
 		tabInited:           make([]bool, len(tabs)),
 		nav:                 &NavStack{},
 		auditLogger:         audit.NewLogger(audit.DefaultPath(), opts.Config.Audit.Enabled),
+		actions:             newActionState(),
 	}
 }
 
@@ -694,7 +697,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if pane == secgroupview.FocusRules && m.secGroupView.SelectedRuleID() != "" {
 					return m.openSGRuleDeleteConfirm()
 				}
-				if (pane == secgroupview.FocusSelector || pane == secgroupview.FocusRules) && m.secGroupView.SelectedGroupName() != "default" {
+				// Whole-group delete only from the selector: an empty or stale
+				// Rules pane must never fall back to deleting the group.
+				if pane == secgroupview.FocusSelector && m.secGroupView.SelectedGroupName() != "default" {
 					return m.openSGDeleteConfirm()
 				}
 			case key.Matches(msg, shared.Keys.Create):
@@ -1106,9 +1111,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modal.ConfirmAction:
 		m.activeModal = modalNone
 		if msg.Confirm {
-			return m.executeAction(msg)
+			return m.runConfirmedAction(msg)
 		}
 		return m, nil
+
+	case actionResultMsg:
+		return m.handleActionResult(msg)
 
 	case modal.ErrorDismissedMsg:
 		m.activeModal = modalNone
@@ -1173,62 +1181,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case shared.ServerActionMsg:
-		m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
-		m.statusBar.Error = ""
-		// Ensure resize modal is dismissed
-		m.serverResize.Active = false
-		// Navigate back to server list if on a sub-view, or after delete
-		if m.view == viewConsoleLog || (m.view == viewServerDetail && msg.Action == "Delete") {
-			m.returnToView = 0
-			m.view = viewServerList
-			m.statusBar.CurrentView = "serverlist"
-			return m, func() tea.Msg { return shared.RefreshServersMsg{} }
-		}
-		// If on detail view, refresh — but skip rapid polling for
-		// confirm/revert resize since those use optimistic updates
-		if m.view == viewServerDetail {
-			if msg.Action == "Confirm resize" || msg.Action == "Revert resize" {
-				// Just refresh the server list, let the normal tick update detail
-				return m, func() tea.Msg { return shared.RefreshServersMsg{} }
-			}
-			id := m.serverDetail.ServerID()
-			return m, tea.Batch(
-				func() tea.Msg { return shared.RefreshServersMsg{} },
-				tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
-					return delayedDetailRefreshMsg{id: id}
-				}),
-				tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-					return delayedDetailRefreshMsg{id: id}
-				}),
-			)
-		}
-		return m, func() tea.Msg { return shared.RefreshServersMsg{} }
+		return m.handleServerActionMsg(msg)
+
+	case serverDeletedMsg:
+		return m.handleServerDeleted(msg)
+
+	case credentialsMsg:
+		return m.handleCredentials(msg)
+
+	case bulkResultMsg:
+		return m.handleBulkResult(msg)
+
+	case actionWarningMsg:
+		return m.handleActionWarning(msg)
+
+	case serveradminact.ActionRequestMsg:
+		return m.executeAdminAction(msg)
 
 	case shared.ResourceActionMsg:
-		m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
-		m.statusBar.Error = ""
-		// Navigate back to list view if we were on a detail view
-		m.returnToView = 0
-		if m.view == viewVolumeDetail {
-			m.view = viewVolumeList
-			m.statusBar.CurrentView = "volumelist"
-		}
-		if m.view == viewKeypairDetail {
-			m.view = viewKeypairList
-			m.statusBar.CurrentView = "keypairlist"
-		}
-		if m.view == viewLBView {
-			m.statusBar.CurrentView = "lbview"
-			return m, m.lbView.ForceRefresh()
-		}
-		if m.view == viewImageView {
-			m.statusBar.CurrentView = "imageview"
-			return m, m.imageView.ForceRefresh()
-		}
-		if m.view == viewSecGroupView {
-			return m, m.secGroupView.ForceRefresh()
-		}
-		return m, nil
+		return m.handleResourceActionMsg(msg)
 
 	case shared.ResourceActionErrMsg:
 		m.errModal = modal.NewError(

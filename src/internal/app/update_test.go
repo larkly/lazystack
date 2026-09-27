@@ -67,9 +67,3 @@ func TestUpdateAvailableMsg_SetsHint(t *testing.T) {
 		t.Error("expected status bar hint about available upgrade")
 	}
 }
-
-var errTest = &testError{}
-
-type testError struct{}
-
-func (e *testError) Error() string { return "test error" }

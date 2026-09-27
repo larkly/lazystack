@@ -471,12 +471,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Advance to next field
 		m.advanceFocus()
 		return m, nil
-	case "up", "k":
+	// Only arrows navigate: j/k must reach the filter as text.
+	case "up":
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		filtered := m.filteredPickerItems(items)
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
@@ -501,7 +502,7 @@ func (m Model) pickerItems() []pickerItem {
 	case fieldImage:
 		items := make([]pickerItem, len(m.images))
 		for i, img := range m.images {
-			items[i] = pickerItem{id: i, name: img.Name, desc: img.ID[:8]}
+			items[i] = pickerItem{id: i, name: img.Name, desc: shortID(img.ID)}
 		}
 		return items
 	case fieldFlavor:
@@ -521,7 +522,7 @@ func (m Model) pickerItems() []pickerItem {
 			if n.Shared {
 				shared = " (shared)"
 			}
-			items[i] = pickerItem{id: i, name: n.Name + shared, desc: n.ID[:8]}
+			items[i] = pickerItem{id: i, name: n.Name + shared, desc: shortID(n.ID)}
 		}
 		return items
 	case fieldKeypair:
@@ -538,6 +539,16 @@ func (m Model) pickerItems() []pickerItem {
 		return items
 	}
 	return nil
+}
+
+// shortID abbreviates an ID for display to at most 8 runes; short or empty
+// IDs are returned unchanged.
+func shortID(id string) string {
+	r := []rune(id)
+	if len(r) > 8 {
+		return string(r[:8])
+	}
+	return id
 }
 
 func (m Model) filteredPickerItems(items []pickerItem) []pickerItem {
@@ -813,21 +824,28 @@ func (m Model) hasCloneVolumes() bool {
 	return m.cloneConfig != nil && len(m.cloneConfig.VolumeIDs) > 0
 }
 
+// submit validates the form and creates the server(s).
+//
+// Naming: a populated Name Template takes precedence over Server Name. Each
+// instance is then created with its own request named from the template
+// (index 0..count-1), exactly as previewed, and the typed name is ignored.
+// Without a template, Server Name is required and count > 1 uses a single
+// Nova multi-create request (min_count = max_count = count).
 func (m Model) submit() (Model, tea.Cmd) {
+	if m.submitting {
+		return m, nil
+	}
 	name := strings.TrimSpace(m.nameInput.Value())
-	if name == "" {
+	tmpl := strings.TrimSpace(m.templateInput.Value())
+	if name == "" && tmpl == "" {
 		m.err = "Server name is required"
 		return m, nil
 	}
-	tmpl := strings.TrimSpace(m.templateInput.Value())
-	if tmpl != "" {
-		name = expandNameTemplate(tmpl, 0)
-	}
-	if m.selectedImage < 0 {
+	if m.selectedImage < 0 || m.selectedImage >= len(m.images) {
 		m.err = "Image is required"
 		return m, nil
 	}
-	if m.selectedFlavor < 0 {
+	if m.selectedFlavor < 0 || m.selectedFlavor >= len(m.flavors) {
 		m.err = "Flavor is required"
 		return m, nil
 	}
@@ -849,20 +867,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 		}
 	}
 
-	opts := servers.CreateOpts{
-		Name:      name,
+	base := servers.CreateOpts{
 		ImageRef:  m.images[m.selectedImage].ID,
 		FlavorRef: m.flavors[m.selectedFlavor].ID,
 		UserData:  m.userData,
 	}
 
-	if count > 1 {
-		opts.Min = count
-		opts.Max = count
-	}
-
-	if m.selectedNetwork >= 0 {
-		opts.Networks = []servers.Network{
+	if m.selectedNetwork >= 0 && m.selectedNetwork < len(m.networks) {
+		base.Networks = []servers.Network{
 			{UUID: m.networks[m.selectedNetwork].ID},
 		}
 	}
@@ -872,23 +884,43 @@ func (m Model) submit() (Model, tea.Cmd) {
 		for _, idx := range m.sortedSecGroupIndices() {
 			sgNames = append(sgNames, m.secGroups[idx].Name)
 		}
-		opts.SecurityGroups = sgNames
+		base.SecurityGroups = sgNames
 	}
 
-	var createOpts servers.CreateOptsBuilder = opts
-	if m.selectedKeypair >= 0 {
-		createOpts = keypairs.CreateOptsExt{
-			CreateOptsBuilder: opts,
-			KeyName:           m.keypairs[m.selectedKeypair].Name,
+	keyName := ""
+	if m.selectedKeypair >= 0 && m.selectedKeypair < len(m.keypairs) {
+		keyName = m.keypairs[m.selectedKeypair].Name
+	}
+	build := func(name string, multi int) servers.CreateOptsBuilder {
+		opts := base
+		opts.Name = name
+		if multi > 1 {
+			opts.Min = multi
+			opts.Max = multi
 		}
+		if keyName != "" {
+			return keypairs.CreateOptsExt{CreateOptsBuilder: opts, KeyName: keyName}
+		}
+		return opts
 	}
 
 	m.submitting = true
 	m.err = ""
 	client := m.computeClient
+
+	if tmpl != "" {
+		names := make([]string, count)
+		for i := range names {
+			names[i] = expandNameTemplate(tmpl, i)
+		}
+		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			return createNamed(client, names, build)
+		})
+	}
+
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
-		shared.Debugf("[servercreate] creating server %q", name)
-		srv, err := compute.CreateServerWithOpts(context.Background(), client, createOpts)
+		shared.Debugf("[servercreate] creating server %q (count %d)", name, count)
+		srv, err := compute.CreateServerWithOpts(context.Background(), client, build(name, count))
 		if err != nil {
 			shared.Debugf("[servercreate] error creating server %q: %v", name, err)
 			return serverCreateErrMsg{err: err}
@@ -896,6 +928,32 @@ func (m Model) submit() (Model, tea.Cmd) {
 		shared.Debugf("[servercreate] created server %q (id=%s)", name, srv.ID)
 		return serverCreatedMsg{server: srv}
 	})
+}
+
+// createNamed creates one server per name, stopping at the first failure.
+// A failure after some servers were created reports the created names and
+// IDs so the user can see (and clean up) what already exists.
+func createNamed(client *gophercloud.ServiceClient, names []string, build func(string, int) servers.CreateOptsBuilder) tea.Msg {
+	var first *compute.Server
+	var created []string
+	for _, n := range names {
+		shared.Debugf("[servercreate] creating server %q", n)
+		srv, err := compute.CreateServerWithOpts(context.Background(), client, build(n, 1))
+		if err != nil {
+			shared.Debugf("[servercreate] error creating server %q: %v", n, err)
+			if len(created) == 0 {
+				return serverCreateErrMsg{err: err}
+			}
+			return serverCreateErrMsg{err: fmt.Errorf("created %d of %d servers (%s); %s failed: %w",
+				len(created), len(names), strings.Join(created, ", "), n, err)}
+		}
+		shared.Debugf("[servercreate] created server %q (id=%s)", n, srv.ID)
+		if first == nil {
+			first = srv
+		}
+		created = append(created, fmt.Sprintf("%s (%s)", n, srv.ID))
+	}
+	return serverCreatedMsg{server: first}
 }
 
 // View renders the create form.
@@ -988,11 +1046,19 @@ func (m Model) View() string {
 				count = c
 			}
 		}
-		if tmpl != "" && count > 1 {
+		if tmpl != "" {
 			names := previewNames(tmpl, count, 5)
-			if len(names) > 0 {
-				b.WriteString(shared.StyleHelp.Render("  Preview: "+strings.Join(names, ", ")) + "\n")
+			if count <= 1 {
+				names = []string{expandNameTemplate(tmpl, 0)}
 			}
+			line := "  Preview: " + strings.Join(names, ", ")
+			if count > len(names) {
+				line += ", …"
+			}
+			if strings.TrimSpace(m.nameInput.Value()) != "" {
+				line += " (template overrides Server Name)"
+			}
+			b.WriteString(shared.StyleHelp.Render(line) + "\n")
 		}
 	}
 

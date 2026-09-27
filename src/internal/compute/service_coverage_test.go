@@ -8,21 +8,66 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/larkly/lazystack/internal/testutil"
 )
+
+func TestCreateSnapshotConflictReasons(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		want    string
+		notWant string
+	}{
+		{"locked", `{"conflictingRequest":{"code":409,"message":"Instance srv is locked"}}`, "Instance srv is locked", "snapshot in progress"},
+		{"invalid state", `{"conflictingRequest":{"code":409,"message":"Cannot 'createImage' instance srv while it is in vm_state error"}}`, "vm_state error", "snapshot in progress"},
+		{"no body", ``, "cannot be snapshotted in its current state", "snapshot in progress"},
+		{"snapshot running", `{"conflictingRequest":{"code":409,"message":"Cannot 'createImage' instance srv while it is in task_state image_snapshot"}}`, "snapshot in progress", ""},
+		{"upload pending", `{"conflictingRequest":{"code":409,"message":"Cannot 'createImage' instance srv while it is in task_state image_pending_upload"}}`, "snapshot in progress", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/servers/srv/action" {
+					t.Errorf("request=%s %s", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				w.Write([]byte(tc.body))
+			}))
+			defer close()
+			err := CreateSnapshot(context.Background(), client, "srv", "snap")
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err=%q, want it to contain %q", err, tc.want)
+			}
+			if tc.notWant != "" && strings.Contains(err.Error(), tc.notWant) {
+				t.Errorf("err=%q must not contain %q", err, tc.notWant)
+			}
+			if !gophercloud.ResponseCodeIs(err, http.StatusConflict) {
+				t.Errorf("HTTP 409 cause not inspectable through %T", err)
+			}
+		})
+	}
+}
 
 func TestGetPasswordHTTP(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Nova encrypts the admin password with RSA PKCS#1 v1.5, so the fixture
+	// must produce that legacy ciphertext for the decryption path to be tested.
+	//lint:ignore SA1019 Nova-compatible PKCS#1 v1.5 ciphertext is the test contract
 	ciphertext, err := rsa.EncryptPKCS1v15(rand.Reader, &key.PublicKey, []byte("secret"))
 	if err != nil {
 		t.Fatal(err)
@@ -108,6 +153,60 @@ func TestRescueAndEvacuateHTTP(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// An accepted evacuation whose admin password cannot be decoded is a
+// partial result: it must be distinguishable from both a failed request and
+// a legitimately absent password, and must not be retried.
+func TestEvacuatePasswordExtraction(t *testing.T) {
+	for _, tc := range []struct {
+		name, body  string
+		want        string
+		unreadable  bool
+		contentType string
+	}{
+		{"password", `{"adminPass":"generated"}`, "generated", false, "application/json"},
+		{"absent field", `{}`, "", false, "application/json"},
+		{"empty body", ``, "", false, ""},
+		{"malformed field", `{"adminPass":123}`, "", true, "application/json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if tc.contentType != "" {
+					w.Header().Set("Content-Type", tc.contentType)
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(tc.body))
+			}))
+			defer close()
+			got, err := EvacuateServer(context.Background(), client, "vm", "", false)
+			if requests != 1 {
+				t.Fatalf("requests=%d, evacuation must not be retried", requests)
+			}
+			if got != tc.want {
+				t.Fatalf("password=%q want %q", got, tc.want)
+			}
+			if tc.unreadable {
+				if !errors.Is(err, ErrAdminPassUnreadable) {
+					t.Fatalf("err=%v, want ErrAdminPassUnreadable", err)
+				}
+			} else if err != nil {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+func TestEvacuateDroppedConnectionIsFailure(t *testing.T) {
+	client, close := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic(http.ErrAbortHandler) // close the connection without a response
+	}))
+	defer close()
+	if _, err := EvacuateServer(context.Background(), client, "vm", "", false); err == nil || errors.Is(err, ErrAdminPassUnreadable) {
+		t.Fatalf("dropped connection reported as success: %v", err)
 	}
 }
 

@@ -296,12 +296,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.closePicker()
 		m.advanceFocus()
 		return m, nil
-	case "up", "k":
+	// Only arrows navigate: j/k must reach the filter as text.
+	case "up":
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
 		}
