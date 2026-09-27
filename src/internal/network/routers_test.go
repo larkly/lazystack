@@ -69,8 +69,10 @@ const getRouterFixture = `{
   }
 }`
 
-func fakeNeutronClientRouters(handler http.Handler) *gophercloud.ServiceClient {
+func fakeNeutronClientRouters(t testing.TB, handler http.Handler) *gophercloud.ServiceClient {
+	t.Helper()
 	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
 	return &gophercloud.ServiceClient{
 		ProviderClient: &gophercloud.ProviderClient{
 			HTTPClient: *srv.Client(),
@@ -90,7 +92,7 @@ func TestListRouters(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNeutronClientRouters(handler)
+	client := fakeNeutronClientRouters(t, handler)
 	ctx := context.Background()
 
 	routers, err := ListRouters(ctx, client)
@@ -173,7 +175,7 @@ func TestGetRouter(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	client := fakeNeutronClientRouters(handler)
+	client := fakeNeutronClientRouters(t, handler)
 	ctx := context.Background()
 
 	router, err := GetRouter(ctx, client, "e5f6a7b8-c9d0-1234-5678-90abcdef1234")

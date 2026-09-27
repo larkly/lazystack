@@ -142,7 +142,7 @@ func TestDetachVolumeHandlesLookupAttachmentAndPartialFailure(t *testing.T) {
 				}
 			}
 			if mode == "success" || mode == "partial-failure" {
-				if len(detached) != 2 || detached[0] != "/servers/s1/os-volume_attachments/attachment" || detached[1] != "/servers/s2/os-volume_attachments/attachment" {
+				if len(detached) != 2 || detached[0] != "/servers/s1/os-volume_attachments/id" || detached[1] != "/servers/s2/os-volume_attachments/id" {
 					t.Fatalf("detach requests=%v", detached)
 				}
 				checkAudit(t, path, audit.ActionDetachVolume, "volume", "id", "name", mode == "partial-failure")

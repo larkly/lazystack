@@ -241,8 +241,8 @@ func DeleteVolume(ctx context.Context, client *gophercloud.ServiceClient, id str
 }
 
 // AttachVolume attaches a volume to a server using Nova's os-volume_attachments
-// and returns the resulting attachment ID. With newer Nova/Cinder the attachment
-// ID differs from the volume ID and is required to detach the volume.
+// and returns the attachment "id" Nova reports (the volume ID before
+// microversion 2.89, empty from 2.89). DetachVolume only needs the volume ID.
 func AttachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient, serverID, volumeID string) (string, error) {
 	if err := requireComputeClient(computeClient); err != nil {
 		return "", err
@@ -257,16 +257,24 @@ func AttachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient,
 	return att.ID, nil
 }
 
-// DetachVolume detaches a volume from a server. Nova's DELETE expects the
-// attachment ID, which with newer Cinder/Nova differs from the volume ID, so
-// the server's attachments are listed first to resolve it. If the lookup fails
-// or finds no match, it falls back to deleting by volume ID.
+// DetachVolume detaches a volume from a server.
+//
+// Nova's DELETE /servers/{server_id}/os-volume_attachments/{volume_id} is
+// keyed by the volume ID in every microversion: before 2.89 the attachment
+// "id" is the volume ID, and from 2.89 "id" is dropped and the Cinder
+// attachment UUID is reported as "attachment_id", which this endpoint does
+// not accept. The server's attachments are listed first so that the endpoint
+// key comes from Nova's own record, and a failed lookup (403, 5xx,
+// cancellation, malformed body) stops the detach with that error instead of
+// being hidden behind a DELETE result. When the listing has no entry for the
+// volume, the DELETE is still sent by volume ID so Nova reports whether the
+// volume is attached.
 func DetachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient, serverID, volumeID string) error {
 	if err := requireComputeClient(computeClient); err != nil {
 		return err
 	}
 	shared.Debugf("[volume] DetachVolume: starting, serverID=%s volumeID=%s", serverID, volumeID)
-	attachmentID := ""
+	target := ""
 	err := volumeattach.List(computeClient, serverID).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
 		attachments, err := volumeattach.ExtractVolumeAttachments(page)
 		if err != nil {
@@ -274,24 +282,23 @@ func DetachVolume(ctx context.Context, computeClient *gophercloud.ServiceClient,
 		}
 		for _, att := range attachments {
 			if att.VolumeID == volumeID {
-				attachmentID = att.ID
+				target = att.VolumeID
 				return false, nil
 			}
 		}
 		return true, nil
 	})
 	if err != nil {
-		shared.Debugf("[volume] DetachVolume: listing attachments failed, falling back to volume ID: %v", err)
-	} else if attachmentID != "" {
-		shared.Debugf("[volume] DetachVolume: resolved attachmentID=%s for volumeID=%s", attachmentID, volumeID)
-	} else {
-		shared.Debugf("[volume] DetachVolume: no attachment found for volumeID=%s, falling back to volume ID", volumeID)
+		shared.Debugf("[volume] DetachVolume: listing attachments failed, not detaching: %v", err)
+		return fmt.Errorf("detaching volume %s from server %s: looking up attachment: %w", volumeID, serverID, err)
 	}
-
-	target := attachmentID
-	if target == "" {
+	if target != "" {
+		shared.Debugf("[volume] DetachVolume: found attachment of volumeID=%s on serverID=%s", volumeID, serverID)
+	} else {
+		shared.Debugf("[volume] DetachVolume: no attachment listed for volumeID=%s, deleting by volume ID anyway", volumeID)
 		target = volumeID
 	}
+
 	resp, err := computeClient.Delete(ctx, computeClient.ServiceURL("servers", serverID, "os-volume_attachments", target), nil)
 	if err != nil {
 		shared.Debugf("[volume] DetachVolume: error: %v", err)
