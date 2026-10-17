@@ -538,8 +538,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if !m.isCreateFormView() {
-			// Filter/search input mode (server list filter, LB and image
-			// search): every keystroke belongs to the input — never let
+			// Filter/search input mode (the "/" input of any list view):
+			// every keystroke belongs to the input — never let
 			// global handlers see them (typing "q" would otherwise quit the
 			// app, digits would switch tabs). Ctrl+C is handled above.
 			if m.textInputFocused() {

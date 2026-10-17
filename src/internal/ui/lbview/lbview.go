@@ -150,8 +150,8 @@ func (m Model) InSelector() bool { return m.focus == FocusSelector }
 func (m Model) IsSearching() bool { return m.searchActive }
 
 // Escape clears one layer of list state per esc press: the committed
-// filter, then the member selection. It reports whether anything was cleared; when nothing was,
-// esc goes on to mean back-navigation in the root model.
+// filter, then the member selection. It reports whether anything was cleared;
+// when nothing was, esc goes on to mean back-navigation in the root model.
 func (m *Model) Escape() (handled bool) {
 	if m.searchFilter != "" {
 		m.searchInput.SetValue("")
