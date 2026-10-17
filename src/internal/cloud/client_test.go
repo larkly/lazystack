@@ -581,3 +581,53 @@ func TestRetryDelay(t *testing.T) {
 		}
 	}
 }
+
+// A DELETE that timed out at the gateway may already have executed; its
+// replay then gets 404. That 404 is the expected outcome of our own delete,
+// not a sign that someone else removed the resource.
+func TestRetryTransport_RetriedDelete404IsSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		first  int // status of the first attempt; 0 means answer 404 at once
+		want   int
+	}{
+		{"delete after 504", http.MethodDelete, http.StatusGatewayTimeout, http.StatusNoContent},
+		{"delete after 502", http.MethodDelete, http.StatusBadGateway, http.StatusNoContent},
+		{"delete first attempt", http.MethodDelete, 0, http.StatusNotFound},
+		{"delete after 429", http.MethodDelete, http.StatusTooManyRequests, http.StatusNotFound},
+		{"get after 504", http.MethodGet, http.StatusGatewayTimeout, http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attempts atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if attempts.Add(1) == 1 && tc.first != 0 {
+					w.Header().Set("Retry-After", "0")
+					w.WriteHeader(tc.first)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"itemNotFound": {"code": 404, "message": "Instance vm could not be found."}}`))
+			}))
+			defer srv.Close()
+
+			req, err := http.NewRequest(tc.method, srv.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := retryTestClient().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != tc.want {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tc.want)
+			}
+			if tc.want == http.StatusNoContent && (len(body) != 0 || resp.ContentLength != 0 || resp.Header.Get("Content-Type") != "") {
+				t.Errorf("204 must be empty: body=%q len=%d type=%q", body, resp.ContentLength, resp.Header.Get("Content-Type"))
+			}
+		})
+	}
+}
