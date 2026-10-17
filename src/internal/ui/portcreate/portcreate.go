@@ -484,7 +484,7 @@ func (m Model) parseFixedIPs(raw string) ([]network.FixedIP, error) {
 			return nil, fmt.Errorf("missing subnet before %q", part[idx:])
 		}
 		if ip != "" {
-			if _, err := netip.ParseAddr(ip); err != nil {
+			if !shared.ValidIP(ip) {
 				return nil, fmt.Errorf("invalid IP address %q for subnet %q", ip, subnetName)
 			}
 		}
@@ -552,6 +552,7 @@ func (m Model) resolveSubnet(name string) (string, error) {
 	return "", fmt.Errorf("unknown subnet %q", name)
 }
 
+// parseAddressPairs parses semicolon-separated ip[/prefix][,mac] entries.
 func parseAddressPairs(raw string) ([]network.AddressPair, error) {
 	var result []network.AddressPair
 	for _, part := range strings.Split(raw, ";") {
@@ -559,13 +560,15 @@ func parseAddressPairs(raw string) ([]network.AddressPair, error) {
 		if part == "" {
 			continue
 		}
-		if idx := strings.Index(part, ","); idx >= 0 {
-			ip := strings.TrimSpace(part[:idx])
-			mac := strings.TrimSpace(part[idx+1:])
-			result = append(result, network.AddressPair{IPAddress: ip, MACAddress: mac})
-		} else {
-			result = append(result, network.AddressPair{IPAddress: part})
+		ip, mac, hasMAC := strings.Cut(part, ",")
+		ip, mac = strings.TrimSpace(ip), strings.TrimSpace(mac)
+		if _, ok := shared.ParseIPOrCIDR(ip); !ok {
+			return nil, fmt.Errorf("address pair %q: %q is not a valid IP or CIDR", part, ip)
 		}
+		if hasMAC && !shared.ValidMAC(mac) {
+			return nil, fmt.Errorf("address pair %q: %q is not a valid MAC address", part, mac)
+		}
+		result = append(result, network.AddressPair{IPAddress: ip, MACAddress: mac})
 	}
 	return result, nil
 }
