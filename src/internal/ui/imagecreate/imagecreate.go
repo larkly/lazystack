@@ -60,15 +60,29 @@ type pickerEntry struct {
 type progressTickMsg struct{}
 type uploadDoneMsg struct {
 	shared.Audit
-	name string
+	uploadID int64
+	name     string
 }
 type uploadErrMsg struct {
 	shared.Audit
-	err error
+	uploadID int64
+	err      error
 }
 type importStartedMsg struct {
 	shared.Audit
 	name string
+}
+
+// uploadSeq generates per-submit session IDs so a result can be attributed
+// to the upload that produced it, even after the modal was reopened.
+var uploadSeq atomic.Int64
+
+// UploadFinishedMsg is emitted when a backgrounded upload (dismissed with
+// "b" or replaced by a newly opened modal) finishes, so the app can surface
+// the result in the status bar.
+type UploadFinishedMsg struct {
+	Name string
+	Err  error // nil on success
 }
 
 // Model is the image upload modal.
@@ -87,6 +101,7 @@ type Model struct {
 	focusField int
 	submitting bool
 	uploading  bool
+	uploadID   int64
 	imageName  string
 
 	// File picker
@@ -192,19 +207,37 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case uploadDoneMsg:
-		m.Active = false
+		name := msg.name
+		if msg.uploadID != m.uploadID {
+			// From an upload whose modal was since replaced.
+			shared.Debugf("[imagecreate] stale done for session %d (current %d), notifying", msg.uploadID, m.uploadID)
+			return m, func() tea.Msg { return UploadFinishedMsg{Name: name} }
+		}
 		m.uploading = false
 		shared.Debugf("[imagecreate] upload success name=%q", msg.name)
-		return m, func() tea.Msg {
-			return shared.ResourceActionMsg{Action: "Uploaded image", Name: msg.name}
+		if m.Active {
+			m.Active = false
+			return m, func() tea.Msg {
+				return shared.ResourceActionMsg{Action: "Uploaded image", Name: name}
+			}
 		}
+		// Backgrounded: report via UploadFinishedMsg for the status bar.
+		return m, func() tea.Msg { return UploadFinishedMsg{Name: name} }
 
 	case uploadErrMsg:
+		finErr := msg.err
+		if msg.uploadID != m.uploadID {
+			shared.Debugf("[imagecreate] stale error for session %d (current %d), notifying", msg.uploadID, m.uploadID)
+			return m, func() tea.Msg { return UploadFinishedMsg{Err: finErr} }
+		}
 		m.uploading = false
 		m.submitting = false
 		m.err = msg.err.Error()
 		shared.Debugf("[imagecreate] error: %v", msg.err)
-		return m, nil
+		if m.Active {
+			return m, nil
+		}
+		return m, func() tea.Msg { return UploadFinishedMsg{Err: finErr} }
 
 	case importStartedMsg:
 		m.Active = false
@@ -680,6 +713,7 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 
 	m.submitting = true
 	m.uploading = true
+	m.uploadID = uploadSeq.Add(1)
 	m.bytesRead = 0
 	m.totalBytes = size
 	m.sharedTotal = size
@@ -689,6 +723,7 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 	m.sharedUpload = sharedUpload
 
 	client := m.client
+	id := m.uploadID
 	return m, tea.Batch(m.spinner.Tick, scheduleProgressTick(), func() tea.Msg {
 		createCtx, cancelCreate := shared.RequestCtx()
 		img, err := image.CreateImage(createCtx, client, image.CreateImageOpts{
@@ -700,7 +735,7 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 		})
 		cancelCreate()
 		if err != nil {
-			return uploadErrMsg{Audit: shared.NewAudit(audit.ActionUpload, "image", "", name, err), err: err}
+			return uploadErrMsg{Audit: shared.NewAudit(audit.ActionUpload, "image", "", name, err), uploadID: id, err: err}
 		}
 		// record describes the upload for the audit log.
 		record := func(err error) shared.Audit {
@@ -711,7 +746,7 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 		f, err := os.Open(path)
 		if err != nil {
 			err = cleanupFailedImage(client, img.ID, fmt.Errorf("opening file: %w", err))
-			return uploadErrMsg{Audit: record(err), err: err}
+			return uploadErrMsg{Audit: record(err), uploadID: id, err: err}
 		}
 		defer f.Close()
 
@@ -730,10 +765,10 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 				err = fmt.Errorf("upload made no progress for %s: %w", shared.TransferStallTimeout, err)
 			}
 			err = cleanupFailedImage(client, img.ID, err)
-			return uploadErrMsg{Audit: record(err), err: err}
+			return uploadErrMsg{Audit: record(err), uploadID: id, err: err}
 		}
 
-		return uploadDoneMsg{Audit: record(nil), name: name}
+		return uploadDoneMsg{Audit: record(nil), uploadID: id, name: name}
 	})
 }
 
@@ -749,7 +784,9 @@ func (m Model) doURLImport() (Model, tea.Cmd) {
 	}
 
 	m.submitting = true
+	m.uploadID = uploadSeq.Add(1)
 	client := m.client
+	id := m.uploadID
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
@@ -762,7 +799,7 @@ func (m Model) doURLImport() (Model, tea.Cmd) {
 			MinRAM:     minRAM,
 		})
 		if err != nil {
-			return uploadErrMsg{Audit: shared.NewAudit(audit.ActionCreateImage, "image", "", name, err), err: err}
+			return uploadErrMsg{Audit: shared.NewAudit(audit.ActionCreateImage, "image", "", name, err), uploadID: id, err: err}
 		}
 
 		err = image.ImportImageURL(ctx, client, img.ID, url)
@@ -772,7 +809,7 @@ func (m Model) doURLImport() (Model, tea.Cmd) {
 		rec := shared.NewAudit(audit.ActionCreateImage, "image", img.ID, name, err).
 			WithDetails(map[string]string{"import_url": url, "disk_format": diskFmt, "visibility": vis})
 		if err != nil {
-			return uploadErrMsg{Audit: rec, err: err}
+			return uploadErrMsg{Audit: rec, uploadID: id, err: err}
 		}
 
 		return importStartedMsg{Audit: rec, name: name}

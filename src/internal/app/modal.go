@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/imagecreate"
 	"github.com/larkly/lazystack/internal/ui/imagedownload"
 )
 
@@ -277,9 +278,30 @@ func (m *Model) updateImageDownloadBackground(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+// updateImageUploadBackground routes image-upload lifecycle messages
+// (progress ticks, done, error) to the upload modal even when it is
+// inactive, so backgrounded uploads keep flowing, and surfaces completion
+// results in the status bar. Returns the resulting command, if any.
+func (m *Model) updateImageUploadBackground(msg tea.Msg) tea.Cmd {
+	if fin, ok := msg.(imagecreate.UploadFinishedMsg); ok {
+		if fin.Err != nil {
+			m.statusBar.StickyHint = fmt.Sprintf("%s Image upload failed: %s", shared.Glyph("✗", "FAIL"), shared.ParseError(fin.Err).FriendlyMessage)
+		} else {
+			m.statusBar.StickyHint = fmt.Sprintf("%s Image %s uploaded", shared.Glyph("✓", "OK"), fin.Name)
+		}
+		return nil
+	}
+	var cmd tea.Cmd
+	m.imageCreate, cmd = m.imageCreate.Update(msg)
+	return cmd
+}
+
 // updateAnyModalBackground routes non-key messages to active modals.
 func (m *Model) updateAnyModalBackground(msg tea.Msg) tea.Cmd {
 	if cmd := m.updateImageDownloadBackground(msg); cmd != nil {
+		return cmd
+	}
+	if cmd := m.updateImageUploadBackground(msg); cmd != nil {
 		return cmd
 	}
 	switch {
@@ -350,10 +372,6 @@ func (m *Model) updateAnyModalBackground(msg tea.Msg) tea.Cmd {
 	case m.imageEdit.Active:
 		var cmd tea.Cmd
 		m.imageEdit, cmd = m.imageEdit.Update(msg)
-		return cmd
-	case m.imageCreate.Active:
-		var cmd tea.Cmd
-		m.imageCreate, cmd = m.imageCreate.Update(msg)
 		return cmd
 	case m.lbCreate.Active:
 		var cmd tea.Cmd
