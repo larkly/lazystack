@@ -262,6 +262,7 @@ func TestListViewsDocumentFilterAndSort(t *testing.T) {
 		{"secgroupview", "Security Groups", true},
 		{"networkview", "Networks", true},
 		{"routerview", "Routers", true},
+		{"dnslist", "DNS", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.view, func(t *testing.T) {

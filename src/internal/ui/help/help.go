@@ -344,6 +344,9 @@ var allSections = []section{
 		binds: []bind{
 			l("↑/k ↓/j", "select zone (shows its records)"),
 			l("pgup/pgdn", "page up/down"),
+			k(&shared.Keys.Filter, "filter zones"),
+			l("s/S", "sort zones / reverse sort"),
+			l("esc", "clear filter"),
 			k(&shared.Keys.Refresh, "refresh"),
 			l("esc", "back"),
 		},

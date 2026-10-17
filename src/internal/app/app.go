@@ -386,6 +386,8 @@ func (m Model) textInputFocused() bool {
 		return m.networkView.IsFiltering()
 	case viewRouterView:
 		return m.routerView.IsFiltering()
+	case viewDNSList:
+		return m.dnsList.IsFiltering()
 	case viewLBView:
 		return m.lbView.IsSearching()
 	case viewImageView:

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/ui/dnslist"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/networkview"
@@ -80,6 +81,15 @@ func listFilterCases() []listFilterCase {
 				m.routerView, _ = m.routerView.Update(keyText('/'))
 			},
 			value: func(m Model) string { return m.routerView.FilterValue() },
+		},
+		{
+			name: "DNS zones",
+			open: func(m *Model) {
+				m.view = viewDNSList
+				m.dnsList = dnslist.New(nil)
+				m.dnsList, _ = m.dnsList.Update(keyText('/'))
+			},
+			value: func(m Model) string { return m.dnsList.FilterValue() },
 		},
 	}
 }
