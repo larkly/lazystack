@@ -22,17 +22,20 @@ type KeyPair struct {
 	Type string
 }
 
-// ListKeyPairs fetches all keypairs.
+// ListKeyPairs fetches all keypairs, following Nova's pagination links.
 func ListKeyPairs(ctx context.Context, client *gophercloud.ServiceClient) ([]KeyPair, error) {
 	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
 		return nil, err
 	}
 	shared.Debugf("[compute] listing keypairs")
 	var result []KeyPair
-	err := keypairs.List(client, keypairs.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+	wrap := func(r pagination.PageResult) pagination.Page {
+		return keypairs.KeyPairPage{SinglePageBase: pagination.SinglePageBase(r)}
+	}
+	err := eachNovaPage(ctx, client, client.ServiceURL("os-keypairs"), "keypairs_links", wrap, func(page pagination.Page) error {
 		extracted, err := keypairs.ExtractKeyPairs(page)
 		if err != nil {
-			return false, err
+			return err
 		}
 		for _, kp := range extracted {
 			result = append(result, KeyPair{
@@ -40,7 +43,7 @@ func ListKeyPairs(ctx context.Context, client *gophercloud.ServiceClient) ([]Key
 				Type: kp.Type,
 			})
 		}
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		shared.Debugf("[compute] list keypairs: %v", err)
