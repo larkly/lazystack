@@ -60,13 +60,9 @@ func (m Model) Render() string {
 
 	right := ""
 	if m.Error != "" {
-		warn := "⚠"
-		if shared.PlainMode {
-			warn = "!"
-		}
 		right = lipgloss.NewStyle().
 			Foreground(shared.ColorError).
-			Render(fmt.Sprintf(" %s %s ", warn, m.Error))
+			Render(fmt.Sprintf(" %s %s ", shared.Glyph("⚠", "!"), m.Error))
 	} else if m.StickyHint != "" {
 		right = shared.StyleHelp.Render(fmt.Sprintf(" %s ", m.StickyHint))
 	} else if m.Hint != "" {

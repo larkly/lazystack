@@ -55,3 +55,23 @@ func TestResourceActionRefreshesAffectedView(t *testing.T) {
 		})
 	}
 }
+
+func TestActionResultMarkerFollowsPlainMode(t *testing.T) {
+	prev := shared.PlainMode
+	t.Cleanup(func() { shared.PlainMode = prev })
+	for _, tc := range []struct {
+		plain bool
+		want  string
+	}{{false, "✓ Deleted vol-1"}, {true, "OK Deleted vol-1"}} {
+		m := initTestModel() // New applies the config's plain mode
+		shared.PlainMode = tc.plain
+		m, _ = m.handleResourceActionMsg(shared.ResourceActionMsg{Action: "Deleted", Name: "vol-1"})
+		if m.statusBar.StickyHint != tc.want {
+			t.Errorf("plain=%v: hint = %q, want %q", tc.plain, m.statusBar.StickyHint, tc.want)
+		}
+		m, _ = m.handleServerActionMsg(shared.ServerActionMsg{Action: "Deleted", Name: "vol-1"})
+		if m.statusBar.StickyHint != tc.want {
+			t.Errorf("plain=%v: server hint = %q, want %q", tc.plain, m.statusBar.StickyHint, tc.want)
+		}
+	}
+}

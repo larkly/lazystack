@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/imagedownload"
 )
 
@@ -265,9 +266,9 @@ func (m *Model) updateAnyModal(msg tea.Msg) (bool, tea.Cmd) {
 func (m *Model) updateImageDownloadBackground(msg tea.Msg) tea.Cmd {
 	if fin, ok := msg.(imagedownload.DownloadFinishedMsg); ok {
 		if fin.Err != nil {
-			m.statusBar.StickyHint = fmt.Sprintf("✗ Image download failed: %v", fin.Err)
+			m.statusBar.StickyHint = fmt.Sprintf("%s Image download failed: %v", shared.Glyph("✗", "FAIL"), fin.Err)
 		} else {
-			m.statusBar.StickyHint = fmt.Sprintf("✓ Image %s downloaded", fin.Name)
+			m.statusBar.StickyHint = fmt.Sprintf("%s Image %s downloaded", shared.Glyph("✓", "OK"), fin.Name)
 		}
 		return nil
 	}
