@@ -136,12 +136,16 @@ func NewEdit(client *gophercloud.ServiceClient, listenerID, currentName, current
 	di.SetWidth(30)
 	di.SetValue(currentDesc)
 
+	// Empty means unlimited; the placeholder, shown once the field is
+	// cleared, keeps the current limit in view.
 	ci := textinput.New()
 	ci.Prompt = ""
 	ci.Placeholder = "unlimited"
 	ci.CharLimit = 7
 	ci.SetWidth(10)
 	if currentConnLimit > 0 {
+		ci.Placeholder = "unlimited (current: " + strconv.Itoa(currentConnLimit) + ")"
+		ci.SetWidth(30)
 		ci.SetValue(strconv.Itoa(currentConnLimit))
 	}
 
@@ -406,6 +410,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 			return m, nil
 		}
 		connLimit = &v
+	} else if m.editMode {
+		unlimited := -1 // Octavia's value for no limit
+		connLimit = &unlimited
 	}
 
 	// Reject a pool the listener protocol cannot route to before any request.
@@ -441,7 +448,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	port, err := strconv.Atoi(strings.TrimSpace(m.portInput.Value()))
-	if err != nil || port < 1 || port > 65535 {
+	if err != nil || !shared.ValidPort(port) {
 		m.err = "Port must be a number between 1 and 65535"
 		return m, nil
 	}
