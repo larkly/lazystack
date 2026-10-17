@@ -18,7 +18,13 @@ import (
 )
 
 type fipsLoadedMsg struct{ fips []network.FloatingIP }
-type fetchErrMsg struct{ err error }
+
+// fetchErrMsg reports a failed initial load; allocOnly names the picker
+// mode that issued it.
+type fetchErrMsg struct {
+	allocOnly bool
+	err       error
+}
 type associateDoneMsg struct {
 	shared.Audit
 	fipAddr, serverName string
@@ -154,6 +160,11 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case fipsLoadedMsg:
+		// Both modes share the app's picker slot: a result from a picker
+		// of the other mode, closed while loading, is not ours.
+		if m.allocOnly {
+			return m, nil
+		}
 		// Without a free floating IP only the allocate row is offered;
 		// allocating waits for Enter.
 		m.loading = false
@@ -161,6 +172,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case netsLoadedMsg:
+		if !m.allocOnly {
+			return m, nil
+		}
 		m.loading = false
 		switch len(msg.nets) {
 		case 0:
@@ -176,8 +190,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case fetchErrMsg:
+		if msg.allocOnly != m.allocOnly {
+			return m, nil
+		}
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case targetsLoadedMsg:
@@ -212,6 +229,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.submitting = false
 		m.resolving = false
 		m.err = msg.err.Error()
+		if m.allocOnly {
+			// A plain allocation; the server flow keeps the raw text,
+			// which says whether a leftover IP was released.
+			m.err = shared.ParseError(msg.err).FriendlyMessage
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -493,7 +515,7 @@ func (m Model) netChoiceView() string {
 		cursor := "  "
 		style := lipgloss.NewStyle().Foreground(shared.ColorFg)
 		if i == m.netCursor {
-			cursor = "▸ "
+			cursor = shared.Glyph("▸", ">") + " "
 			style = style.Foreground(shared.ColorHighlight).Bold(true)
 		}
 		label := n.Name
@@ -506,7 +528,7 @@ func (m Model) netChoiceView() string {
 	if m.allocOnly {
 		back = "esc cancel"
 	}
-	lines = append(lines, "", shared.StyleHelp.Render("↑↓ navigate • enter allocate • "+back))
+	lines = append(lines, "", shared.StyleHelp.Render(shared.Glyph("↑↓", "up/down")+" navigate • enter allocate • "+back))
 	return strings.Join(lines, "\n")
 }
 
@@ -627,7 +649,7 @@ func (m Model) fetchExternalNetworks() tea.Cmd {
 		nets, err := network.ListExternalNetworks(ctx, client)
 		if err != nil {
 			shared.Debugf("[fippicker] error listing external networks: %v", err)
-			return fetchErrMsg{err: err}
+			return fetchErrMsg{allocOnly: true, err: err}
 		}
 		return netsLoadedMsg{nets: nets}
 	}

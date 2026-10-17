@@ -1,10 +1,13 @@
 package fippicker
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/testutil"
 )
@@ -146,5 +149,61 @@ func TestAllocateOnUnroutedNetworkAsksForAddress(t *testing.T) {
 	m, _ = m.Update(esc)
 	if !m.Active || m.choosingPort || !strings.Contains(m.View(), "+ Allocate new floating IP") {
 		t.Fatalf("esc should return to the list:\n%s", m.View())
+	}
+}
+
+// Both modes share the app's picker slot, so a load result from a picker
+// closed while loading can reach a newly opened one of the other mode. It
+// must be ignored: a stale network list must not allocate for a server, and
+// a stale floating IP list must not appear in the allocate-only picker.
+func TestLoadResultsFromTheOtherModeAreIgnored(t *testing.T) {
+	nets := []network.Network{{ID: "ext-1", Name: "public"}}
+
+	srv := New(nil, "srv", "web")
+	srv, cmd := srv.Update(netsLoadedMsg{nets: nets})
+	if cmd != nil || srv.submitting || srv.choosingNet || !srv.loading {
+		t.Fatalf("server picker acted on a network list: cmd=%v submitting=%v", cmd != nil, srv.submitting)
+	}
+	srv, _ = srv.Update(fetchErrMsg{allocOnly: true, err: errors.New("stale")})
+	if srv.err != "" || !srv.loading {
+		t.Fatalf("server picker took the allocate picker's error: %q", srv.err)
+	}
+
+	alloc := NewAllocate(nil)
+	alloc, cmd = alloc.Update(fipsLoadedMsg{fips: []network.FloatingIP{{ID: "fip", FloatingIP: "192.0.2.1"}}})
+	if cmd != nil || len(alloc.fips) != 0 || !alloc.loading {
+		t.Fatalf("allocate picker took a floating IP list: fips=%v", alloc.fips)
+	}
+	alloc, _ = alloc.Update(fetchErrMsg{err: errors.New("stale")})
+	if alloc.err != "" || !alloc.loading {
+		t.Fatalf("allocate picker took the server picker's error: %q", alloc.err)
+	}
+}
+
+// Allocation and loading errors are shown in their friendly form.
+func TestAllocateErrorsAreFriendly(t *testing.T) {
+	raw := errors.New("Expected HTTP response code [201] when accessing [POST http://neutron:9696/v2.0/floatingips], but got 409 instead: Quota exceeded for resources: ['floatingip']")
+	want := shared.ParseError(raw).FriendlyMessage
+	for _, msg := range []tea.Msg{fetchErrMsg{allocOnly: true, err: raw}, allocateErrMsg{err: raw}} {
+		m := NewAllocate(nil)
+		m, _ = m.Update(msg)
+		if m.err != want {
+			t.Fatalf("%T: err = %q, want %q", msg, m.err, want)
+		}
+	}
+}
+
+// The network step degrades its glyphs in plain mode.
+func TestNetworkStepPlainGlyphs(t *testing.T) {
+	orig := shared.PlainMode
+	shared.PlainMode = true
+	t.Cleanup(func() { shared.PlainMode = orig })
+
+	m := NewAllocate(nil)
+	m.SetSize(80, 30)
+	m, _ = m.Update(netsLoadedMsg{nets: []network.Network{{ID: "a", Name: "one"}, {ID: "b", Name: "two"}}})
+	view := ansi.Strip(m.netChoiceView())
+	if strings.ContainsAny(view, "▸↑↓") || !strings.Contains(view, "> one") || !strings.Contains(view, "up/down") {
+		t.Fatalf("plain view:\n%s", view)
 	}
 }
