@@ -149,6 +149,30 @@ func (m Model) InSelector() bool { return m.focus == FocusSelector }
 // IsSearching reports whether the search input has focus.
 func (m Model) IsSearching() bool { return m.searchActive }
 
+// Escape clears one layer of list state per esc press: the committed
+// filter, then the member selection. It reports whether anything was cleared; when nothing was,
+// esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if m.searchFilter != "" {
+		m.searchInput.SetValue("")
+		m.setSearchFilter("")
+		return true
+	}
+	if len(m.selectedMembers) > 0 {
+		m.selectedMembers = make(map[string]bool)
+		return true
+	}
+	return false
+}
+
+// FilterValue is the current search filter text, typed or committed.
+func (m Model) FilterValue() string {
+	if m.searchActive {
+		return m.searchInput.Value()
+	}
+	return m.searchFilter
+}
+
 // SelectedLB returns the load balancer under the selector cursor.
 func (m Model) SelectedLB() *loadbalancer.LoadBalancer {
 	visible := m.visibleLBs()
@@ -489,6 +513,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.order.Highlight = false
 		return m, nil
 
+	case shared.SelectionChangedMsg:
+		return m.onSelectorChange()
+
 	case spinner.TickMsg:
 		if m.loading || m.detailLoading {
 			var cmd tea.Cmd
@@ -516,9 +543,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
-		if m.searchFilter != "" {
-			m.searchInput.SetValue("")
-			m.setSearchFilter("")
+		if m.Escape() {
 			return m.onSelectorChange()
 		}
 		return m, nil
@@ -553,7 +578,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m.reverseSort()
 		}
 
-	case msg.String() == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		if m.focus == FocusSelector {
 			m.searchActive = true
 			m.searchInput.SetValue(m.searchFilter)
@@ -1885,7 +1910,10 @@ func (m Model) renderActionBar() string {
 			}
 		}
 	}
-	buttons = append(buttons, btn{"tab", "Switch Pane"}, btn{"esc", "Back"})
+	buttons = append(buttons, btn{"tab", "Switch Pane"})
+	if m.searchFilter != "" || len(m.selectedMembers) > 0 {
+		buttons = append(buttons, btn{"esc", "Clear"})
+	}
 
 	var parts []string
 	totalLen := 0
@@ -2080,16 +2108,27 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
+	if m.searchActive {
+		return "enter confirm \u2022 esc clear"
+	}
+	// esc only clears state here; it never leaves the view.
+	esc := ""
+	switch {
+	case m.searchFilter != "":
+		esc = "esc clear filter \u2022 "
+	case len(m.selectedMembers) > 0:
+		esc = "esc clear selection \u2022 "
+	}
 	switch m.focus {
 	case FocusSelector:
-		return "\u2191\u2193 navigate \u2022 / search \u2022 S sort \u2022 ^n create \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 / search \u2022 s/S sort \u2022 ^n create \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 " + esc + "? help"
 	case FocusListeners:
-		return "\u2191\u2193 navigate \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 " + esc + "? help"
 	case FocusPools:
-		return "\u2191\u2193 select pool \u2022 ^h monitor \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 select pool \u2022 ^h monitor \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 " + esc + "? help"
 	case FocusMembers:
-		return "\u2191\u2193 navigate \u2022 space select \u2022 x all \u2022 w drain \u2022 o admin \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 space select \u2022 x all \u2022 w drain \u2022 o admin \u2022 ^d delete \u2022 R refresh \u2022 " + esc + "? help"
 	default:
-		return "o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 " + esc + "? help"
 	}
 }

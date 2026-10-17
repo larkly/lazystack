@@ -252,6 +252,30 @@ func (m Model) SelectedImages() []img.Image {
 // IsSearching reports whether the search input has focus.
 func (m Model) IsSearching() bool { return m.searchActive }
 
+// Escape clears one layer of list state per esc press: the committed
+// filter, then the selection. It reports whether anything was cleared; when nothing was,
+// esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if m.searchFilter != "" {
+		m.searchInput.SetValue("")
+		m.setSearchFilter("")
+		return true
+	}
+	if len(m.selected) > 0 {
+		m.ClearSelection()
+		return true
+	}
+	return false
+}
+
+// FilterValue is the current search filter text, typed or committed.
+func (m Model) FilterValue() string {
+	if m.searchActive {
+		return m.searchInput.Value()
+	}
+	return m.searchFilter
+}
+
 // SelectionCount returns the number of selected images that bulk actions
 // would target (selected and visible).
 func (m Model) SelectionCount() int {
@@ -468,15 +492,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
-		if m.searchFilter != "" {
-			m.searchInput.SetValue("")
-			m.setSearchFilter("")
-			return m, nil
-		}
-		if len(m.selected) > 0 {
-			m.ClearSelection()
-			return m, nil
-		}
+		m.Escape()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Tab):
@@ -509,7 +525,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m.reverseSort()
 		}
 
-	case msg.String() == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		if m.focus == FocusSelector {
 			m.searchActive = true
 			m.searchInput.SetValue(m.searchFilter)
@@ -1468,7 +1484,10 @@ func (m Model) renderActionBar() string {
 			buttons = append(buttons, btn{"enter", "Server Detail"})
 		}
 	}
-	buttons = append(buttons, btn{"tab", "Switch Pane"}, btn{"esc", "Back"})
+	buttons = append(buttons, btn{"tab", "Switch Pane"})
+	if m.searchFilter != "" || len(m.selected) > 0 {
+		buttons = append(buttons, btn{"esc", "Clear"})
+	}
 
 	var parts []string
 	totalLen := 0
@@ -1577,12 +1596,19 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
+	if m.searchActive {
+		return "enter confirm \u2022 esc clear"
+	}
 	switch m.focus {
 	case FocusSelector:
 		if n := m.SelectionCount(); n > 0 {
 			return fmt.Sprintf("(%d selected) space toggle • ^d delete • esc clear • ? help", n)
 		}
-		return "\u2191\u2193 navigate \u2022 / search \u2022 S sort \u2022 ^n upload \u2022 d deactivate \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 ? help"
+		esc := ""
+		if m.searchFilter != "" {
+			esc = "esc clear filter \u2022 "
+		}
+		return "\u2191\u2193 navigate \u2022 / search \u2022 s/S sort \u2022 ^n upload \u2022 d deactivate \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 " + esc + "? help"
 	case FocusInfo:
 		return "enter edit \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 ? help"
 	case FocusProperties:

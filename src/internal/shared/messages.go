@@ -51,6 +51,11 @@ type ServerActionErrMsg struct {
 	Err    error
 }
 
+// SelectionChangedMsg tells the active list view that its selection may have
+// changed outside Update (e.g. Escape cleared a filter), so it can load the
+// newly selected item's detail.
+type SelectionChangedMsg struct{}
+
 // RefreshServersMsg triggers a server list refresh.
 type RefreshServersMsg struct{}
 

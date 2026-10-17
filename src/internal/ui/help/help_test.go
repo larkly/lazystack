@@ -101,7 +101,7 @@ func TestNewerViewsHaveContextualHelp(t *testing.T) {
 	}{
 		{"hypervisorlist", "Hypervisors", []entry{{"↑/k ↓/j", "navigate"}, {bindingKeys(shared.Keys.Refresh), "refresh"}, {"esc", "back"}}},
 		{"servicecatalog", "Service Catalog", []entry{{"↑/k ↓/j", "navigate"}, {"esc", "back"}}},
-		{"dnslist", "DNS", []entry{{"↑/k ↓/j", "zone"}, {bindingKeys(shared.Keys.Refresh), "refresh"}, {"esc", "back"}}},
+		{"dnslist", "DNS", []entry{{"↑/k ↓/j", "zone"}, {bindingKeys(shared.Keys.Refresh), "refresh"}, {"esc", "clear filter"}}},
 		{"usermanagement", "User Management", []entry{{"enter", "enable/disable"}, {"d", "delete user"}, {"esc", "back"}}},
 		{"auditlog", "Audit Trail", []entry{{"a", "action"}, {"r", "resource"}, {"d", "date"}, {"c", "clear"}, {"esc", "back"}}},
 	}
@@ -263,6 +263,9 @@ func TestListViewsDocumentFilterAndSort(t *testing.T) {
 		{"networkview", "Networks", true},
 		{"routerview", "Routers", true},
 		{"dnslist", "DNS", true},
+		{"lbview", "LB List", true},
+		{"imageview", "Images", true},
+		{"serverlist", "Server List", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.view, func(t *testing.T) {

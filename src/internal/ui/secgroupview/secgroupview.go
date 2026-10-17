@@ -123,8 +123,26 @@ type sortClearMsg struct{}
 // IsFiltering reports whether the "/" group filter input has focus.
 func (m Model) IsFiltering() bool { return m.filter.Active() }
 
+// escHint mentions esc in the selector hints while it has a filter to clear.
+func (m Model) escHint() string {
+	if m.filter.Value() != "" {
+		return "esc clear filter • "
+	}
+	return ""
+}
+
 // FilterValue is the current group filter text.
 func (m Model) FilterValue() string { return m.filter.Value() }
+
+// Escape clears the committed filter and reports whether there was one;
+// when there was not, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if !m.filter.Clear() {
+		return false
+	}
+	m.applyFilter()
+	return true
+}
 
 // SetComputeClient sets the compute client for server resolution.
 func (m *Model) SetComputeClient(client *gophercloud.ServiceClient) {
@@ -328,6 +346,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.order.Highlight = false
 		return m, nil
 
+	case shared.SelectionChangedMsg:
+		return m.onSelectorChange()
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -443,8 +464,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, m.filter.Start()
 
 	case key.Matches(msg, shared.Keys.Back):
-		if m.filter.Clear() {
-			m.applyFilter()
+		if m.Escape() {
 			return m.onSelectorChange()
 		}
 		return m, nil
@@ -1390,7 +1410,7 @@ func (m Model) Hints() string {
 	case focusInfo:
 		return "tab focus • ^n new • r rename • c clone • R refresh • ? help"
 	default:
-		return "↑↓ navigate • / filter • s/S sort • ^n new • ^d delete • r rename • c clone • tab focus • R refresh • ? help"
+		return "↑↓ navigate • / filter • s/S sort • ^n new • ^d delete • r rename • c clone • tab focus • R refresh • " + m.escHint() + "? help"
 	}
 }
 

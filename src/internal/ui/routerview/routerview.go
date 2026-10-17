@@ -114,8 +114,26 @@ type sortClearMsg struct{}
 // IsFiltering reports whether the "/" router filter input has focus.
 func (m Model) IsFiltering() bool { return m.filter.Active() }
 
+// escHint mentions esc in the selector hints while it has a filter to clear.
+func (m Model) escHint() string {
+	if m.filter.Value() != "" {
+		return "esc clear filter • "
+	}
+	return ""
+}
+
 // FilterValue is the current router filter text.
 func (m Model) FilterValue() string { return m.filter.Value() }
+
+// Escape clears the committed filter and reports whether there was one;
+// when there was not, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if !m.filter.Clear() {
+		return false
+	}
+	m.applyFilter()
+	return true
+}
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
@@ -357,6 +375,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.order.Highlight = false
 		return m, nil
 
+	case shared.SelectionChangedMsg:
+		cmd := m.onSelectorChange()
+		return m, cmd
+
 	case tea.KeyMsg:
 		if m.filter.Active() {
 			var cmd tea.Cmd
@@ -369,8 +391,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Filter) && m.focus == FocusSelector:
 			return m, m.filter.Start()
 		case key.Matches(msg, shared.Keys.Back):
-			if m.filter.Clear() {
-				m.applyFilter()
+			if m.Escape() {
 				cmd := m.onSelectorChange()
 				return m, cmd
 			}
@@ -1239,7 +1260,7 @@ func (m Model) Hints() string {
 	case focusInfo:
 		return "tab/shift+tab focus \u2022 ^n new \u2022 ^d delete \u2022 R refresh \u2022 ? help"
 	default:
-		return "\u2191\u2193 navigate \u2022 / filter \u2022 s/S sort \u2022 ^n new \u2022 ^d delete \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 / filter \u2022 s/S sort \u2022 ^n new \u2022 ^d delete \u2022 tab/shift+tab focus \u2022 R refresh \u2022 " + m.escHint() + "? help"
 	}
 }
 

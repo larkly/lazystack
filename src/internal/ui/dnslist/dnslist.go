@@ -58,6 +58,7 @@ type Model struct {
 	spinner      spinner.Model
 	err          error
 	refresh      shared.RefreshGate // zone list fetches
+	needRecords  bool               // Escape changed the selected zone; load its records
 }
 
 // New creates a DNS list model.
@@ -78,6 +79,26 @@ func (m Model) IsFiltering() bool { return m.filter.Active() }
 
 // FilterValue is the current zone filter text.
 func (m Model) FilterValue() string { return m.filter.Value() }
+
+// Escape clears the committed filter and reports whether there was one;
+// when there was not, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if !m.filter.Clear() {
+		return false
+	}
+	if m.applyFilter() {
+		m.needRecords = true
+	}
+	return true
+}
+
+// syncRecords loads the selected zone's records when Escape changed the
+// selection.
+func (m *Model) syncRecords() tea.Cmd {
+	changed := m.needRecords
+	m.needRecords = false
+	return m.recordsFor(changed)
+}
 
 // Init fetches zones.
 func (m Model) Init() tea.Cmd {
@@ -152,12 +173,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.order.Highlight = false
 		return m, nil
 
+	case shared.SelectionChangedMsg:
+		cmd := m.syncRecords()
+		return m, cmd
+
 	case tea.KeyMsg:
 		if m.filter.Active() {
 			var cmd tea.Cmd
 			m.filter, cmd = m.filter.Update(msg)
 			changed := m.applyFilter()
-			return m, tea.Batch(cmd, m.recordsFor(changed))
+			records := m.recordsFor(changed)
+			return m, tea.Batch(cmd, records)
 		}
 		switch {
 		case key.Matches(msg, shared.Keys.Filter):
@@ -169,13 +195,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.order = shared.ReverseSort(m.order)
 			return m.resort()
 		case key.Matches(msg, shared.Keys.Back):
-			if m.filter.Clear() {
-				changed := m.applyFilter()
-				return m, m.recordsFor(changed)
-			}
-			return m, func() tea.Msg {
-				return shared.ViewChangeMsg{View: "serverlist"}
-			}
+			m.Escape()
+			cmd := m.syncRecords()
+			return m, cmd
 		case key.Matches(msg, shared.Keys.Up):
 			return m.moveCursor(m.cursor - 1)
 		case key.Matches(msg, shared.Keys.Down):
@@ -443,7 +465,7 @@ func (m Model) Hints() string {
 	if m.filter.Active() {
 		return "enter confirm • esc clear"
 	}
-	return "↑↓ navigate zones • / filter • s/S sort • esc back • R refresh • ? help"
+	return "↑↓ navigate zones • / filter • s/S sort • R refresh • ? help"
 }
 
 // isSelectedZone reports whether zoneID is the zone currently selected.

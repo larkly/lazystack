@@ -368,6 +368,41 @@ func (m Model) isCreateFormView() bool {
 	return m.view == viewServerCreate || m.view == viewVolumeCreate || m.view == viewKeypairCreate
 }
 
+// listEscaper is a list view's part of the esc contract: clear one layer of
+// list state (the committed filter, then the selection) and report whether
+// anything was cleared.
+type listEscaper interface {
+	Escape() (handled bool)
+}
+
+// activeListEscaper returns the active list view, or nil when the active
+// view is not a list.
+func (m *Model) activeListEscaper() listEscaper {
+	switch m.view {
+	case viewServerList:
+		return &m.serverList
+	case viewVolumeList:
+		return &m.volumeList
+	case viewFloatingIPList:
+		return &m.floatingIPList
+	case viewKeypairList:
+		return &m.keypairList
+	case viewSecGroupView:
+		return &m.secGroupView
+	case viewNetworkList:
+		return &m.networkView
+	case viewRouterView:
+		return &m.routerView
+	case viewDNSList:
+		return &m.dnsList
+	case viewImageView:
+		return &m.imageView
+	case viewLBView:
+		return &m.lbView
+	}
+	return nil
+}
+
 // textInputFocused reports whether the active view has a focused filter or
 // search input that must receive every key before global shortcuts do.
 func (m Model) textInputFocused() bool {
@@ -510,20 +545,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.textInputFocused() {
 				return m.updateActiveView(msg)
 			}
-			// Server list: esc clears a committed filter, then the selection,
-			// before it means back-navigation; the list decides the order.
-			if m.view == viewServerList && m.serverList.HasClearableState() && key.Matches(msg, shared.Keys.Back) {
-				return m.updateActiveView(msg)
-			}
-			// Volume list: esc clears selection when items are selected
-			if m.view == viewVolumeList && m.volumeList.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
-				m.volumeList.ClearSelection()
-				return m, nil
-			}
-			// Image view: esc clears selection when items are selected
-			if m.view == viewImageView && m.imageView.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
-				m.imageView.ClearSelection()
-				return m, nil
+			// List views: esc first clears the view's committed filter,
+			// then its selection; only then does it mean back-navigation.
+			if key.Matches(msg, shared.Keys.Back) {
+				if l := m.activeListEscaper(); l != nil && l.Escape() {
+					return m.updateActiveView(shared.SelectionChangedMsg{})
+				}
 			}
 
 			switch {

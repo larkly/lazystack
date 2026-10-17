@@ -108,6 +108,9 @@ func (m Model) IsFiltering() bool {
 	return m.filter.Active() || m.namingFilter
 }
 
+// FilterValue is the current filter text, typed or committed.
+func (m Model) FilterValue() string { return m.filter.Value() }
+
 // CopyEntries returns the title and copyable fields for the selected server.
 func (m Model) CopyEntries() (string, []copypicker.Entry) {
 	s := m.SelectedServer()
@@ -255,12 +258,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		m.ensureVisible()
 	case key.Matches(msg, shared.Keys.Back):
-		// Clear one layer at a time: the committed filter, then the selection.
-		if m.filter.Clear() {
-			m.applyFilter()
-		} else if len(m.selected) > 0 {
-			m.ClearSelection()
-		}
+		m.Escape()
 	case key.Matches(msg, shared.Keys.Filter):
 		return m, m.filter.Start()
 	case key.Matches(msg, shared.Keys.SaveFilter):
@@ -953,10 +951,19 @@ func (m *Model) SelectIDs(ids []string) {
 	}
 }
 
-// HasClearableState reports whether esc has something to clear on the list
-// (a committed filter or a selection) rather than meaning back-navigation.
-func (m Model) HasClearableState() bool {
-	return m.filter.Value() != "" || len(m.selected) > 0
+// Escape clears one layer of list state per esc press: the committed
+// filter, then the selection. It reports whether anything was cleared; when nothing was,
+// esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if m.filter.Clear() {
+		m.applyFilter()
+		return true
+	}
+	if len(m.selected) > 0 {
+		m.ClearSelection()
+		return true
+	}
+	return false
 }
 
 // SelectionCount returns the number of selected servers bulk actions would

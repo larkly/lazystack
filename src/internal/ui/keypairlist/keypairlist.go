@@ -68,6 +68,16 @@ func (m Model) IsFiltering() bool { return m.filter.Active() }
 // FilterValue is the current filter text.
 func (m Model) FilterValue() string { return m.filter.Value() }
 
+// Escape clears the committed filter and reports whether there was one;
+// when there was not, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if !m.filter.Clear() {
+		return false
+	}
+	m.applyFilter()
+	return true
+}
+
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
 	shared.Debugf("[keypairlist] Init()")
@@ -134,9 +144,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Filter):
 			return m, m.filter.Start()
 		case key.Matches(msg, shared.Keys.Back):
-			if m.filter.Clear() {
-				m.applyFilter()
-			}
+			m.Escape()
 		case key.Matches(msg, shared.Keys.Sort):
 			m.order = shared.NextSort(m.order, len(kpSortColumns))
 			return m.resort()

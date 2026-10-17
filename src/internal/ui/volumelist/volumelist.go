@@ -222,6 +222,21 @@ func (m Model) listedSelection() []volume.Volume {
 	return result
 }
 
+// Escape clears one layer of list state per esc press: the committed
+// filter, then the selection. It reports whether anything was cleared; when nothing was,
+// esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if m.filter.Clear() {
+		m.applyFilter()
+		return true
+	}
+	if len(m.selected) > 0 {
+		m.ClearSelection()
+		return true
+	}
+	return false
+}
+
 // ClearSelection clears all selected volumes.
 func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
@@ -350,9 +365,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Filter):
 			return m, m.filter.Start()
 		case key.Matches(msg, shared.Keys.Back):
-			if m.filter.Clear() {
-				m.applyFilter()
-			}
+			m.Escape()
 		case key.Matches(msg, shared.Keys.Sort):
 			if n := m.visibleColCount(); n > 0 {
 				m.order = shared.NextSort(m.order, n)

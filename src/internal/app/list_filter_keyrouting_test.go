@@ -7,10 +7,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/ui/dnslist"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
+	"github.com/larkly/lazystack/internal/ui/imageview"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
+	"github.com/larkly/lazystack/internal/ui/lbview"
 	"github.com/larkly/lazystack/internal/ui/networkview"
 	"github.com/larkly/lazystack/internal/ui/routerview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
+	"github.com/larkly/lazystack/internal/ui/serverlist"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 )
 
@@ -28,6 +31,33 @@ type listFilterCase struct {
 
 func listFilterCases() []listFilterCase {
 	return []listFilterCase{
+		{
+			name: "servers",
+			open: func(m *Model) {
+				m.view = viewServerList
+				m.serverList = serverlist.New(nil, nil, 5*time.Second)
+				m.serverList, _ = m.serverList.Update(keyText('/'))
+			},
+			value: func(m Model) string { return m.serverList.FilterValue() },
+		},
+		{
+			name: "images",
+			open: func(m *Model) {
+				m.view = viewImageView
+				m.imageView = imageview.New(nil, nil, 5*time.Second)
+				m.imageView, _ = m.imageView.Update(keyText('/'))
+			},
+			value: func(m Model) string { return m.imageView.FilterValue() },
+		},
+		{
+			name: "load balancers",
+			open: func(m *Model) {
+				m.view = viewLBView
+				m.lbView = lbview.New(nil, 5*time.Second)
+				m.lbView, _ = m.lbView.Update(keyText('/'))
+			},
+			value: func(m Model) string { return m.lbView.FilterValue() },
+		},
 		{
 			name: "volumes",
 			open: func(m *Model) {

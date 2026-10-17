@@ -285,7 +285,8 @@ var allSections = []section{
 			l("ctrl+d", "delete load balancer"),
 			l("s/S", "sort / reverse sort"),
 			l("Y", "copy field..."),
-			l("/", "filter"),
+			k(&shared.Keys.Filter, "filter"),
+			l("esc", "clear filter"),
 		},
 	},
 	{
@@ -302,7 +303,7 @@ var allSections = []section{
 			l("space", "toggle member selection"),
 			l("x", "select/deselect all members"),
 			l("Y", "copy field..."),
-			l("esc", "back to list"),
+			l("esc", "clear member selection"),
 		},
 	},
 	{
@@ -348,7 +349,6 @@ var allSections = []section{
 			l("s/S", "sort zones / reverse sort"),
 			l("esc", "clear filter"),
 			k(&shared.Keys.Refresh, "refresh"),
-			l("esc", "back"),
 		},
 	},
 	{
