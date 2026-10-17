@@ -425,6 +425,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		})
 	}
 
+	if m.subnetsLoading {
+		m.err = "Loading subnets…"
+		return m, nil
+	}
 	if len(m.subnets) == 0 {
 		m.err = "No subnets available"
 		return m, nil
