@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -28,6 +29,26 @@ var networkPatterns = []string{
 	"temporarily unavailable",
 }
 
+// quotaPatterns match the quota and over-limit wording of Nova, Neutron,
+// Cinder and Octavia. They are checked before the status code because the
+// services disagree on it: Nova answers 403, Neutron 409, Cinder 413.
+var quotaPatterns = []string{
+	"quota exceeded",
+	"limit exceeded",
+	"overquota",
+	"exceeded for",
+}
+
+// httpStatus returns the HTTP status carried by err, or 0 when err is not
+// an unexpected-response-code error.
+func httpStatus(err error) int {
+	var codeErr gophercloud.ErrUnexpectedResponseCode
+	if errors.As(err, &codeErr) {
+		return codeErr.Actual
+	}
+	return 0
+}
+
 // ParsedError carries both a user-friendly message and the raw error for expandable display.
 type ParsedError struct {
 	FriendlyMessage string // User-friendly, actionable message
@@ -52,8 +73,21 @@ func ParseError(err error) *ParsedError {
 	}
 
 	raw := err.Error()
+	lowerRaw := strings.ToLower(raw)
 
-	// Check HTTP status codes first.
+	// Quota text wins over the status code; see quotaPatterns.
+	for _, pattern := range quotaPatterns {
+		if strings.Contains(lowerRaw, pattern) {
+			return &ParsedError{
+				FriendlyMessage: "Quota exceeded — free up resources or contact your cloud admin.",
+				RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
+				HTTPStatusCode:  httpStatus(err),
+				Category:        "quota",
+			}
+		}
+	}
+
+	// Then the HTTP status code.
 	if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
 		return &ParsedError{
 			FriendlyMessage: "Resource is busy (provisioning in progress). Try again shortly.",
@@ -91,18 +125,6 @@ func ParseError(err error) *ParsedError {
 			FriendlyMessage: "Quota exceeded — free up resources or contact your cloud admin.",
 			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
 			HTTPStatusCode:  http.StatusRequestEntityTooLarge,
-			Category:        "quota",
-		}
-	}
-
-	lowerRaw := strings.ToLower(raw)
-
-	// Check for quota-related patterns in raw error if status code wasn't enough.
-	if strings.Contains(lowerRaw, "quota exceeded") || strings.Contains(lowerRaw, "limit exceeded") {
-		return &ParsedError{
-			FriendlyMessage: "Quota exceeded — free up resources or contact your cloud admin.",
-			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
-			HTTPStatusCode:  0,
 			Category:        "quota",
 		}
 	}

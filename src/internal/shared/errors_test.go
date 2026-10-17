@@ -307,3 +307,55 @@ func TestParseError_GophercloudErrUnexpected(t *testing.T) {
 func (e *ParsedError) Categorized() bool {
 	return e.Category != "unknown"
 }
+
+// newHTTPErrorWithBody creates a gophercloud ErrUnexpectedResponseCode
+// carrying an API response body.
+func newHTTPErrorWithBody(statusCode int, body string) gophercloud.ErrUnexpectedResponseCode {
+	e := newHTTPError(statusCode)
+	e.Body = []byte(body)
+	return e
+}
+
+// Nova reports OverQuota as 403 and Neutron as 409; the quota text in the
+// body must win over the status code.
+func TestParseError_QuotaBodyBeatsStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"nova 403", http.StatusForbidden, `{"forbidden": {"code": 403, "message": "Quota exceeded for cores: Requested 4, but already used 20 of 20 cores"}}`},
+		{"neutron 409", http.StatusConflict, `{"NeutronError": {"type": "OverQuota", "message": "Quota exceeded for resources: ['port'].", "detail": ""}}`},
+		{"neutron type only", http.StatusConflict, `{"NeutronError": {"type": "OverQuota", "message": "", "detail": ""}}`},
+		{"cinder 413", http.StatusRequestEntityTooLarge, `{"overLimit": {"message": "Maximum number of volumes allowed (10) exceeded for quota 'volumes'."}}`},
+		{"limit 403", http.StatusForbidden, `{"forbidden": {"message": "Maximum number of key pairs limit exceeded"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed := ParseError(newHTTPErrorWithBody(tc.status, tc.body))
+			if parsed.Category != "quota" {
+				t.Errorf("category=%q, want quota", parsed.Category)
+			}
+			if parsed.FriendlyMessage != "Quota exceeded — free up resources or contact your cloud admin." {
+				t.Errorf("friendly=%q", parsed.FriendlyMessage)
+			}
+			if parsed.HTTPStatusCode != tc.status {
+				t.Errorf("status=%d, want %d", parsed.HTTPStatusCode, tc.status)
+			}
+		})
+	}
+}
+
+func TestParseError_PlainStatusWithoutQuotaBody(t *testing.T) {
+	for _, tc := range []struct {
+		status   int
+		body     string
+		category string
+	}{
+		{http.StatusForbidden, `{"forbidden": {"code": 403, "message": "Policy doesn't allow os_compute_api:servers:create to be performed."}}`, "forbidden"},
+		{http.StatusConflict, `{"conflictingRequest": {"code": 409, "message": "Cannot 'reboot' instance while it is in task_state rebooting"}}`, "conflict"},
+	} {
+		if got := ParseError(newHTTPErrorWithBody(tc.status, tc.body)).Category; got != tc.category {
+			t.Errorf("status %d: category=%q, want %q", tc.status, got, tc.category)
+		}
+	}
+}
