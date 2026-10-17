@@ -168,3 +168,8 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return "enter open in browser • c copy • esc close"
+}

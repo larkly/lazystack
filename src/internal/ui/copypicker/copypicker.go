@@ -212,3 +212,8 @@ func truncate(s string, n int) string {
 	}
 	return s[:n-1] + "…"
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return shared.Glyph("↑↓", "up/down") + " navigate • 1-9 quick pick • enter copy • esc cancel"
+}

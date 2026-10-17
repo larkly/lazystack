@@ -106,3 +106,11 @@ func (m *ErrorModel) SetSize(w, h int) {
 	m.Width = w
 	m.Height = h
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m ErrorModel) Hints() string {
+	if m.ShowDetails {
+		return "enter/esc dismiss • d hide details"
+	}
+	return "enter/esc dismiss • d details"
+}

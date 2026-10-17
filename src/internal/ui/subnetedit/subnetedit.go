@@ -553,3 +553,8 @@ func routesEqual(a, b []network.HostRoute) bool {
 	}
 	return true
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return "tab/" + shared.Glyph("↑↓", "up/down") + " fields • " + shared.Glyph("←→", "left/right") + " cycle • ctrl+s submit • esc cancel"
+}

@@ -665,3 +665,11 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.sgPickerOpen {
+		return shared.Glyph("↑↓", "up/down") + " navigate • space toggle • enter confirm • esc close • type to filter"
+	}
+	return "tab/" + shared.Glyph("↑↓", "up/down") + " fields • " + shared.Glyph("←→", "left/right") + " cycle • ctrl+s submit • esc cancel"
+}

@@ -298,3 +298,11 @@ func (m Model) attachVolume(srv compute.Server) tea.Cmd {
 		return attachDoneMsg{Audit: rec, serverName: serverName, volumeName: volumeName}
 	}
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.loading || m.submitting || m.err != "" || len(m.filtered) == 0 {
+		return "esc close"
+	}
+	return shared.Glyph("↑↓", "up/down") + " navigate • enter select • type to filter • esc cancel"
+}

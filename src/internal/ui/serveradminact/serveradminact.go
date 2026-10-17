@@ -311,3 +311,16 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	switch m.promptStage {
+	case "host":
+		return "enter execute • esc back"
+	case "state":
+		return shared.Glyph("↑↓", "up/down") + " navigate • enter set state • esc back"
+	case "confirm":
+		return "y confirm • n cancel • esc back"
+	}
+	return shared.Glyph("↑↓", "up/down") + " navigate • enter select • esc close"
+}

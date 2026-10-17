@@ -517,3 +517,11 @@ func (m Model) fetchExtNetworks() tea.Cmd {
 		return extNetsLoadedMsg{nets: nets}
 	}
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.pickerOpen {
+		return shared.Glyph("↑↓", "up/down") + " navigate • enter select • esc close"
+	}
+	return "tab/" + shared.Glyph("↑↓", "up/down") + " fields • " + shared.Glyph("←→", "left/right") + " cycle • enter picker • ctrl+s submit • esc cancel"
+}

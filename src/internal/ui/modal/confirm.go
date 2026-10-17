@@ -177,3 +177,11 @@ func (m *ConfirmModel) SetSize(w, h int) {
 	m.Width = w
 	m.Height = h
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m ConfirmModel) Hints() string {
+	if len(m.VolumeIDs) > 0 {
+		return "y confirm • n/esc cancel • space toggle volumes • tab switch"
+	}
+	return "y confirm • n/esc cancel • tab switch"
+}

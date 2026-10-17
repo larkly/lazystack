@@ -487,3 +487,11 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.mode == "add" || m.mode == "edit" {
+		return "enter save • tab switch • esc cancel"
+	}
+	return "a add • e edit • d delete • " + shared.Glyph("↑↓", "up/down") + " navigate • esc back"
+}

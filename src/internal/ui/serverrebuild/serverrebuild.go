@@ -380,3 +380,14 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	switch {
+	case m.confirming:
+		return "y confirm • n/esc cancel"
+	case m.filtering:
+		return "type to filter • enter apply • esc clear"
+	}
+	return shared.Glyph("↑↓", "up/down") + " navigate • enter select • / filter • esc cancel"
+}

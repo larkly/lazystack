@@ -264,3 +264,21 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.creds != nil {
+		reveal := "r reveal"
+		if m.revealed {
+			reveal = "r hide"
+		}
+		if len(m.creds) > 1 {
+			return shared.Glyph("↑↓", "up/down") + " select • " + reveal + " • c copy • esc close"
+		}
+		return reveal + " • c copy • esc close"
+	}
+	if m.plain != "" || m.encrypted != "" {
+		return "c copy • esc close"
+	}
+	return "esc close"
+}

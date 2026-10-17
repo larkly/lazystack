@@ -550,3 +550,18 @@ func listSSHKeys() []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	switch {
+	case m.ipPickerOpen:
+		return shared.Glyph("↑↓", "up/down") + " select • enter confirm • esc close"
+	case m.pickerOpen:
+		return shared.Glyph("↑↓", "up/down") + " select • enter choose key • type to filter • esc close"
+	case m.focusField == fieldHost && len(m.ips) > 1:
+		return shared.Glyph("←→", "left/right") + " change IP • enter pick from list • tab next • esc cancel"
+	case m.focusField == fieldKeyPath:
+		return "enter browse keys • tab next • esc cancel"
+	}
+	return "tab next • space toggle • enter connect • esc cancel"
+}

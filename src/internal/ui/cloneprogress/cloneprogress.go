@@ -759,3 +759,8 @@ func waitUntil(ctx context.Context, cond func() bool) bool {
 func isNotFound(err error) bool {
 	return err != nil && gophercloud.ResponseCodeIs(err, http.StatusNotFound)
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return "esc dismiss (operations continue in background)"
+}

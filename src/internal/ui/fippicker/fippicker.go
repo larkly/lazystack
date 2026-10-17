@@ -748,3 +748,21 @@ func releaseAfterFailure(client *gophercloud.ServiceClient, fip *network.Floatin
 	shared.Debugf("[fippicker] released unassociated FIP %s", fip.ID)
 	return fmt.Errorf("%w (allocated floating IP %s was released)", cause, fip.FloatingIP), nil
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	ud := shared.Glyph("↑↓", "up/down")
+	switch {
+	case m.loading || m.resolving || m.submitting || m.err != "":
+		return "esc close"
+	case m.choosingNet:
+		back := "esc back"
+		if m.allocOnly {
+			back = "esc cancel"
+		}
+		return ud + " navigate • enter allocate • " + back
+	case m.choosingPort:
+		return ud + " navigate • enter assign • esc back"
+	}
+	return ud + " navigate • enter select • esc cancel"
+}

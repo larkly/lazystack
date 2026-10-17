@@ -526,3 +526,14 @@ func firstUsableIP(cidr string) string {
 	ip[len(ip)-1] = 1
 	return ip.String()
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.phase == phaseConfirm {
+		return "tab fields • ctrl+s submit • esc back"
+	}
+	if m.loading || m.submitting || m.err != "" || len(m.subnets) == 0 {
+		return "esc close"
+	}
+	return shared.Glyph("↑↓", "up/down") + " navigate • enter select • esc cancel"
+}
