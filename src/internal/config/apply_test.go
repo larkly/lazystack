@@ -170,11 +170,11 @@ func TestApplyKeybindings_UnknownKeyIgnored(t *testing.T) {
 func TestApplyAll_Integration(t *testing.T) {
 	prevPlain := shared.PlainMode
 	prevPri := shared.ColorPrimary
-	prevQuit := shared.Keys.Quit
+	prevKeys := shared.Keys
 	defer func() {
 		shared.PlainMode = prevPlain
 		shared.ColorPrimary = prevPri
-		shared.Keys.Quit = prevQuit
+		shared.Keys = prevKeys
 	}()
 
 	cfg := Defaults()

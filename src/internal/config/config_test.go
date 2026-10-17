@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 func TestDefaults(t *testing.T) {
@@ -365,6 +367,12 @@ func TestSaveAndRoundTrip(t *testing.T) {
 }
 
 func TestApplyAll(t *testing.T) {
+	prevPlain, prevPri, prevErr, prevKeys := shared.PlainMode, shared.ColorPrimary, shared.ColorError, shared.Keys
+	defer func() {
+		shared.PlainMode, shared.ColorPrimary, shared.ColorError, shared.Keys = prevPlain, prevPri, prevErr, prevKeys
+		shared.RebuildStyles()
+	}()
+
 	cfg := Defaults()
 	cfg.General.PlainMode = true
 	cfg.Colors.Primary = "#FF0000"

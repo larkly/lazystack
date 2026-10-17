@@ -2,8 +2,10 @@ package shared
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 // reservedKeys can never be bound: Ctrl+A is the GNU Screen prefix and
@@ -96,6 +98,27 @@ type KeyMap struct {
 	Metadata       key.Binding
 	UserManagement key.Binding
 	ColumnPick     key.Binding
+
+	// Form and pane-specific actions.
+	Submit              key.Binding
+	HealthMonitor       key.Binding
+	DrainMember         key.Binding
+	SelectAll           key.Binding
+	Download            key.Binding
+	Background          key.Binding
+	ToggleDetails       key.Binding
+	MetadataAdd         key.Binding
+	MetadataEdit        key.Binding
+	MetadataDelete      key.Binding
+	SaveKey             key.Binding
+	JumpStart           key.Binding
+	JumpEnd             key.Binding
+	AuditFilterAction   key.Binding
+	AuditFilterResource key.Binding
+	AuditFilterDate     key.Binding
+	AuditFilterClear    key.Binding
+	CopyValue           key.Binding
+	Reveal              key.Binding
 }
 
 var Keys = KeyMap{
@@ -359,4 +382,99 @@ var Keys = KeyMap{
 		key.WithKeys("O"),
 		key.WithHelp("O", "columns"),
 	),
+	Submit: key.NewBinding(
+		key.WithKeys("ctrl+s"),
+		key.WithHelp("ctrl+s", "submit"),
+	),
+	HealthMonitor: key.NewBinding(
+		key.WithKeys("ctrl+h"),
+		key.WithHelp("ctrl+h", "health monitor"),
+	),
+	DrainMember: key.NewBinding(
+		key.WithKeys("w"),
+		key.WithHelp("w", "drain member"),
+	),
+	SelectAll: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "select all"),
+	),
+	Download: key.NewBinding(
+		key.WithKeys("ctrl+g"),
+		key.WithHelp("ctrl+g", "download"),
+	),
+	Background: key.NewBinding(
+		key.WithKeys("b"),
+		key.WithHelp("b", "background"),
+	),
+	ToggleDetails: key.NewBinding(
+		key.WithKeys("d", "D"),
+		key.WithHelp("d", "details"),
+	),
+	MetadataAdd: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "add metadata"),
+	),
+	MetadataEdit: key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "edit metadata"),
+	),
+	MetadataDelete: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "delete metadata"),
+	),
+	SaveKey: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "save private key"),
+	),
+	JumpStart: key.NewBinding(
+		key.WithKeys("g"),
+		key.WithHelp("g", "jump to start"),
+	),
+	JumpEnd: key.NewBinding(
+		key.WithKeys("G"),
+		key.WithHelp("G", "jump to end"),
+	),
+	AuditFilterAction: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "filter by action"),
+	),
+	AuditFilterResource: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "filter by resource"),
+	),
+	AuditFilterDate: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "filter by date"),
+	),
+	AuditFilterClear: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "clear filter"),
+	),
+	CopyValue: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "copy"),
+	),
+	Reveal: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "reveal/hide"),
+	),
+}
+
+// TextKeys are the editing keys of the hand-rolled filter inputs. They mirror
+// the editing keys of bubbles' textinput, which are not configurable either,
+// so they are deliberately absent from the keybinding config.
+var TextKeys = struct {
+	DeleteChar key.Binding
+	ClearLine  key.Binding
+}{
+	DeleteChar: key.NewBinding(key.WithKeys("backspace", "delete")),
+	ClearLine:  key.NewBinding(key.WithKeys("ctrl+u")),
+}
+
+// MatchesNonText reports whether msg matches b and is not a single printable
+// character. Pickers with a type-to-filter input navigate with it, so a
+// letter in the binding (k/j by default) still reaches the filter as text,
+// while arrows and any non-character key the user binds still navigate.
+func MatchesNonText(msg tea.KeyMsg, b key.Binding) bool {
+	return key.Matches(msg, b) && utf8.RuneCountInString(msg.String()) != 1
 }

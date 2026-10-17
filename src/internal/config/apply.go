@@ -120,6 +120,26 @@ var keybindingFieldMap = map[string]func(b key.Binding){
 	"hypervisors":     func(b key.Binding) { shared.Keys.Hypervisors = b },
 	"user_management": func(b key.Binding) { shared.Keys.UserManagement = b },
 	"column_pick":     func(b key.Binding) { shared.Keys.ColumnPick = b },
+
+	"submit":                func(b key.Binding) { shared.Keys.Submit = b },
+	"health_monitor":        func(b key.Binding) { shared.Keys.HealthMonitor = b },
+	"drain_member":          func(b key.Binding) { shared.Keys.DrainMember = b },
+	"select_all":            func(b key.Binding) { shared.Keys.SelectAll = b },
+	"download":              func(b key.Binding) { shared.Keys.Download = b },
+	"background":            func(b key.Binding) { shared.Keys.Background = b },
+	"toggle_details":        func(b key.Binding) { shared.Keys.ToggleDetails = b },
+	"metadata_add":          func(b key.Binding) { shared.Keys.MetadataAdd = b },
+	"metadata_edit":         func(b key.Binding) { shared.Keys.MetadataEdit = b },
+	"metadata_delete":       func(b key.Binding) { shared.Keys.MetadataDelete = b },
+	"save_key":              func(b key.Binding) { shared.Keys.SaveKey = b },
+	"jump_start":            func(b key.Binding) { shared.Keys.JumpStart = b },
+	"jump_end":              func(b key.Binding) { shared.Keys.JumpEnd = b },
+	"audit_filter_action":   func(b key.Binding) { shared.Keys.AuditFilterAction = b },
+	"audit_filter_resource": func(b key.Binding) { shared.Keys.AuditFilterResource = b },
+	"audit_filter_date":     func(b key.Binding) { shared.Keys.AuditFilterDate = b },
+	"audit_filter_clear":    func(b key.Binding) { shared.Keys.AuditFilterClear = b },
+	"copy_value":            func(b key.Binding) { shared.Keys.CopyValue = b },
+	"reveal":                func(b key.Binding) { shared.Keys.Reveal = b },
 }
 
 // defaultHelpText maps config keybinding names to their help descriptions.
@@ -182,6 +202,26 @@ var defaultHelpText = map[string]string{
 	"hypervisors":     "hypervisors",
 	"user_management": "user management",
 	"column_pick":     "columns",
+
+	"submit":                "submit",
+	"health_monitor":        "health monitor",
+	"drain_member":          "drain member",
+	"select_all":            "select all",
+	"download":              "download",
+	"background":            "background",
+	"toggle_details":        "details",
+	"metadata_add":          "add metadata",
+	"metadata_edit":         "edit metadata",
+	"metadata_delete":       "delete metadata",
+	"save_key":              "save private key",
+	"jump_start":            "jump to start",
+	"jump_end":              "jump to end",
+	"audit_filter_action":   "filter by action",
+	"audit_filter_resource": "filter by resource",
+	"audit_filter_date":     "filter by date",
+	"audit_filter_clear":    "clear filter",
+	"copy_value":            "copy",
+	"reveal":                "reveal/hide",
 }
 
 // ApplyKeybindings sets shared.Keys fields from the config map.

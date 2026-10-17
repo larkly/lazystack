@@ -179,6 +179,26 @@ func DefaultKeybindings() map[string]string {
 		"hypervisors":     "H",
 		"user_management": "U",
 		"column_pick":     "O",
+		// Form and pane-specific actions.
+		"submit":                "ctrl+s", // submit a create/edit form
+		"health_monitor":        "ctrl+h", // LB pools pane: create/edit health monitor
+		"drain_member":          "w",      // LB members pane: set weight 0
+		"select_all":            "x",      // LB members pane: toggle all selections
+		"download":              "ctrl+g", // image properties pane: download image
+		"background":            "b",      // image upload/download: hide progress
+		"toggle_details":        "d,D",    // error modal: show/hide raw error
+		"metadata_add":          "a",      // server metadata: add key
+		"metadata_edit":         "e",      // server metadata: edit key
+		"metadata_delete":       "d",      // server metadata: delete key
+		"save_key":              "s",      // keypair created: save private key
+		"jump_start":            "g",      // console log: scroll to top
+		"jump_end":              "G",      // console log: scroll to bottom
+		"audit_filter_action":   "a",      // audit trail: filter by action
+		"audit_filter_resource": "r",      // audit trail: filter by resource
+		"audit_filter_date":     "d",      // audit trail: filter by date
+		"audit_filter_clear":    "c",      // audit trail: clear filter
+		"copy_value":            "c",      // console URL / admin password: copy
+		"reveal":                "r",      // admin password: reveal/hide
 	}
 }
 
