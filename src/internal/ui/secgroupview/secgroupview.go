@@ -1380,6 +1380,11 @@ func (m *Model) applyHighlightNames() {
 	if len(m.highlightNames) == 0 {
 		return
 	}
+	// A committed filter that hides every group being jumped to gives way.
+	if m.filter.Value() != "" && !m.listsHighlighted(m.groups) && m.listsHighlighted(m.allGroups) {
+		m.filter.Clear()
+		m.applyFilter()
+	}
 	for i, sg := range m.groups {
 		if m.highlightNames[sg.Name] {
 			m.cursor = i
@@ -1393,6 +1398,17 @@ func (m *Model) applyHighlightNames() {
 			return
 		}
 	}
+}
+
+// listsHighlighted reports whether items contains a group named in
+// highlightNames.
+func (m Model) listsHighlighted(items []network.SecurityGroup) bool {
+	for _, it := range items {
+		if m.highlightNames[it.Name] {
+			return true
+		}
+	}
+	return false
 }
 
 // Hints returns key hints for the status bar.

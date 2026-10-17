@@ -291,6 +291,16 @@ func (m *Model) applyHighlight() {
 	if m.highlight == "" {
 		return
 	}
+	// A committed filter that hides the key pair being highlighted gives way.
+	if m.filter.Value() != "" && shared.RestoreCursor(m.rowNames(), m.highlight) < 0 {
+		for _, kp := range m.allPairs {
+			if kp.Name == m.highlight {
+				m.filter.Clear()
+				m.applyFilter()
+				break
+			}
+		}
+	}
 	for i, kp := range m.pairs {
 		if kp.Name == m.highlight {
 			m.cursor = i

@@ -84,3 +84,16 @@ func TestFilterWithNoMatchesSaysSo(t *testing.T) {
 		t.Fatalf("view does not say nothing matches:\n%s", v)
 	}
 }
+
+// A key pair just created must get the cursor even when the committed
+// filter hides it: the filter gives way.
+func TestHighlightClearsFilterThatHidesTarget(t *testing.T) {
+	m := New(nil, time.Second)
+	m.SetSize(120, 30)
+	m, _ = m.Update(keypairsLoadedMsg{keypairs: filterPairs()})
+	m = typeFilter(m, "alice")
+	m.SetHighlight("bob")
+	if m.FilterValue() != "" || m.SelectedKeyPair() == nil || m.SelectedKeyPair().Name != "bob" {
+		t.Fatalf("filter=%q cursor=%+v, want filter cleared and cursor on bob", m.FilterValue(), m.SelectedKeyPair())
+	}
+}

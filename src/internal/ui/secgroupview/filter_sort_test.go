@@ -138,3 +138,14 @@ func TestFilterWithNoMatchesClearsDetail(t *testing.T) {
 		t.Fatalf("view does not say nothing matches:\n%s", v)
 	}
 }
+
+// Jumping to a group from server detail must land on it even when the
+// committed filter hides it: the filter gives way.
+func TestScrollToNamesClearsFilterThatHidesTarget(t *testing.T) {
+	m := loadedGroups(t)
+	m, _ = typeFilter(m, "web")
+	m.ScrollToNames([]string{"default"})
+	if m.FilterValue() != "" || m.SelectedGroupName() != "default" {
+		t.Fatalf("filter=%q selected=%q, want filter cleared and default selected", m.FilterValue(), m.SelectedGroupName())
+	}
+}

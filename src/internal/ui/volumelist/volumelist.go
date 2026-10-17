@@ -829,6 +829,11 @@ func (m *Model) applyHighlight() {
 	if len(m.highlight) == 0 {
 		return
 	}
+	// A committed filter that hides every volume being jumped to gives way.
+	if m.filter.Value() != "" && !m.lists(m.volumes) && m.lists(m.allVolumes) {
+		m.filter.Clear()
+		m.applyFilter()
+	}
 	for i, v := range m.volumes {
 		if m.highlight[v.ID] {
 			m.cursor = i
@@ -837,6 +842,16 @@ func (m *Model) applyHighlight() {
 			return
 		}
 	}
+}
+
+// lists reports whether vols contains a highlighted volume.
+func (m Model) lists(vols []volume.Volume) bool {
+	for _, v := range vols {
+		if m.highlight[v.ID] {
+			return true
+		}
+	}
+	return false
 }
 
 // Hints returns key hints.

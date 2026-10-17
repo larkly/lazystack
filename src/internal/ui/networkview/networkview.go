@@ -1429,6 +1429,11 @@ func (m *Model) applyHighlightNames() {
 	if len(m.highlightNames) == 0 {
 		return
 	}
+	// A committed filter that hides every network being jumped to gives way.
+	if m.filter.Value() != "" && !m.listsHighlighted(m.networks) && m.listsHighlighted(m.allNetworks) {
+		m.filter.Clear()
+		m.applyFilter()
+	}
 	for i, net := range m.networks {
 		if m.highlightNames[net.Name] {
 			m.cursor = i
@@ -1456,6 +1461,17 @@ func (m *Model) takePendingDetailFetch() tea.Cmd {
 	netID := m.pendingDetailID
 	m.pendingDetailID = ""
 	return m.fetchDetail(netID, m.detailRefresh.Start())
+}
+
+// listsHighlighted reports whether items contains a network named in
+// highlightNames.
+func (m Model) listsHighlighted(items []network.Network) bool {
+	for _, it := range items {
+		if m.highlightNames[it.Name] {
+			return true
+		}
+	}
+	return false
 }
 
 // Hints returns key hints for the status bar.

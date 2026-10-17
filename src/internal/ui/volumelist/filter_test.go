@@ -109,3 +109,27 @@ func TestFilterLineKeepsTableHeight(t *testing.T) {
 		t.Fatalf("view is %d lines with the filter line, more than the %d available", lines, 20-2)
 	}
 }
+
+// Jumping to a volume (e.g. from server detail) must land on it even when
+// the committed filter hides it: the filter gives way.
+func TestHighlightClearsFilterThatHidesTarget(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.SetSize(120, 30)
+	m, _ = m.Update(volumesLoadedMsg{volumes: filterVols()})
+	m = typeFilter(m, "web")
+	m.SetHighlight([]string{"v2"}) // db-data, hidden by the filter
+	if m.FilterValue() != "" || m.SelectedVolume() == nil || m.SelectedVolume().ID != "v2" {
+		t.Fatalf("filter=%q cursor=%+v, want filter cleared and cursor on v2", m.FilterValue(), m.SelectedVolume())
+	}
+}
+
+func TestHighlightKeepsFilterThatShowsTarget(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.SetSize(120, 30)
+	m, _ = m.Update(volumesLoadedMsg{volumes: filterVols()})
+	m = typeFilter(m, "web")
+	m.SetHighlight([]string{"v3"})
+	if m.FilterValue() != "web" || m.SelectedVolume().ID != "v3" {
+		t.Fatalf("filter=%q cursor=%s, want filter kept and cursor on v3", m.FilterValue(), m.SelectedVolume().ID)
+	}
+}

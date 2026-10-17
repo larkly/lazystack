@@ -136,3 +136,14 @@ func TestFilterWithNoMatchesClearsDetail(t *testing.T) {
 		t.Fatalf("view does not say nothing matches:\n%s", v)
 	}
 }
+
+// Jumping to a network from server detail must land on it even when the
+// committed filter hides it: the filter gives way.
+func TestScrollToNamesClearsFilterThatHidesTarget(t *testing.T) {
+	m := loadedNets(t)
+	m = typeFilter(m, "db")
+	m.ScrollToNames([]string{"public"})
+	if m.FilterValue() != "" || m.SelectedNetworkName() != "public" {
+		t.Fatalf("filter=%q selected=%q, want filter cleared and public selected", m.FilterValue(), m.SelectedNetworkName())
+	}
+}
