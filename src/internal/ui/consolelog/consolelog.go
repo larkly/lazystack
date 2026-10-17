@@ -120,9 +120,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.scroll < 0 {
 				m.scroll = 0
 			}
-		case msg.String() == "g":
+		case key.Matches(msg, shared.Keys.JumpStart):
 			m.scroll = 0
-		case msg.String() == "G":
+		case key.Matches(msg, shared.Keys.JumpEnd):
 			m.scroll = m.maxScroll()
 		}
 	}

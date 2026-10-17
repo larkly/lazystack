@@ -893,7 +893,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					key.Matches(msg, shared.Keys.Create) ||
 					key.Matches(msg, shared.Keys.Enter) ||
 					key.Matches(msg, shared.Keys.StopStart) ||
-					msg.String() == "ctrl+h" {
+					key.Matches(msg, shared.Keys.HealthMonitor) {
 					m.statusBar.StickyHint = "Load balancer is " + lb.ProvisioningStatus + ", please wait..."
 					return m, nil
 				}
@@ -901,8 +901,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			pane := m.lbView.FocusedPane()
 
-			// Health monitor: ctrl+h on pools pane
-			if msg.String() == "ctrl+h" && pane == lbview.FocusPools {
+			// Health monitor on pools pane
+			if key.Matches(msg, shared.Keys.HealthMonitor) && pane == lbview.FocusPools {
 				if pool := m.lbView.SelectedPool(); pool != nil {
 					if pool.MonitorID != "" {
 						return m.openLBMonitorEdit()
@@ -925,18 +925,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			// Bulk member selection: space toggles, x toggles all
+			// Bulk member selection: Select toggles one, SelectAll toggles all
 			if key.Matches(msg, shared.Keys.Select) && pane == lbview.FocusMembers {
 				m.lbView.ToggleMemberSelection()
 				return m, nil
 			}
-			if msg.String() == "x" && pane == lbview.FocusMembers {
+			if key.Matches(msg, shared.Keys.SelectAll) && pane == lbview.FocusMembers {
 				m.lbView.ToggleAllMemberSelection()
 				return m, nil
 			}
 
-			// Drain member: 'w' key on members pane
-			if msg.String() == "w" && pane == lbview.FocusMembers {
+			// Drain member on members pane
+			if key.Matches(msg, shared.Keys.DrainMember) && pane == lbview.FocusMembers {
 				if m.lbView.SelectedMemberCount() > 0 {
 					return m.drainLBMembersBulk()
 				}
@@ -1042,7 +1042,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.Create) && pane == imageview.FocusSelector {
 				return m.openImageUpload()
 			}
-			if msg.String() == "ctrl+g" && pane == imageview.FocusProperties {
+			if key.Matches(msg, shared.Keys.Download) && pane == imageview.FocusProperties {
 				return m.openImageDownload()
 			}
 			if key.Matches(msg, shared.Keys.Enter) {

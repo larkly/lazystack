@@ -429,12 +429,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
 		return m, nil
 
-	// Console-specific: g/G for top/bottom when console focused. These must
+	// Console-specific: jump to top/bottom when console focused. These must
 	// precede the resource jumps so g is not taken by JumpSecGroups.
-	case m.focus == focusConsole && msg.String() == "g":
+	case m.focus == focusConsole && key.Matches(msg, shared.Keys.JumpStart):
 		m.consoleScroll = 0
 		return m, nil
-	case m.focus == focusConsole && msg.String() == "G":
+	case m.focus == focusConsole && key.Matches(msg, shared.Keys.JumpEnd):
 		m.consoleScroll = m.consoleMaxScroll()
 		return m, nil
 

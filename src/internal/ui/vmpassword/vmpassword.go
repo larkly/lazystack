@@ -110,7 +110,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.credCursor++
 			}
 			return m, nil
-		case msg.String() == "r":
+		case key.Matches(msg, shared.Keys.Reveal):
 			m.revealed = !m.revealed
 			return m, nil
 		}
@@ -119,7 +119,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Back):
 		m.Active = false
 		return m, nil
-	case msg.String() == "c":
+	case key.Matches(msg, shared.Keys.CopyValue):
 		return m.copyToClipboard()
 	default:
 		return m, nil

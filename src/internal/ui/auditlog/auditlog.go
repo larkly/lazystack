@@ -99,22 +99,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.adjustScroll()
 			}
 			return m, nil
-		case msg.String() == "a":
+		case key.Matches(msg, shared.Keys.AuditFilterAction):
 			m.filterMode = FilterAction
 			m.filterInput = ""
 			m.filterCursor = 0
 			return m, nil
-		case msg.String() == "r":
+		case key.Matches(msg, shared.Keys.AuditFilterResource):
 			m.filterMode = FilterResource
 			m.filterInput = ""
 			m.filterCursor = 0
 			return m, nil
-		case msg.String() == "d":
+		case key.Matches(msg, shared.Keys.AuditFilterDate):
 			m.filterMode = FilterDate
 			m.filterInput = ""
 			m.filterCursor = 0
 			return m, nil
-		case msg.String() == "c":
+		case key.Matches(msg, shared.Keys.AuditFilterClear):
 			m.filterMode = FilterNone
 			m.filterInput = ""
 			m.applyFilter()
@@ -142,13 +142,13 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.applyFilter()
 		m.filterMode = FilterNone
 		return m, nil
-	case msg.String() == "backspace" || msg.String() == "delete":
+	case key.Matches(msg, shared.TextKeys.DeleteChar):
 		if len(m.filterInput) > 0 {
 			m.filterInput = m.filterInput[:len(m.filterInput)-1]
 			m.applyFilter()
 		}
 		return m, nil
-	case msg.String() == "ctrl+u":
+	case key.Matches(msg, shared.TextKeys.ClearLine):
 		m.filterInput = ""
 		m.applyFilter()
 		return m, nil

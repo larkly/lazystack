@@ -59,7 +59,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, shared.Keys.Enter):
 		return m.openInBrowser()
-	case msg.String() == "c":
+	case key.Matches(msg, shared.Keys.CopyValue):
 		return m.copyToClipboard()
 	default:
 		return m, nil

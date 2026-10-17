@@ -202,7 +202,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if m.cursor < len(keys)-1 {
 				m.cursor++
 			}
-		case msg.String() == "a":
+		case key.Matches(msg, shared.Keys.MetadataAdd):
 			// Add new metadata
 			m.mode = "add"
 			m.keyInput.SetValue("")
@@ -210,7 +210,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.keyInput.Focus()
 			m.err = ""
 			return m, textinput.Blink
-		case msg.String() == "e":
+		case key.Matches(msg, shared.Keys.MetadataEdit):
 			// Edit selected
 			if m.cursor < len(keys) {
 				m.mode = "edit"
@@ -221,7 +221,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.err = ""
 				return m, textinput.Blink
 			}
-		case msg.String() == "d":
+		case key.Matches(msg, shared.Keys.MetadataDelete):
 			// Delete selected, after confirmation
 			if m.cursor < len(keys) {
 				m.mode = "delete"
@@ -279,14 +279,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 // isFieldSwitch reports whether msg moves between the key and value inputs.
-// Only tab/shift+tab and the arrows qualify: j/k must reach the inputs as
-// text so keys like "project_id" can be typed.
+// Only tab/shift+tab and the non-text Up/Down keys qualify: j/k must reach
+// the inputs as text so keys like "project_id" can be typed.
 func isFieldSwitch(msg tea.KeyMsg) bool {
-	switch msg.String() {
-	case "up", "down":
-		return true
-	}
-	return key.Matches(msg, shared.Keys.Tab) || key.Matches(msg, shared.Keys.ShiftTab)
+	return shared.MatchesNonText(msg, shared.Keys.Up) ||
+		shared.MatchesNonText(msg, shared.Keys.Down) ||
+		key.Matches(msg, shared.Keys.Tab) || key.Matches(msg, shared.Keys.ShiftTab)
 }
 
 // toggleField moves focus between the key and value inputs.

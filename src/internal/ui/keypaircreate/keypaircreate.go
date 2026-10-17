@@ -198,7 +198,7 @@ func (m Model) handlePrivateKeyView(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.privateScroll--
 		}
 	default:
-		if msg.String() == "s" && m.savedPath == "" {
+		if key.Matches(msg, shared.Keys.SaveKey) && m.savedPath == "" {
 			m.showSaveInput = true
 			home, _ := os.UserHomeDir()
 			defaultPath := filepath.Join(home, ".ssh", m.keypairName)
