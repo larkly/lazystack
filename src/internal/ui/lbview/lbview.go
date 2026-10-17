@@ -563,11 +563,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.searchInput.Focus()
 			return m, m.searchInput.Focus()
 		}
-
-	case key.Matches(msg, shared.Keys.Refresh):
-		if !m.searchActive {
-			return m, m.ForceRefresh()
-		}
 	}
 	return m, nil
 }
