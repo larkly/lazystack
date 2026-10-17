@@ -2,6 +2,7 @@ package serverlist
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -168,4 +169,44 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")
 	}
+}
+
+func fiftyServers() []compute.Server {
+	servers := make([]compute.Server, 50)
+	for i := range servers {
+		id := fmt.Sprintf("s-%02d", i)
+		servers[i] = compute.Server{ID: id, Name: "srv-" + id}
+	}
+	return servers
+}
+
+// An auto-refresh (and the image-name lookup that follows it) must keep the
+// cursor row on screen instead of snapping the viewport back to the top.
+func TestRefreshKeepsCursorRowVisible(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.width = 120
+	for m.height = 1; m.tableHeight() < 10; m.height++ {
+	}
+	m.loading = false
+	m.servers = fiftyServers()
+	m.applyFilter()
+	for m.cursor < 30 {
+		m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	}
+	assertVisible := func(stage string) {
+		t.Helper()
+		if m.cursor != 30 {
+			t.Fatalf("%s: cursor = %d, want 30", stage, m.cursor)
+		}
+		if h := m.tableHeight(); m.cursor < m.scrollOff || m.cursor >= m.scrollOff+h {
+			t.Fatalf("%s: cursor %d outside viewport [%d, %d)", stage, m.cursor, m.scrollOff, m.scrollOff+h)
+		}
+	}
+	assertVisible("setup")
+
+	m, _ = m.Update(serversLoadedMsg{seq: m.refresh.Seq(), servers: fiftyServers()})
+	assertVisible("after servers loaded")
+
+	m, _ = m.Update(imageNamesMsg{"img": "ubuntu"})
+	assertVisible("after image names")
 }

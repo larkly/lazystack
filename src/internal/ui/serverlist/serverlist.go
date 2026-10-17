@@ -402,7 +402,10 @@ func (m *Model) applyFilter() {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
-	m.scrollOff = 0
+	// Keep the viewport where it was (a refresh must not snap to the top),
+	// clamped to the new list length, then bring the cursor into view.
+	m.scrollOff = min(m.scrollOff, max(0, len(m.filtered)-m.tableHeight()))
+	m.ensureVisible()
 	m.recomputeColumns()
 }
 
