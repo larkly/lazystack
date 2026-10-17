@@ -255,10 +255,12 @@ var allSections = []section{
 			l("enter", "view detail (interfaces)"),
 			l("ctrl+n", "create router"),
 			l("ctrl+d", "delete router"),
+			k(&shared.Keys.Filter, "filter routers"),
+			l("s/S", "sort routers / reverse sort"),
 			k(&shared.Keys.Attach, "add interface (from detail)"),
 			k(&shared.Keys.Detach, "remove interface (from detail)"),
 			l("Y", "copy field..."),
-			l("esc", "back to list"),
+			l("esc", "clear filter"),
 		},
 	},
 	{

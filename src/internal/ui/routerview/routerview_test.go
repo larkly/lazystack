@@ -628,8 +628,8 @@ func TestRoutersLoadedMsgPreservesCursorByID(t *testing.T) {
 	// prior state: one router with ID "old1" at cursor=0
 	m.routers = []network.Router{{ID: "old1", Name: "old1"}}
 	m.cursor = 0
-	// new list still contains "old1" but at index 1
-	newRouters := []network.Router{{ID: "x1", Name: "x1"}, {ID: "old1", Name: "old1"}}
+	// new list still contains "old1" but at index 1 (sorted by name)
+	newRouters := []network.Router{{ID: "a1", Name: "a1"}, {ID: "old1", Name: "old1"}}
 	upd, _ := m.Update(routersLoadedMsg{routers: newRouters})
 	if upd.loading {
 		t.Errorf("routersLoadedMsg should set loading=false")
@@ -665,8 +665,8 @@ func TestRoutersLoadedMsgClampsCursorWhenListEmpty(t *testing.T) {
 	m.routers = []network.Router{{ID: "r1"}, {ID: "r2"}}
 	m.cursor = 1
 	upd, _ := m.Update(routersLoadedMsg{routers: nil})
-	if upd.cursor != 1 {
-		t.Errorf("cursor after empty routersLoadedMsg = %d, want unchanged (1)", upd.cursor)
+	if upd.cursor != 0 {
+		t.Errorf("cursor after empty routersLoadedMsg = %d, want clamped to 0", upd.cursor)
 	}
 	if !upd.loading { // loading was set false regardless
 		// loading flag flips to false even on empty load

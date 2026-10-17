@@ -384,6 +384,8 @@ func (m Model) textInputFocused() bool {
 		return m.secGroupView.IsFiltering()
 	case viewNetworkList:
 		return m.networkView.IsFiltering()
+	case viewRouterView:
+		return m.routerView.IsFiltering()
 	case viewLBView:
 		return m.lbView.IsSearching()
 	case viewImageView:

@@ -8,6 +8,7 @@ import (
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/networkview"
+	"github.com/larkly/lazystack/internal/ui/routerview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 )
@@ -70,6 +71,15 @@ func listFilterCases() []listFilterCase {
 				m.networkView, _ = m.networkView.Update(keyText('/'))
 			},
 			value: func(m Model) string { return m.networkView.FilterValue() },
+		},
+		{
+			name: "routers",
+			open: func(m *Model) {
+				m.view = viewRouterView
+				m.routerView = routerview.New(nil, 5*time.Second)
+				m.routerView, _ = m.routerView.Update(keyText('/'))
+			},
+			value: func(m Model) string { return m.routerView.FilterValue() },
 		},
 	}
 }
