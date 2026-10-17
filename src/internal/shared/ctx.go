@@ -3,6 +3,7 @@ package shared
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,52 @@ var (
 // ErrTransferStalled is the cancellation cause of a StallCtx context whose
 // transfer stopped making progress.
 var ErrTransferStalled = errors.New("transfer stalled")
+
+// ErrTransferCanceled reports a transfer the user canceled.
+var ErrTransferCanceled = errors.New("transfer canceled")
+
+// TransferCancel lets the UI cancel a streaming transfer whose command
+// goroutine creates its StallCtx only later. The goroutine binds the
+// context's cancel func; Cancel invokes it, at once if already bound or
+// at Bind time otherwise. The zero value is ready to use.
+type TransferCancel struct {
+	mu       sync.Mutex
+	canceled bool
+	cancel   context.CancelFunc
+}
+
+// Bind registers the transfer's cancel func.
+func (t *TransferCancel) Bind(cancel context.CancelFunc) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.cancel = cancel
+	if t.canceled {
+		cancel()
+	}
+}
+
+// Cancel cancels the transfer. Repeated calls have no further effect.
+func (t *TransferCancel) Cancel() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.canceled {
+		return
+	}
+	t.canceled = true
+	if t.cancel != nil {
+		t.cancel()
+	}
+}
+
+// Canceled reports whether Cancel was called. A nil holder never is.
+func (t *TransferCancel) Canceled() bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.canceled
+}
 
 // RequestCtx returns a context bounded by RequestTimeout.
 func RequestCtx() (context.Context, context.CancelFunc) {

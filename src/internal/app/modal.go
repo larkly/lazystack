@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
@@ -182,6 +183,10 @@ func (m *Model) updateAnyModal(msg tea.Msg) (bool, tea.Cmd) {
 // results in the status bar. Returns the resulting command, if any.
 func (m *Model) updateImageDownloadBackground(msg tea.Msg) tea.Cmd {
 	if fin, ok := msg.(imagedownload.DownloadFinishedMsg); ok {
+		if errors.Is(fin.Err, shared.ErrTransferCanceled) {
+			m.statusBar.StickyHint = transferCancelledHint("download", fin.Name, fin.Err)
+			return nil
+		}
 		if fin.Err != nil {
 			m.statusBar.StickyHint = fmt.Sprintf("%s Image download failed: %v", shared.Glyph("✗", "FAIL"), fin.Err)
 		} else {
@@ -200,6 +205,10 @@ func (m *Model) updateImageDownloadBackground(msg tea.Msg) tea.Cmd {
 // results in the status bar. Returns the resulting command, if any.
 func (m *Model) updateImageUploadBackground(msg tea.Msg) tea.Cmd {
 	if fin, ok := msg.(imagecreate.UploadFinishedMsg); ok {
+		if errors.Is(fin.Err, shared.ErrTransferCanceled) {
+			m.statusBar.StickyHint = transferCancelledHint("upload", fin.Name, fin.Err)
+			return nil
+		}
 		if fin.Err != nil {
 			m.statusBar.StickyHint = fmt.Sprintf("%s Image upload failed: %s", shared.Glyph("✗", "FAIL"), shared.ParseError(fin.Err).FriendlyMessage)
 		} else {
@@ -210,6 +219,19 @@ func (m *Model) updateImageUploadBackground(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	m.imageCreate, cmd = m.imageCreate.Update(msg)
 	return cmd
+}
+
+// transferCancelledHint reports a cancelled image transfer, including any
+// cleanup problem the cancel ran into (a partial file or image left over).
+func transferCancelledHint(kind, name string, err error) string {
+	what := "Image " + kind
+	if name != "" {
+		what = fmt.Sprintf("Image %s of %s", kind, name)
+	}
+	if err != shared.ErrTransferCanceled {
+		return fmt.Sprintf("%s %s cancelled: %s", shared.Glyph("✗", "FAIL"), what, shared.ParseError(err).FriendlyMessage)
+	}
+	return what + " cancelled"
 }
 
 // updateAnyModalBackground routes non-key messages to active modals.

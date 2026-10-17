@@ -112,8 +112,12 @@ func TestProgressAndBackgroundCorrelation(t *testing.T) {
 		t.Fatal("unknown total")
 	}
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if !m.Active {
-		t.Fatal("escape must not cancel download")
+	if !m.Active || !m.confirmCancel {
+		t.Fatal("escape must ask before cancelling the download")
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	if !m.Active || m.confirmCancel || m.transfer.Canceled() {
+		t.Fatal("n must keep the download")
 	}
 	stale := downloadDoneMsg{downloadID: m.downloadID + 1, imageID: "old", name: "old image"}
 	m, cmd = m.Update(stale)

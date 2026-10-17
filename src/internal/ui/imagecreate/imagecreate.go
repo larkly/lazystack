@@ -101,8 +101,12 @@ type Model struct {
 	focusField int
 	submitting bool
 	uploading  bool
-	uploadID   int64
-	imageName  string
+	// transfer cancels the running transfer; confirmCancel is the inline
+	// y/n step Esc opens before cancelling.
+	transfer      *shared.TransferCancel
+	confirmCancel bool
+	uploadID      int64
+	imageName     string
 
 	// File picker
 	pickerOpen    bool
@@ -214,6 +218,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg { return UploadFinishedMsg{Name: name} }
 		}
 		m.uploading = false
+		m.confirmCancel = false
 		shared.Debugf("[imagecreate] upload success name=%q", msg.name)
 		if m.Active {
 			m.Active = false
@@ -232,12 +237,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.uploading = false
 		m.submitting = false
+		m.confirmCancel = false
 		m.err = msg.err.Error()
 		shared.Debugf("[imagecreate] error: %v", msg.err)
 		if m.Active {
 			return m, nil
 		}
-		return m, func() tea.Msg { return UploadFinishedMsg{Err: finErr} }
+		finName := m.imageName
+		return m, func() tea.Msg { return UploadFinishedMsg{Name: finName, Err: finErr} }
 
 	case importStartedMsg:
 		m.Active = false
@@ -261,13 +268,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.uploading {
-			// During upload, only allow background/cancel
-			if msg.String() == "b" {
-				// Send to background
-				m.Active = false
-				return m, nil
-			}
-			return m, nil
+			return m.handleUploadingKey(msg)
 		}
 		if m.submitting {
 			return m, nil
@@ -279,6 +280,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m.handlePickerKey(msg)
 		}
 		return m.handleKey(msg)
+	}
+	return m, nil
+}
+
+// handleUploadingKey handles keys while an upload runs: b sends it to the
+// background, Esc asks whether to cancel it and y confirms.
+func (m Model) handleUploadingKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.confirmCancel {
+		switch {
+		case key.Matches(msg, shared.Keys.Confirm):
+			shared.Debugf("[imagecreate] cancelling upload %d", m.uploadID)
+			m.confirmCancel = false
+			m.transfer.Cancel()
+			m.Active = false
+		case key.Matches(msg, shared.Keys.Deny), key.Matches(msg, shared.Keys.Back):
+			m.confirmCancel = false
+		}
+		return m, nil
+	}
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
+		m.confirmCancel = true
+	case msg.String() == "b":
+		m.Active = false
 	}
 	return m, nil
 }
@@ -721,6 +746,9 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 	// The goroutine publishes its reader; the progress tick reads from it.
 	sharedUpload := &atomic.Pointer[image.UploadReader]{}
 	m.sharedUpload = sharedUpload
+	transfer := &shared.TransferCancel{}
+	m.transfer = transfer
+	m.confirmCancel = false
 
 	client := m.client
 	id := m.uploadID
@@ -743,6 +771,12 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 				WithDetails(map[string]string{"disk_format": diskFmt, "visibility": vis})
 		}
 
+		if transfer.Canceled() {
+			// Cancelled while the image was being created.
+			err := cleanupFailedImage(client, img.ID, shared.ErrTransferCanceled)
+			return uploadErrMsg{Audit: record(err), uploadID: id, err: err}
+		}
+
 		f, err := os.Open(path)
 		if err != nil {
 			err = cleanupFailedImage(client, img.ID, fmt.Errorf("opening file: %w", err))
@@ -755,11 +789,17 @@ func (m Model) doUpload() (Model, tea.Cmd) {
 
 		// The data transfer may legitimately take hours, so it has no
 		// overall deadline; it is abandoned only if it stops making
-		// progress. (Waiting for the response once the body is sent is
-		// bounded by the transport's response-header timeout.)
+		// progress or the user cancels it. (Waiting for the response once
+		// the body is sent is bounded by the transport's response-header
+		// timeout.)
 		ctx, cancel := shared.StallCtx(ur.BytesRead)
 		defer cancel()
+		transfer.Bind(cancel)
 		err = image.UploadImageData(ctx, client, img.ID, ur)
+		if transfer.Canceled() {
+			// Honour the cancel even if the upload finished meanwhile.
+			err = shared.ErrTransferCanceled
+		}
 		if err != nil {
 			if errors.Is(context.Cause(ctx), shared.ErrTransferStalled) {
 				err = fmt.Errorf("upload made no progress for %s: %w", shared.TransferStallTimeout, err)
@@ -893,6 +933,9 @@ func (m *Model) SetSize(w, h int) {
 // Hints returns key hints.
 func (m Model) Hints() string {
 	if m.uploading {
+		if m.confirmCancel {
+			return "y cancel upload • n/esc keep uploading"
+		}
 		return "b background • esc cancel"
 	}
 	if m.source == 0 && m.focusField == fieldPath {
@@ -1009,7 +1052,12 @@ func (m Model) renderProgress() string {
 		pct, shared.FormatSize(m.bytesRead), shared.FormatSize(m.totalBytes)))
 
 	rows = append(rows, "")
-	rows = append(rows, shared.StyleHelp.Render("b send to background"))
+	if m.confirmCancel {
+		rows = append(rows, lipgloss.NewStyle().Foreground(shared.ColorWarning).Bold(true).Render(
+			"Cancel the upload and delete the new image? [y/n]"))
+	} else {
+		rows = append(rows, shared.StyleHelp.Render("b send to background • esc cancel"))
+	}
 
 	content := title + "\n\n" + strings.Join(rows, "\n")
 	box := shared.StyleModal.Width(m.formWidth()).Render(content)

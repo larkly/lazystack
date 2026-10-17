@@ -97,7 +97,11 @@ type Model struct {
 	pickerEntries []pickerDirEntry
 	pickerCursor  int
 
-	downloading     bool
+	downloading bool
+	// transfer cancels the running transfer; confirmCancel is the inline
+	// y/n step Esc opens before cancelling.
+	transfer        *shared.TransferCancel
+	confirmCancel   bool
 	downloadID      int64 // current download session (0 = none)
 	sharedBytesRead *atomic.Int64
 	sharedTotal     *atomic.Int64
@@ -219,6 +223,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		m.downloading = false
+		m.confirmCancel = false
 		shared.Debugf("[imagedownload] download success name=%q", msg.name)
 		if m.Active {
 			m.Active = false
@@ -241,15 +246,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		m.downloading = false
+		m.confirmCancel = false
 		m.err = msg.err.Error()
 		shared.Debugf("[imagedownload] error: %v", msg.err)
 		if m.Active {
 			return m, nil
 		}
-		// Backgrounded: surface the failure via DownloadFinishedMsg.
-		finErr := msg.err
+		// Backgrounded or cancelled: surface the result via
+		// DownloadFinishedMsg.
+		finErr, finName := msg.err, m.imageName
 		return m, func() tea.Msg {
-			return DownloadFinishedMsg{ImageID: msg.imageID, Err: finErr}
+			return DownloadFinishedMsg{ImageID: msg.imageID, Name: finName, Err: finErr}
 		}
 
 	case spinner.TickMsg:
@@ -267,16 +274,36 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.downloading {
-			if msg.String() == "b" {
-				m.Active = false
-				return m, nil
-			}
-			return m, nil
+			return m.handleDownloadingKey(msg)
 		}
 		if m.pickerOpen {
 			return m.handlePickerKey(msg)
 		}
 		return m.handleKey(msg)
+	}
+	return m, nil
+}
+
+// handleDownloadingKey handles keys while a download runs: b sends it to
+// the background, Esc asks whether to cancel it and y confirms.
+func (m Model) handleDownloadingKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.confirmCancel {
+		switch {
+		case key.Matches(msg, shared.Keys.Confirm):
+			shared.Debugf("[imagedownload] cancelling download %d", m.downloadID)
+			m.confirmCancel = false
+			m.transfer.Cancel()
+			m.Active = false
+		case key.Matches(msg, shared.Keys.Deny), key.Matches(msg, shared.Keys.Back):
+			m.confirmCancel = false
+		}
+		return m, nil
+	}
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
+		m.confirmCancel = true
+	case msg.String() == "b":
+		m.Active = false
 	}
 	return m, nil
 }
@@ -493,15 +520,23 @@ func (m Model) submit() (Model, tea.Cmd) {
 	name := m.imageName
 	m.downloadID = downloadSeq.Add(1)
 	downloadID := m.downloadID
+	transfer := &shared.TransferCancel{}
+	m.transfer = transfer
+	m.confirmCancel = false
 	return m, tea.Batch(m.spinner.Tick, scheduleProgressTick(), func() tea.Msg {
 		// The transfer may legitimately take hours, so it has no overall
-		// deadline; it is abandoned only if no bytes arrive for a while.
-		// (The wait for response headers is bounded by the transport.)
+		// deadline; it is abandoned only if no bytes arrive for a while
+		// or the user cancels it. (The wait for response headers is
+		// bounded by the transport.)
 		ctx, cancel := shared.StallCtx(sharedBytes.Load)
 		defer cancel()
+		transfer.Bind(cancel)
 
 		body, contentLength, err := image.DownloadImageData(ctx, client, imageID)
 		if err != nil {
+			if transfer.Canceled() {
+				err = shared.ErrTransferCanceled
+			}
 			return downloadErrMsg{downloadID: downloadID, imageID: imageID, err: err}
 		}
 		defer body.Close()
@@ -518,6 +553,15 @@ func (m Model) submit() (Model, tea.Cmd) {
 		reader := &countingReader{reader: body, counter: sharedBytes}
 
 		_, err = io.Copy(f, reader)
+		if transfer.Canceled() {
+			// Honour the cancel even if the last bytes arrived meanwhile.
+			f.Close()
+			err = shared.ErrTransferCanceled
+			if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+				err = fmt.Errorf("%w (could not remove partial file %s: %v)", err, path, rmErr)
+			}
+			return downloadErrMsg{downloadID: downloadID, imageID: imageID, err: err}
+		}
 		if err != nil {
 			if errors.Is(context.Cause(ctx), shared.ErrTransferStalled) {
 				err = fmt.Errorf("download made no progress for %s: %w", shared.TransferStallTimeout, err)
@@ -539,7 +583,10 @@ func (m *Model) SetSize(w, h int) {
 // Hints returns key hints.
 func (m Model) Hints() string {
 	if m.downloading {
-		return "b background • downloading..."
+		if m.confirmCancel {
+			return "y cancel download • n/esc keep downloading"
+		}
+		return "b background • esc cancel • downloading..."
 	}
 	return "ctrl+s download • esc cancel"
 }
@@ -619,7 +666,12 @@ func (m Model) renderProgress() string {
 	}
 
 	rows = append(rows, "")
-	rows = append(rows, shared.StyleHelp.Render("b send to background"))
+	if m.confirmCancel {
+		rows = append(rows, lipgloss.NewStyle().Foreground(shared.ColorWarning).Bold(true).Render(
+			"Cancel the download and delete the partial file? [y/n]"))
+	} else {
+		rows = append(rows, shared.StyleHelp.Render("b send to background • esc cancel"))
+	}
 
 	content := title + "\n\n" + strings.Join(rows, "\n")
 	box := shared.StyleModal.Width(m.formWidth()).Render(content)
