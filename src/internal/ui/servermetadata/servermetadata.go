@@ -16,9 +16,11 @@ import (
 )
 
 type metaOpDoneMsg struct {
-	action  string
-	name    string
-	deleted string // key removed from the server, if any
+	action   string
+	name     string
+	setKey   string // key written on the server, if any
+	setValue string
+	deleted  string // key removed from the server, if any
 }
 
 type metaOpErrMsg struct {
@@ -48,6 +50,7 @@ type Model struct {
 	valueInput textinput.Model
 	loading    bool
 	submitting bool
+	saved      bool // the last change was stored; cleared by the next key
 	err        string
 	spinner    spinner.Model
 }
@@ -113,18 +116,33 @@ func (m *Model) clampCursor() {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case metaOpDoneMsg:
+		// Stay open for further changes: mirror the change locally and
+		// return to the list with the saved key selected.
 		m.submitting = false
-		m.Active = false
+		m.saved = true
+		m.err = ""
+		m.mode = ""
+		m.keyInput.Blur()
+		m.valueInput.Blur()
 		if msg.deleted != "" {
 			delete(m.metadata, msg.deleted)
-			m.clampCursor()
 		}
+		if msg.setKey != "" {
+			m.metadata[msg.setKey] = msg.setValue
+			for i, k := range m.sortedKeys() {
+				if k == msg.setKey {
+					m.cursor = i
+				}
+			}
+		}
+		m.clampCursor()
 		return m, func() tea.Msg {
 			return shared.ServerActionMsg{Action: msg.action, Name: msg.name}
 		}
 
 	case metaOpErrMsg:
 		m.submitting = false
+		m.saved = false
 		m.err = fmt.Sprintf("%s %s: %v", msg.action, msg.name, msg.err)
 		if msg.setKey != "" {
 			m.metadata[msg.setKey] = msg.setValue
@@ -158,6 +176,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.submitting {
 		return m, nil
 	}
+	m.saved = false
 
 	if key.Matches(msg, shared.Keys.Back) {
 		if m.mode != "" {
@@ -305,7 +324,7 @@ func (m *Model) addMetadatum() tea.Cmd {
 			return metaOpErrMsg{action: "Update metadata", name: name, err: r.Err}
 		}
 		shared.Debugf("[servermetadata] created metadata for %s", name)
-		return metaOpDoneMsg{action: "Updated metadata", name: name}
+		return metaOpDoneMsg{action: "Updated metadata", name: name, setKey: key, setValue: value}
 	}
 }
 
@@ -350,7 +369,11 @@ func (m *Model) updateMetadatum() tea.Cmd {
 			}
 		}
 		shared.Debugf("[servermetadata] updated metadata for %s", name)
-		return metaOpDoneMsg{action: "Updated metadata", name: name}
+		done := metaOpDoneMsg{action: "Updated metadata", name: name, setKey: newKey, setValue: value}
+		if oldKey != newKey {
+			done.deleted = oldKey
+		}
+		return done
 	}
 }
 
@@ -409,6 +432,10 @@ func (m Model) View() string {
 
 	if m.submitting {
 		body += "\n\n  " + m.spinner.View() + " Saving..."
+	} else if m.saved {
+		body += "\n\n" + lipgloss.NewStyle().
+			Foreground(shared.ColorSuccess).
+			Render("  "+shared.Glyph("✓", "OK")+" saved")
 	}
 
 	width := 60

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -127,7 +128,7 @@ func TestResizeReachesEveryOverlay(t *testing.T) {
 
 // Async results of an overlay must reach it while it is open; the metadata
 // editor used to stay stuck because its completion message was never routed
-// back to it.
+// back to it. It stays open after a save.
 func TestServerMetadataReceivesBackgroundResults(t *testing.T) {
 	m, _ := actionFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete || r.URL.Path != "/servers/srv/metadata/k" {
@@ -151,8 +152,8 @@ func TestServerMetadataReceivesBackgroundResults(t *testing.T) {
 			}
 		}
 	}
-	if m.serverMetadata.Active || !sawAction {
-		t.Fatalf("metadata result not delivered: active=%v action=%v", m.serverMetadata.Active, sawAction)
+	if !m.serverMetadata.Active || !sawAction || strings.Contains(m.serverMetadata.View(), "Saving") {
+		t.Fatalf("metadata result not delivered: active=%v action=%v\n%s", m.serverMetadata.Active, sawAction, m.serverMetadata.View())
 	}
 }
 

@@ -231,8 +231,11 @@ func TestRenameWritesNewKeyBeforeRemovingOld(t *testing.T) {
 			t.Fatalf("requests=%v want %v", got, want)
 		}
 		m, done := m.Update(msg)
-		if m.Active || done == nil {
-			t.Fatal("successful rename did not close")
+		if !m.Active || done == nil {
+			t.Fatal("successful rename closed the editor or reported nothing")
+		}
+		if _, ok := m.metadata["old"]; ok || m.metadata["new"] != "v1" {
+			t.Fatalf("local view after rename=%v", m.metadata)
 		}
 	})
 
@@ -403,5 +406,77 @@ func TestDeleteAsksForConfirmation(t *testing.T) {
 	cmd()
 	if got := rec.got(); len(got) != 1 || got[0] != "DELETE /servers/srv-1/metadata/zone" {
 		t.Fatalf("requests=%v", got)
+	}
+}
+
+// The editor stays open after each change, mirrors it locally and says it
+// was saved; Esc closes it.
+func TestEditorStaysOpenAfterEachOperation(t *testing.T) {
+	saved := shared.Glyph("✓", "OK") + " saved"
+	m, rec := newModel(t, map[string]string{"role": "db"})
+	finish := func(m Model, cmd tea.Cmd) Model {
+		t.Helper()
+		if cmd == nil {
+			t.Fatal("no request command")
+		}
+		m, done := m.Update(cmd())
+		if done == nil {
+			t.Fatal("no completion message for the app")
+		}
+		if got, ok := done().(shared.ServerActionMsg); !ok || got.Name != "web" {
+			t.Fatalf("completion=%#v", got)
+		}
+		if !m.Active || m.submitting || m.mode != "" {
+			t.Fatalf("after save: active=%v submitting=%v mode=%q", m.Active, m.submitting, m.mode)
+		}
+		if !strings.Contains(m.View(), saved) {
+			t.Fatalf("no saved status:\n%s", m.View())
+		}
+		return m
+	}
+
+	// Add.
+	m = runes(m, "a")
+	m = runes(m, "owner")
+	m, _ = press(m, keyTab)
+	m = runes(m, "ops")
+	m, cmd := press(m, keyEnter)
+	m = finish(m, cmd)
+	if m.metadata["owner"] != "ops" || m.metadata["role"] != "db" {
+		t.Fatalf("after add=%v", m.metadata)
+	}
+	if keys := m.sortedKeys(); keys[m.cursor] != "owner" {
+		t.Fatalf("cursor on %q, want the saved key", keys[m.cursor])
+	}
+
+	// Any key clears the status.
+	m, _ = press(m, keyDown)
+	if strings.Contains(m.View(), saved) {
+		t.Fatal("saved status outlived the next key")
+	}
+
+	// Edit with rename: role -> tier.
+	m = runes(m, "e")
+	m.keyInput.SetValue("tier")
+	m.valueInput.SetValue("web")
+	m, cmd = press(m, keyEnter)
+	m = finish(m, cmd)
+	if _, ok := m.metadata["role"]; ok || m.metadata["tier"] != "web" {
+		t.Fatalf("after rename=%v", m.metadata)
+	}
+
+	// Delete.
+	m, cmd = deleteSelected(m)
+	m = finish(m, cmd)
+	if _, ok := m.metadata["tier"]; ok || len(m.metadata) != 1 {
+		t.Fatalf("after delete=%v", m.metadata)
+	}
+
+	if n := len(rec.got()); n != 4 {
+		t.Fatalf("requests=%v", rec.got())
+	}
+	m, _ = press(m, keyEsc)
+	if m.Active {
+		t.Fatal("esc did not close the editor")
 	}
 }
