@@ -86,3 +86,34 @@ func TestTickRefreshesZonesWithoutOverlap(t *testing.T) {
 		t.Fatal("tick blocked after the newest fetch completed")
 	}
 }
+
+// The error line takes a zone row, so a cursor on the last visible row must
+// scroll back into view when a load fails.
+func TestErrorKeepsCursorVisible(t *testing.T) {
+	list := make([]zones.Zone, 30)
+	for i := range list {
+		list[i] = zones.Zone{ID: string(rune('a' + i)), Name: string(rune('a'+i)) + ".example."}
+	}
+	m := New(nil)
+	m.SetSize(100, 14)
+	m, _ = m.Update(zonesLoadedMsg{seq: m.refresh.Seq(), zones: list})
+	for i := 0; i < m.visibleRows()-1; i++ {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	if m.scroll != 0 || m.cursor != m.visibleRows()-1 {
+		t.Fatalf("setup: cursor=%d scroll=%d", m.cursor, m.scroll)
+	}
+
+	m, _ = m.Update(recordsetsErrMsg{zoneID: m.selectedZone.ID, err: errors.New("boom")})
+	if m.cursor < m.scroll || m.cursor >= m.scroll+m.visibleRows() {
+		t.Fatalf("cursor %d off screen after a records error: scroll=%d rows=%d", m.cursor, m.scroll, m.visibleRows())
+	}
+
+	m.err = nil
+	m.scroll = 0
+	m.ForceRefresh()
+	m, _ = m.Update(zonesErrMsg{seq: m.refresh.Seq(), err: errors.New("boom")})
+	if m.cursor < m.scroll || m.cursor >= m.scroll+m.visibleRows() {
+		t.Fatalf("cursor %d off screen after a zones error: scroll=%d rows=%d", m.cursor, m.scroll, m.visibleRows())
+	}
+}

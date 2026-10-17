@@ -97,6 +97,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case usersErrMsg:
 		m.loading = false
 		m.err = msg.err
+		// The error line takes a row; keep the cursor on screen.
+		if visible := m.visibleRows(); m.cursor >= m.scroll+visible {
+			m.scroll = m.cursor - visible + 1
+		}
 		m.pending = nil
 		m.busy = false
 		return m, nil

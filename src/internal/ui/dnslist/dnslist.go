@@ -108,6 +108,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.err = msg.err
+		m.scrollTo(m.cursor) // the error line takes a zone row
 		return m, nil
 
 	case recordsetsLoadedMsg:
@@ -126,6 +127,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.err = msg.err
+		m.scrollTo(m.cursor) // the error line takes a zone row
 		return m, nil
 
 	case shared.TickMsg:

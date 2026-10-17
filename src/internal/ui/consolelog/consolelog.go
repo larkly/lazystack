@@ -70,8 +70,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case consoleErrMsg:
+		atBottom := m.scroll >= m.maxScroll()
 		m.loading = false
 		m.err = msg.err
+		// The error line takes a row; a view following the end of the output
+		// keeps showing the last line.
+		if atBottom {
+			m.scroll = m.maxScroll()
+		}
 		shared.Debugf("[consolelog] error: %v", msg.err)
 		return m, nil
 
