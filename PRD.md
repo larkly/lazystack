@@ -53,6 +53,12 @@
 
 - **Limited tests**: The codebase has minimal test coverage (cloud, compute, serverlist columns). The compute layer functions are thin wrappers around gophercloud and would benefit from interface-based mocking. The UI components are harder to test but snapshot testing of `View()` output would catch rendering regressions.
 
+- **No shared form package (`ui/form`)**: every create and edit form hand-rolls its field list, focus cycling, picker opening, submit/cancel buttons and key handling. Behaviour such as the submit key, picker keys and Esc has to be fixed form by form. A shared `ui/form` package would remove the duplication; it was deferred as a separate refactor rather than mixed into bug-fix work.
+
+- **No shared table package (`ui/table`)**: each list view implements its own columns, sorting, cursor and scroll handling and selection; most lists share only the filter input (`ui/filterbar`). A `ui/table` package would let the list views share one implementation; deferred together with `ui/form`.
+
+- **Duplicated selector code in the pane views**: the security group, network and router views carry near-identical selector pane code (filter wiring, sort, cursor visibility, selector rendering, Esc handling). It should become one shared selector component, ideally built on `ui/table`.
+
 - **Error handling in bulk operations**: Bulk actions collect errors and report them as a single concatenated string. Individual failure tracking and partial success reporting would be better UX.
 
 ### OpenStack API Considerations
@@ -505,13 +511,14 @@ src/
 - **Bulk member operations**: Add multiple members at once
 - Status colors: ACTIVE/ONLINE=green, PENDING_*=yellow, ERROR/OFFLINE=red
 
-#### Project Switching (ALPHA — UNTESTED)
+#### Project Switching
 - After cloud connection, accessible projects fetched in background via Keystone `ListAvailable`
 - If more than one project available, `P` key opens project picker modal
 - Current project marked with `*` in picker
 - On selection, re-authenticates scoped to new project via `ConnectWithProject` (overrides TenantID)
 - All tabs reset on project switch (same as cloud switch)
 - Project name shown in status bar between cloud and region
+- Covered by tests in `src/internal/app/connection_scope_test.go`: results and ticks from the previous connection or project are discarded, a failed switch keeps the prior identity, and only the latest connect attempt is applied
 
 #### Quota Overlay
 - `Q` key opens full-screen quota overlay (same pattern as help)
@@ -522,7 +529,7 @@ src/
 - Scroll support, close with `Q` or `Esc`
 - Block Storage section omitted if Cinder unavailable
 
-### Phase 5: Quality of Life (Partial)
+### Phase 5: Quality of Life (Complete)
 
 #### Server Rename (`r`)
 - Inline rename from server list or detail view
