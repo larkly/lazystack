@@ -302,18 +302,18 @@ func (m Model) handleUploadingKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		m.confirmCancel = true
-	case msg.String() == "b":
+	case key.Matches(msg, shared.Keys.Background):
 		m.Active = false
 	}
 	return m, nil
 }
 
 func (m Model) handleLargeFileWarning(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "y":
+	switch {
+	case key.Matches(msg, shared.Keys.Confirm):
 		m.warnLargeFile = false
 		return m.doUpload()
-	case "n", "esc":
+	case key.Matches(msg, shared.Keys.Deny) || msg.String() == "esc":
 		m.warnLargeFile = false
 		return m, nil
 	}
@@ -352,7 +352,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField = (m.focusField + 1) % numFields
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			var cmd tea.Cmd
@@ -428,7 +428,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.updateFocus()
 		}
 		return m, nil
-	case msg.String() == "ctrl+s":
+	case key.Matches(msg, shared.Keys.Submit):
 		return m.submit()
 	}
 	return m, nil

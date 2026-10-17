@@ -323,7 +323,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Enter):
 			m.advanceFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			switch m.focusField {
@@ -410,7 +410,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 
 	// Handle backspace on user data to clear selection
-	if m.focusField == fieldUserData && (msg.String() == "backspace" || msg.String() == "delete") {
+	if m.focusField == fieldUserData && key.Matches(msg, shared.TextKeys.DeleteChar) {
 		m.userData = nil
 		m.userDataFile = ""
 		return m, nil
@@ -423,7 +423,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 
 	// Handle ctrl+s to submit
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -446,12 +446,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	items := m.pickerItems()
 	isMultiSelect := m.pickerField == fieldSecGroup
 
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.pickerOpen = false
 		m.pickerFilter.Blur()
 		return m, nil
-	case "space":
+	case shared.MatchesNonText(msg, shared.Keys.Select):
 		if isMultiSelect {
 			filtered := m.filteredPickerItems(items)
 			if len(filtered) > 0 && m.pickerCursor < len(filtered) {
@@ -464,7 +464,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		if !isMultiSelect {
 			filtered := m.filteredPickerItems(items)
 			if len(filtered) > 0 && m.pickerCursor < len(filtered) {
@@ -476,13 +476,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Advance to next field
 		m.advanceFocus()
 		return m, nil
-	// Only arrows navigate: j/k must reach the filter as text.
-	case "up":
+	// Only non-text keys navigate: j/k must reach the filter as text.
+	case shared.MatchesNonText(msg, shared.Keys.Up):
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down":
+	case shared.MatchesNonText(msg, shared.Keys.Down):
 		filtered := m.filteredPickerItems(items)
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++

@@ -208,7 +208,7 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField = confirmSubmit
 			m.ipInput.Blur()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submitInterface()
 		default:
 			var cmd tea.Cmd
@@ -246,7 +246,7 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.err = ""
 			return m, nil
 		}
-	case msg.String() == "ctrl+s":
+	case key.Matches(msg, shared.Keys.Submit):
 		return m.submitInterface()
 	}
 

@@ -228,7 +228,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField++
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			return m.routeToInput(msg)
@@ -280,7 +280,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.Active = false
 			return m, nil
 		}
-	case msg.String() == "ctrl+s":
+	case key.Matches(msg, shared.Keys.Submit):
 		return m.submit()
 	}
 
@@ -290,18 +290,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) updateSGPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	filtered := m.filteredSGs()
 
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.sgPickerOpen = false
 		m.sgPickerFilter.Blur()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		m.sgPickerOpen = false
 		m.sgPickerFilter.Blur()
 		m.focusField++
 		m.updateFocus()
 		return m, nil
-	case "space":
+	case shared.MatchesNonText(msg, shared.Keys.Select):
 		if len(filtered) > 0 && m.sgPickerCursor < len(filtered) {
 			idx := filtered[m.sgPickerCursor].id
 			if m.selectedSGs[idx] {
@@ -311,12 +311,12 @@ func (m Model) updateSGPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "up":
+	case shared.MatchesNonText(msg, shared.Keys.Up):
 		if m.sgPickerCursor > 0 {
 			m.sgPickerCursor--
 		}
 		return m, nil
-	case "down":
+	case shared.MatchesNonText(msg, shared.Keys.Down):
 		if m.sgPickerCursor < len(filtered)-1 {
 			m.sgPickerCursor++
 		}

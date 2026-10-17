@@ -192,14 +192,14 @@ func (m Model) updateConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) updateFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.filtering = false
 		m.filter.SetValue("")
 		m.filter.Blur()
 		m.applyFilter()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		m.filtering = false
 		m.filter.Blur()
 		return m, nil

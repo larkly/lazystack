@@ -356,7 +356,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField++
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			switch m.focusField {
@@ -436,7 +436,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 

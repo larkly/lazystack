@@ -213,7 +213,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField++
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			switch m.focusField {
@@ -289,7 +289,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -314,12 +314,12 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	items := m.pickerItems()
 
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.pickerOpen = false
 		m.pickerFilter.Blur()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		filtered := m.filteredPickerItems(items)
 		if len(filtered) > 0 && m.pickerCursor < len(filtered) {
 			m.setPickerSelection(filtered[m.pickerCursor].id)
@@ -329,12 +329,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focusField = (m.focusField + 1) % numFields
 		m.updateFocus()
 		return m, nil
-	case "up":
+	case shared.MatchesNonText(msg, shared.Keys.Up):
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down":
+	case shared.MatchesNonText(msg, shared.Keys.Down):
 		filtered := m.filteredPickerItems(items)
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++

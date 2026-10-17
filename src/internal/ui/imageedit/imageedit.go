@@ -207,7 +207,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField = (m.focusField + 1) % numFields
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			var cmd tea.Cmd
@@ -269,7 +269,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.updateFocus()
 		}
 		return m, nil
-	case msg.String() == "ctrl+s":
+	case key.Matches(msg, shared.Keys.Submit):
 		return m.submit()
 	}
 	return m, nil

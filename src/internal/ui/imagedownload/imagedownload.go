@@ -302,7 +302,7 @@ func (m Model) handleDownloadingKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		m.confirmCancel = true
-	case msg.String() == "b":
+	case key.Matches(msg, shared.Keys.Background):
 		m.Active = false
 	}
 	return m, nil
@@ -332,7 +332,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				p = filepath.Dir(p)
 			}
 			return m.openDirPicker(p)
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			var cmd tea.Cmd
@@ -372,7 +372,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, nil
-	case msg.String() == "ctrl+s":
+	case key.Matches(msg, shared.Keys.Submit):
 		return m.submit()
 	}
 	return m, nil
