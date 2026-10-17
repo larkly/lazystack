@@ -189,6 +189,8 @@ var allSections = []section{
 			l("↑/k ↓/j", "navigate"),
 			k(&shared.Keys.Enter, "view detail"),
 			k(&shared.Keys.Select, "select/deselect"),
+			k(&shared.Keys.Filter, "filter"),
+			l("esc", "clear filter / selection"),
 			k(&shared.Keys.Create, "create volume"),
 			k(&shared.Keys.Delete, "delete volume(s)"),
 			k(&shared.Keys.Attach, "attach to server"),

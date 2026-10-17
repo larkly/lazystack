@@ -247,3 +247,31 @@ func TestNoLiteralReservedKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestListViewsDocumentFilterAndSort checks that every list view with a "/"
+// filter (and s/S sort) says so in its profiled help, along with what esc
+// clears there.
+func TestListViewsDocumentFilterAndSort(t *testing.T) {
+	tests := []struct {
+		view, section string
+		sort          bool
+	}{
+		{"volumelist", "Volume List", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.view, func(t *testing.T) {
+			entries := profiled(t, tc.view)[tc.section]
+			if e, ok := find(entries, "filter"); !ok || e.keys != bindingKeys(shared.Keys.Filter) {
+				t.Errorf("%s: filter entry = %+v (found %v), want keys %q", tc.section, e, ok, bindingKeys(shared.Keys.Filter))
+			}
+			if e, ok := find(entries, "clear filter"); !ok || e.keys != "esc" {
+				t.Errorf("%s: no esc entry clearing the filter", tc.section)
+			}
+			if tc.sort {
+				if e, ok := find(entries, "sort"); !ok || e.keys != "s/S" {
+					t.Errorf("%s: no s/S sort entry", tc.section)
+				}
+			}
+		})
+	}
+}
