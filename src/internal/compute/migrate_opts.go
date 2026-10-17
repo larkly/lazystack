@@ -51,3 +51,28 @@ func (o evacuateOpts) ToEvacuateMap() (map[string]any, error) {
 	}
 	return map[string]any{"evacuate": body}, nil
 }
+
+// liveMigrateOpts builds the os-migrateLive action body for the client's
+// microversion. From 2.25 Nova accepts block_migration "auto", which picks
+// block migration for local-storage instances; disk_over_commit is gone.
+// Below 2.25 the schema requires both booleans.
+type liveMigrateOpts struct {
+	microversion string
+	host         string // empty lets the scheduler choose
+}
+
+// ToLiveMigrateMap implements servers.LiveMigrateOptsBuilder.
+func (o liveMigrateOpts) ToLiveMigrateMap() (map[string]any, error) {
+	var host any
+	if o.host != "" {
+		host = o.host
+	}
+	body := map[string]any{"host": host}
+	if microversionAtLeast(o.microversion, 2, 25) {
+		body["block_migration"] = "auto"
+	} else {
+		body["block_migration"] = false
+		body["disk_over_commit"] = false
+	}
+	return map[string]any{"os-migrateLive": body}, nil
+}

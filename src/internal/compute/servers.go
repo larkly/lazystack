@@ -432,11 +432,12 @@ func MigrateServer(ctx context.Context, client *gophercloud.ServiceClient, id st
 	return nil
 }
 
-// LiveMigrateServer live-migrates a server to a target host.
+// LiveMigrateServer live-migrates a server to a target host. An empty host
+// lets the scheduler choose. From microversion 2.25 block migration is
+// decided by Nova ("auto"); below it shared-storage migration is requested.
 func LiveMigrateServer(ctx context.Context, client *gophercloud.ServiceClient, id, host string) error {
-	shared.Debugf("[compute] live-migrating server %s to host %s", id, host)
-	opts := servers.LiveMigrateOpts{Host: &host, BlockMigration: new(bool)}
-	*opts.BlockMigration = false
+	shared.Debugf("[compute] live-migrating server %s to host %s (microversion=%s)", id, host, client.Microversion)
+	opts := liveMigrateOpts{microversion: client.Microversion, host: host}
 	r := servers.LiveMigrate(ctx, client, id, opts)
 	if r.Err != nil {
 		shared.Debugf("[compute] live-migrate server %s: %v", id, r.Err)
