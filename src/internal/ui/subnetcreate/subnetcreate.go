@@ -2,6 +2,7 @@ package subnetcreate
 
 import (
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -407,6 +408,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	if m.ipVersion == 1 {
 		ipVer = 6
 	}
+	if err := validateAddressing(ipVer, cidr, m.gatewayInput.Value()); err != nil {
+		m.err = err.Error()
+		return m, nil
+	}
 
 	prefixLen := 0
 	if ipVer == 6 && poolSelected {
@@ -456,6 +461,50 @@ func (m Model) submit() (Model, tea.Cmd) {
 		shared.Debugf("[subnetcreate] created subnet %q in network %s", opts.Name, m.networkName)
 		return subnetCreatedMsg{Audit: rec}
 	})
+}
+
+// validateAddressing checks the CIDR and gateway against the selected IP
+// version. cidr may be blank when a subnet pool allocates it; the gateway
+// may be blank (auto) or "none".
+func validateAddressing(ipVer int, cidr, gateway string) error {
+	if cidr != "" {
+		prefix, err := netip.ParsePrefix(cidr)
+		if err != nil {
+			return fmt.Errorf("CIDR %q is not a valid CIDR, e.g. 10.0.0.0/24 or 2001:db8::/64", cidr)
+		}
+		if err := checkFamily("CIDR", cidr, prefix.Addr(), ipVer); err != nil {
+			return err
+		}
+		if masked := prefix.Masked(); masked != prefix {
+			return fmt.Errorf("CIDR %s has host bits set, use %s", cidr, masked)
+		}
+	}
+	gw := strings.TrimSpace(gateway)
+	if gw == "" || network.IsNoGateway(gw) {
+		return nil
+	}
+	if !shared.ValidIP(gw) {
+		return fmt.Errorf(`Gateway %q is not a valid IP address (or "none")`, gw)
+	}
+	if cidr == "" {
+		return checkFamily("Gateway", gw, netip.MustParseAddr(gw), ipVer)
+	}
+	if !shared.IPInCIDR(gw, cidr) {
+		return fmt.Errorf("Gateway %s is not inside %s", gw, cidr)
+	}
+	return nil
+}
+
+// checkFamily rejects an address of the other IP family than ipVer.
+func checkFamily(what, raw string, addr netip.Addr, ipVer int) error {
+	got := 6
+	if addr.Is4() {
+		got = 4
+	}
+	if got != ipVer {
+		return fmt.Errorf("%s %s is IPv%d but IPv%d is selected", what, raw, got, ipVer)
+	}
+	return nil
 }
 
 // gatewayOpt maps the gateway field to CreateSubnet's GatewayIP: blank
