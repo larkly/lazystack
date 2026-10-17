@@ -1,9 +1,11 @@
 package shared
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -49,6 +51,53 @@ func httpStatus(err error) int {
 	return 0
 }
 
+// APIFaultMessage extracts the human-readable message from an OpenStack
+// error response body. It understands the Nova/Cinder fault shape
+// {"<fault>": {"message": ...}}, Neutron's {"NeutronError": {"message": ...}}
+// and Octavia's {"faultstring": ...}. It returns "" when err carries no
+// response body or the body has no message.
+func APIFaultMessage(err error) string {
+	var codeErr gophercloud.ErrUnexpectedResponseCode
+	if !errors.As(err, &codeErr) || len(codeErr.Body) == 0 {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(codeErr.Body, &fields) != nil {
+		return ""
+	}
+	var faultstring string
+	if json.Unmarshal(fields["faultstring"], &faultstring) == nil {
+		if m := strings.TrimSpace(faultstring); m != "" {
+			return m
+		}
+	}
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		var fault struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(fields[k], &fault) != nil {
+			continue
+		}
+		if m := strings.TrimSpace(fault.Message); m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+// withAPIFault appends the API's own reason to a friendly message.
+func withAPIFault(friendly string, err error) string {
+	if m := APIFaultMessage(err); m != "" {
+		return friendly + " (" + m + ")"
+	}
+	return friendly
+}
+
 // ParsedError carries both a user-friendly message and the raw error for expandable display.
 type ParsedError struct {
 	FriendlyMessage string // User-friendly, actionable message
@@ -90,7 +139,7 @@ func ParseError(err error) *ParsedError {
 	// Then the HTTP status code.
 	if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
 		return &ParsedError{
-			FriendlyMessage: "Resource is busy (provisioning in progress). Try again shortly.",
+			FriendlyMessage: withAPIFault("Conflict — the resource is busy, in use, or the name already exists.", err),
 			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
 			HTTPStatusCode:  http.StatusConflict,
 			Category:        "conflict",
@@ -114,7 +163,7 @@ func ParseError(err error) *ParsedError {
 	}
 	if gophercloud.ResponseCodeIs(err, http.StatusBadRequest) {
 		return &ParsedError{
-			FriendlyMessage: "Invalid request — check your input values and try again.",
+			FriendlyMessage: withAPIFault("Invalid request — check your input values and try again.", err),
 			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
 			HTTPStatusCode:  http.StatusBadRequest,
 			Category:        "bad_request",

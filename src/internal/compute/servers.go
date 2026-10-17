@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -336,7 +335,7 @@ func (e *conflictError) Unwrap() error { return e.cause }
 // task running), so only a snapshot-related task_state is reported as a
 // snapshot in progress; anything else keeps Nova's own reason.
 func snapshotConflict(id string, err error) error {
-	reason := novaFaultMessage(err)
+	reason := shared.APIFaultMessage(err)
 	var msg string
 	switch {
 	case strings.Contains(reason, "task_state image_"):
@@ -347,28 +346,6 @@ func snapshotConflict(id string, err error) error {
 		msg = fmt.Sprintf("server %s cannot be snapshotted in its current state", id)
 	}
 	return &conflictError{msg: msg, cause: err}
-}
-
-// novaFaultMessage extracts the message from a Nova fault body such as
-// {"conflictingRequest": {"code": 409, "message": "..."}}. It returns ""
-// when err carries no parseable body.
-func novaFaultMessage(err error) string {
-	var codeErr gophercloud.ErrUnexpectedResponseCode
-	if !errors.As(err, &codeErr) || len(codeErr.Body) == 0 {
-		return ""
-	}
-	var fault map[string]struct {
-		Message string `json:"message"`
-	}
-	if json.Unmarshal(codeErr.Body, &fault) != nil {
-		return ""
-	}
-	for _, f := range fault {
-		if m := strings.TrimSpace(f.Message); m != "" {
-			return m
-		}
-	}
-	return ""
 }
 
 // RebuildServer rebuilds a server with a new image.

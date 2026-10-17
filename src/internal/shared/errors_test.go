@@ -2,6 +2,7 @@ package shared
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func TestParseError_409Conflict(t *testing.T) {
 	err := newHTTPError(http.StatusConflict)
 	parsed := ParseError(err)
 
-	if parsed.FriendlyMessage != "Resource is busy (provisioning in progress). Try again shortly." {
+	if parsed.FriendlyMessage != "Conflict — the resource is busy, in use, or the name already exists." {
 		t.Errorf("unexpected friendly message: %q", parsed.FriendlyMessage)
 	}
 	if parsed.Category != "conflict" {
@@ -271,7 +272,7 @@ func TestSanitizeAPIError_DelegatesToParseError(t *testing.T) {
 	conflictErr := newHTTPError(http.StatusConflict)
 
 	result := SanitizeAPIError(conflictErr)
-	expected := "Resource is busy (provisioning in progress). Try again shortly."
+	expected := "Conflict — the resource is busy, in use, or the name already exists."
 	if result != expected {
 		t.Errorf("SanitizeAPIError = %q, want %q", result, expected)
 	}
@@ -357,5 +358,57 @@ func TestParseError_PlainStatusWithoutQuotaBody(t *testing.T) {
 		if got := ParseError(newHTTPErrorWithBody(tc.status, tc.body)).Category; got != tc.category {
 			t.Errorf("status %d: category=%q, want %q", tc.status, got, tc.category)
 		}
+	}
+}
+
+func TestAPIFaultMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"nova", newHTTPErrorWithBody(409, `{"conflictingRequest": {"code": 409, "message": "Instance srv is locked"}}`), "Instance srv is locked"},
+		{"neutron", newHTTPErrorWithBody(409, `{"NeutronError": {"type": "RouterInUse", "message": "Router r1 still has ports", "detail": ""}}`), "Router r1 still has ports"},
+		{"octavia", newHTTPErrorWithBody(409, `{"faultcode": "Client", "faultstring": "Load Balancer lb-1 is immutable", "debuginfo": null}`), "Load Balancer lb-1 is immutable"},
+		{"trimmed", newHTTPErrorWithBody(400, `{"badRequest": {"message": "  Invalid flavorRef  "}}`), "Invalid flavorRef"},
+		{"wrapped", fmt.Errorf("creating server: %w", newHTTPErrorWithBody(400, `{"badRequest": {"message": "Invalid key_name"}}`)), "Invalid key_name"},
+		{"not json", newHTTPErrorWithBody(409, `<html>Conflict</html>`), ""},
+		{"empty body", newHTTPError(409), ""},
+		{"empty message", newHTTPErrorWithBody(409, `{"conflictingRequest": {"code": 409, "message": ""}}`), ""},
+		{"not an HTTP error", errors.New("boom"), ""},
+		{"nil", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := APIFaultMessage(tc.err); got != tc.want {
+				t.Errorf("APIFaultMessage=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// 409 and 400 carry the API's own reason, which the friendly message must
+// not hide.
+func TestParseError_AppendsAPIFaultMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"409 nova", newHTTPErrorWithBody(409, `{"conflictingRequest": {"code": 409, "message": "Instance srv is locked"}}`),
+			"Conflict — the resource is busy, in use, or the name already exists. (Instance srv is locked)"},
+		{"409 octavia", newHTTPErrorWithBody(409, `{"faultstring": "Load Balancer lb-1 is immutable"}`),
+			"Conflict — the resource is busy, in use, or the name already exists. (Load Balancer lb-1 is immutable)"},
+		{"409 not json", newHTTPErrorWithBody(409, `Conflict`),
+			"Conflict — the resource is busy, in use, or the name already exists."},
+		{"400 neutron", newHTTPErrorWithBody(400, `{"NeutronError": {"type": "HTTPBadRequest", "message": "Invalid input for name"}}`),
+			"Invalid request — check your input values and try again. (Invalid input for name)"},
+		{"400 no body", newHTTPError(400),
+			"Invalid request — check your input values and try again."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ParseError(tc.err).FriendlyMessage; got != tc.want {
+				t.Errorf("friendly=%q, want %q", got, tc.want)
+			}
+		})
 	}
 }
