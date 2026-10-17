@@ -412,3 +412,35 @@ func TestParseError_AppendsAPIFaultMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestParseError_401Unauthorized(t *testing.T) {
+	parsed := ParseError(fmt.Errorf("listing servers: %w", newHTTPError(http.StatusUnauthorized)))
+	if parsed.Category != "unauthorized" {
+		t.Errorf("category=%q, want unauthorized", parsed.Category)
+	}
+	if parsed.FriendlyMessage != "Session expired or credentials rejected — press C to reconnect." {
+		t.Errorf("friendly=%q", parsed.FriendlyMessage)
+	}
+	if parsed.HTTPStatusCode != http.StatusUnauthorized {
+		t.Errorf("status=%d", parsed.HTTPStatusCode)
+	}
+}
+
+func TestParseError_5xxUnavailable(t *testing.T) {
+	for _, code := range []int{500, 502, 503, 504} {
+		parsed := ParseError(newHTTPErrorWithBody(code, `<html>Service Unavailable</html>`))
+		if parsed.Category != "unavailable" {
+			t.Errorf("%d: category=%q, want unavailable", code, parsed.Category)
+		}
+		want := fmt.Sprintf("The cloud API is unavailable (HTTP %d) — try again shortly.", code)
+		if parsed.FriendlyMessage != want {
+			t.Errorf("%d: friendly=%q, want %q", code, parsed.FriendlyMessage, want)
+		}
+		if parsed.HTTPStatusCode != code {
+			t.Errorf("%d: status=%d", code, parsed.HTTPStatusCode)
+		}
+	}
+	if got := ParseError(newHTTPError(501)).Category; got == "unavailable" {
+		t.Errorf("501 Not Implemented classified as unavailable")
+	}
+}

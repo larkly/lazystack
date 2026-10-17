@@ -3,6 +3,7 @@ package shared
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -103,7 +104,7 @@ type ParsedError struct {
 	FriendlyMessage string // User-friendly, actionable message
 	RawError        string // Original error text for debug/details
 	HTTPStatusCode  int    // HTTP status code (0 if unknown)
-	Category        string // Category: "conflict", "forbidden", "not_found", "bad_request", "quota", "network", "unknown"
+	Category        string // Category: "conflict", "forbidden", "not_found", "bad_request", "quota", "unauthorized", "unavailable", "network", "unknown"
 }
 
 func (e *ParsedError) Error() string {
@@ -137,6 +138,22 @@ func ParseError(err error) *ParsedError {
 	}
 
 	// Then the HTTP status code.
+	switch status := httpStatus(err); status {
+	case http.StatusUnauthorized:
+		return &ParsedError{
+			FriendlyMessage: "Session expired or credentials rejected — press C to reconnect.",
+			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
+			HTTPStatusCode:  status,
+			Category:        "unauthorized",
+		}
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return &ParsedError{
+			FriendlyMessage: fmt.Sprintf("The cloud API is unavailable (HTTP %d) — try again shortly.", status),
+			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
+			HTTPStatusCode:  status,
+			Category:        "unavailable",
+		}
+	}
 	if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
 		return &ParsedError{
 			FriendlyMessage: withAPIFault("Conflict — the resource is busy, in use, or the name already exists.", err),
