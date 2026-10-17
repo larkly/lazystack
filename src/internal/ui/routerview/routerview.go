@@ -605,7 +605,7 @@ func (m Model) renderWide() string {
 	selPanel := m.panelBorder(FocusSelector).
 		Width(m.width).
 		Height(selH).
-		Render(padContent(m.panelTitle(FocusSelector), selContent))
+		Render(shared.PadContent(m.panelTitle(FocusSelector), selContent))
 
 	// Detail top row: info (35%) | interfaces (65%)
 	topH := dh * 55 / 100
@@ -620,14 +620,14 @@ func (m Model) renderWide() string {
 	leftW := m.width * 35 / 100
 	rightW := m.width - leftW - 1
 
-	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
+	infoContent := shared.PadContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
 	infoPanel := m.panelBorder(focusInfo).Width(leftW).Height(topH).Render(infoContent)
 
-	ifacesContent := padContent(m.panelTitle(FocusInterfaces), m.renderInterfacesContent(rightW-4, topH-4))
+	ifacesContent := shared.PadContent(m.panelTitle(FocusInterfaces), m.renderInterfacesContent(rightW-4, topH-4))
 	ifacesPanel := m.panelBorder(FocusInterfaces).Width(rightW).Height(topH).Render(ifacesContent)
 
 	// Detail bottom row: routes (full width)
-	routesContent := padContent(m.panelTitle(focusRoutes), m.renderRoutesContent(m.width-4, bottomH-4))
+	routesContent := shared.PadContent(m.panelTitle(focusRoutes), m.renderRoutesContent(m.width-4, bottomH-4))
 	routesPanel := m.panelBorder(focusRoutes).Width(m.width).Height(bottomH).Render(routesContent)
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", ifacesPanel)
@@ -656,28 +656,16 @@ func (m Model) renderNarrow() string {
 	}
 
 	selContent := m.renderSelectorContent(w-4, selH-2)
-	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(padContent(m.panelTitle(FocusSelector), selContent))
+	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(shared.PadContent(m.panelTitle(FocusSelector), selContent))
 
-	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4)))
-	ifacesPanel := m.panelBorder(FocusInterfaces).Width(w).Height(ifacesH).Render(padContent(m.panelTitle(FocusInterfaces), m.renderInterfacesContent(w-4, ifacesH-4)))
-	routesPanel := m.panelBorder(focusRoutes).Width(w).Height(routesH).Render(padContent(m.panelTitle(focusRoutes), m.renderRoutesContent(w-4, routesH-4)))
+	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(shared.PadContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4)))
+	ifacesPanel := m.panelBorder(FocusInterfaces).Width(w).Height(ifacesH).Render(shared.PadContent(m.panelTitle(FocusInterfaces), m.renderInterfacesContent(w-4, ifacesH-4)))
+	routesPanel := m.panelBorder(focusRoutes).Width(w).Height(routesH).Render(shared.PadContent(m.panelTitle(focusRoutes), m.renderRoutesContent(w-4, routesH-4)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, ifacesPanel, routesPanel)
 }
 
 // --- Panel helpers ---
-
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "")
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) panelTitle(pane focusPane) string {
 	borderColor := shared.ColorMuted

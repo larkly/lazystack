@@ -66,10 +66,7 @@ type Model struct {
 	lbs            []loadbalancer.LoadBalancer
 	cursor         int
 	selectorScroll int
-	sortCol        int
-	sortAsc        bool
-	sortHighlight  bool
-	sortClearAt    time.Time
+	order          shared.SortState
 
 	// Search/filter
 	searchActive bool
@@ -131,7 +128,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 		monitors:        make(map[string]*loadbalancer.HealthMonitor),
 		selectedMembers: make(map[string]bool),
 		refreshInterval: refreshInterval,
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 	}
 }
 
@@ -489,7 +486,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case spinner.TickMsg:
@@ -818,15 +815,10 @@ func (m Model) cycleSort() (Model, tea.Cmd) {
 	if lb := m.SelectedLB(); lb != nil {
 		cursorID = lb.ID
 	}
-	m.sortCol = (m.sortCol + 1) % len(sortColumns)
-	m.sortAsc = true
-	m.sortHighlight = true
-	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.order = shared.NextSort(m.order, len(sortColumns))
 	m.sortLBs()
 	m.restoreCursor(cursorID)
-	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return sortClearMsg{}
-	})
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
 func (m Model) reverseSort() (Model, tea.Cmd) {
@@ -834,25 +826,22 @@ func (m Model) reverseSort() (Model, tea.Cmd) {
 	if lb := m.SelectedLB(); lb != nil {
 		cursorID = lb.ID
 	}
-	m.sortAsc = !m.sortAsc
-	m.sortHighlight = true
-	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.order = shared.ReverseSort(m.order)
 	m.sortLBs()
 	m.restoreCursor(cursorID)
-	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return sortClearMsg{}
-	})
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
+// restoreCursor puts the cursor back on the load balancer with cursorID
+// when it is still listed.
 func (m *Model) restoreCursor(cursorID string) {
-	if cursorID == "" {
-		return
+	vis := m.visibleLBs()
+	ids := make([]string, len(vis))
+	for i, lb := range vis {
+		ids[i] = lb.ID
 	}
-	for i, lb := range m.visibleLBs() {
-		if lb.ID == cursorID {
-			m.cursor = i
-			return
-		}
+	if i := shared.RestoreCursor(ids, cursorID); i >= 0 {
+		m.cursor = i
 	}
 }
 
@@ -860,8 +849,8 @@ func (m *Model) sortLBs() {
 	if len(m.lbs) == 0 {
 		return
 	}
-	colKey := sortColumns[m.sortCol]
-	asc := m.sortAsc
+	colKey := sortColumns[m.order.Col]
+	asc := m.order.Asc
 	sort.SliceStable(m.lbs, func(i, j int) bool {
 		a, b := m.lbs[i], m.lbs[j]
 		if !asc {
@@ -1079,7 +1068,7 @@ func (m Model) renderWide() string {
 	selH := m.selectorHeight()
 
 	// Selector: full width
-	selContent := padContent(m.selectorTitle(), m.renderSelectorContent(m.width-4, selH-4))
+	selContent := shared.PadContent(m.selectorTitle(), m.renderSelectorContent(m.width-4, selH-4))
 	selPanel := m.panelBorder(FocusSelector).
 		Width(m.width).
 		Height(selH).
@@ -1095,16 +1084,16 @@ func (m Model) renderWide() string {
 	leftW := m.width * 35 / 100
 	rightW := m.width - leftW - 1
 
-	infoContent := padContent(m.panelTitle(FocusInfo), m.renderInfoContent(leftW-4))
+	infoContent := shared.PadContent(m.panelTitle(FocusInfo), m.renderInfoContent(leftW-4))
 	infoPanel := m.panelBorder(FocusInfo).Width(leftW).Height(topH).Render(infoContent)
 
-	listenersContent := padContent(m.panelTitle(FocusListeners), m.renderListenersContent(rightW-4, topH-4))
+	listenersContent := shared.PadContent(m.panelTitle(FocusListeners), m.renderListenersContent(rightW-4, topH-4))
 	listenersPanel := m.panelBorder(FocusListeners).Width(rightW).Height(topH).Render(listenersContent)
 
-	poolsContent := padContent(m.panelTitle(FocusPools), m.renderPoolsContent(leftW-4, bottomH-4))
+	poolsContent := shared.PadContent(m.panelTitle(FocusPools), m.renderPoolsContent(leftW-4, bottomH-4))
 	poolsPanel := m.panelBorder(FocusPools).Width(leftW).Height(bottomH).Render(poolsContent)
 
-	membersContent := padContent(m.panelTitle(FocusMembers), m.renderMembersContent(rightW-4, bottomH-4))
+	membersContent := shared.PadContent(m.panelTitle(FocusMembers), m.renderMembersContent(rightW-4, bottomH-4))
 	membersPanel := m.panelBorder(FocusMembers).Width(rightW).Height(bottomH).Render(membersContent)
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", listenersPanel)
@@ -1121,7 +1110,7 @@ func (m Model) renderNarrow() string {
 	remaining := totalH - selH
 
 	selContent := m.renderSelectorContent(w-4, selH-4)
-	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(padContent(m.selectorTitle(), selContent))
+	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(shared.PadContent(m.selectorTitle(), selContent))
 
 	if m.SelectedLB() == nil {
 		return selPanel
@@ -1138,27 +1127,15 @@ func (m Model) renderNarrow() string {
 		}
 	}
 
-	infoPanel := m.panelBorder(FocusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(FocusInfo), m.renderInfoContent(w-4)))
-	listenersPanel := m.panelBorder(FocusListeners).Width(w).Height(listenersH).Render(padContent(m.panelTitle(FocusListeners), m.renderListenersContent(w-4, listenersH-4)))
-	poolsPanel := m.panelBorder(FocusPools).Width(w).Height(poolsH).Render(padContent(m.panelTitle(FocusPools), m.renderPoolsContent(w-4, poolsH-4)))
-	membersPanel := m.panelBorder(FocusMembers).Width(w).Height(membersH).Render(padContent(m.panelTitle(FocusMembers), m.renderMembersContent(w-4, membersH-4)))
+	infoPanel := m.panelBorder(FocusInfo).Width(w).Height(infoH).Render(shared.PadContent(m.panelTitle(FocusInfo), m.renderInfoContent(w-4)))
+	listenersPanel := m.panelBorder(FocusListeners).Width(w).Height(listenersH).Render(shared.PadContent(m.panelTitle(FocusListeners), m.renderListenersContent(w-4, listenersH-4)))
+	poolsPanel := m.panelBorder(FocusPools).Width(w).Height(poolsH).Render(shared.PadContent(m.panelTitle(FocusPools), m.renderPoolsContent(w-4, poolsH-4)))
+	membersPanel := m.panelBorder(FocusMembers).Width(w).Height(membersH).Render(shared.PadContent(m.panelTitle(FocusMembers), m.renderMembersContent(w-4, membersH-4)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, listenersPanel, poolsPanel, membersPanel)
 }
 
 // --- Panel helpers ---
-
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "")
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) selectorTitle() string {
 	borderColor := shared.ColorMuted
@@ -1277,15 +1254,8 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 	var headerParts []string
 	for i, h := range headerTitles {
 		title := h.title
-		indicator := ""
-		if i == m.sortCol {
-			if m.sortAsc {
-				indicator = " \u25b2"
-			} else {
-				indicator = " \u25bc"
-			}
-		}
-		if i == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(i)
+		if i == m.order.Col && m.order.Highlight {
 			headerParts = append(headerParts, lipgloss.NewStyle().
 				Foreground(shared.ColorHighlight).Bold(true).
 				Render(fmt.Sprintf("%-*s", h.width, title+indicator)))
@@ -1346,10 +1316,10 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		parts := []string{
-			nameStyle.Render(truncate(name, nameW)),
-			vipStyle.Render(truncate(lb.VipAddress, 18)),
-			psStyle.Render(provIcon + truncate(lb.ProvisioningStatus, 16)),
-			osStyle.Render(operIcon + truncate(lb.OperatingStatus, 14)),
+			nameStyle.Render(shared.TruncateCells(name, nameW)),
+			vipStyle.Render(shared.TruncateCells(lb.VipAddress, 18)),
+			psStyle.Render(provIcon + shared.TruncateCells(lb.ProvisioningStatus, 16)),
+			osStyle.Render(operIcon + shared.TruncateCells(lb.OperatingStatus, 14)),
 		}
 
 		prefixStyle := lipgloss.NewStyle()
@@ -1938,16 +1908,6 @@ func (m Model) renderActionBar() string {
 }
 
 // --- Style helpers ---
-
-func truncate(s string, w int) string {
-	if len(s) > w && w > 3 {
-		return s[:w-3] + "..."
-	}
-	if len(s) > w {
-		return s[:w]
-	}
-	return s
-}
 
 func provStatusStyle(status string) lipgloss.Style {
 	var fg color.Color = shared.ColorFg

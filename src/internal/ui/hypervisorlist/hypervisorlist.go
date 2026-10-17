@@ -176,7 +176,7 @@ func (m Model) View() string {
 
 		row := fmt.Sprintf("%s%-30s %-12s %s/%s %s/%s %s%s",
 			prefix,
-			truncate(h.Name, 29),
+			shared.TruncateCells(h.Name, 29),
 			h.Status,
 			formatInt(h.VCPUsUsed), formatInt(h.VCPUs),
 			formatInt(ramUsedGB), formatInt(ramTotalGB),
@@ -229,13 +229,6 @@ func (m Model) fetch() tea.Cmd {
 		}
 		return hypervisorsLoadedMsg{items: items}
 	}
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }
 
 func formatInt(n int) string {

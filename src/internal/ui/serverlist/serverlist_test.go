@@ -21,16 +21,16 @@ func TestDescendingSortKeepsTiesStable(t *testing.T) {
 		{ID: "s-3", Name: "c", Status: "SHUTOFF"},
 		{ID: "s-4", Name: "d", Status: "SHUTOFF"},
 	}
-	m.sortCol = -1
+	m.order.Col = -1
 	for i := 0; m.visibleColKey(i) != ""; i++ {
 		if m.visibleColKey(i) == "status" {
-			m.sortCol = i
+			m.order.Col = i
 		}
 	}
-	if m.sortCol < 0 {
+	if m.order.Col < 0 {
 		t.Fatal("status column not visible by default")
 	}
-	m.sortAsc = false
+	m.order.Asc = false
 	m.sortServers()
 
 	want := []string{"s-1", "s-3", "s-4", "s-2"}
@@ -55,7 +55,7 @@ func TestEscClearsFilterAndExitsFiltering(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/'}))
 	m = updated
-	if !m.filtering {
+	if !m.filter.Active() {
 		t.Fatalf("expected filtering mode to be enabled")
 	}
 
@@ -68,7 +68,7 @@ func TestEscClearsFilterAndExitsFiltering(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
 	m = updated
 
-	if m.filtering {
+	if m.filter.Active() {
 		t.Fatalf("expected filtering mode to be disabled after esc")
 	}
 	if got := m.filter.Value(); got != "" {
@@ -221,8 +221,8 @@ func commitFilter(t *testing.T, m Model, query string) Model {
 		m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
 	}
 	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if m.filtering || m.filter.Value() != query {
-		t.Fatalf("setup: filtering=%v filter=%q, want committed %q", m.filtering, m.filter.Value(), query)
+	if m.filter.Active() || m.filter.Value() != query {
+		t.Fatalf("setup: filtering=%v filter=%q, want committed %q", m.filter.Active(), m.filter.Value(), query)
 	}
 	return m
 }

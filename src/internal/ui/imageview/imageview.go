@@ -157,10 +157,7 @@ type Model struct {
 	columns        []Column
 	cursor         int
 	selectorScroll int
-	sortCol        int
-	sortAsc        bool
-	sortHighlight  bool
-	sortClearAt    time.Time
+	order          shared.SortState
 
 	// Search/filter
 	searchActive bool
@@ -207,7 +204,7 @@ func New(imageClient, computeClient *gophercloud.ServiceClient, refreshInterval 
 		searchInput:     ti,
 		refreshInterval: refreshInterval,
 		selected:        make(map[string]bool),
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 	}
 }
 
@@ -441,7 +438,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case spinner.TickMsg:
@@ -653,15 +650,10 @@ func (m Model) cycleSort() (Model, tea.Cmd) {
 	if i := m.SelectedImage(); i != nil {
 		cursorID = i.ID
 	}
-	m.sortCol = (m.sortCol + 1) % visCount
-	m.sortAsc = true
-	m.sortHighlight = true
-	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.order = shared.NextSort(m.order, visCount)
 	m.sortImages()
 	m.restoreCursor(cursorID)
-	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return sortClearMsg{}
-	})
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
 func (m Model) reverseSort() (Model, tea.Cmd) {
@@ -672,25 +664,22 @@ func (m Model) reverseSort() (Model, tea.Cmd) {
 	if i := m.SelectedImage(); i != nil {
 		cursorID = i.ID
 	}
-	m.sortAsc = !m.sortAsc
-	m.sortHighlight = true
-	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.order = shared.ReverseSort(m.order)
 	m.sortImages()
 	m.restoreCursor(cursorID)
-	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return sortClearMsg{}
-	})
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
+// restoreCursor puts the cursor back on the image with cursorID when it is
+// still listed.
 func (m *Model) restoreCursor(cursorID string) {
-	if cursorID == "" {
-		return
+	vis := m.visibleImages()
+	ids := make([]string, len(vis))
+	for i, im := range vis {
+		ids[i] = im.ID
 	}
-	for i, im := range m.visibleImages() {
-		if im.ID == cursorID {
-			m.cursor = i
-			return
-		}
+	if i := shared.RestoreCursor(ids, cursorID); i >= 0 {
+		m.cursor = i
 	}
 }
 
@@ -722,11 +711,11 @@ func (m *Model) sortImages() {
 	if len(m.images) == 0 {
 		return
 	}
-	colKey := m.visibleColKey(m.sortCol)
+	colKey := m.visibleColKey(m.order.Col)
 	if colKey == "" {
 		return
 	}
-	asc := m.sortAsc
+	asc := m.order.Asc
 	sort.SliceStable(m.images, func(i, j int) bool {
 		a, b := m.images[i], m.images[j]
 		// Descending swaps the operands so equal keys still compare false
@@ -910,7 +899,7 @@ func (m Model) View() string {
 func (m Model) renderWide() string {
 	selH := m.selectorHeight()
 
-	selContent := padContent(m.selectorTitle(), m.renderSelectorContent(m.width-4, selH-4))
+	selContent := shared.PadContent(m.selectorTitle(), m.renderSelectorContent(m.width-4, selH-4))
 	selPanel := m.panelBorder(FocusSelector).
 		Width(m.width).
 		Height(selH).
@@ -926,13 +915,13 @@ func (m Model) renderWide() string {
 	leftW := m.width * 35 / 100
 	rightW := m.width - leftW - 1
 
-	infoContent := padContent(m.panelTitle(FocusInfo), m.renderInfoContent(leftW-4))
+	infoContent := shared.PadContent(m.panelTitle(FocusInfo), m.renderInfoContent(leftW-4))
 	infoPanel := m.panelBorder(FocusInfo).Width(leftW).Height(midH).Render(infoContent)
 
-	propsContent := padContent(m.panelTitle(FocusProperties), m.renderPropertiesContent(rightW-4))
+	propsContent := shared.PadContent(m.panelTitle(FocusProperties), m.renderPropertiesContent(rightW-4))
 	propsPanel := m.panelBorder(FocusProperties).Width(rightW).Height(midH).Render(propsContent)
 
-	serversContent := padContent(m.panelTitle(FocusServers), m.renderServersContent(m.width-4, bottomH-4))
+	serversContent := shared.PadContent(m.panelTitle(FocusServers), m.renderServersContent(m.width-4, bottomH-4))
 	serversPanel := m.panelBorder(FocusServers).Width(m.width).Height(bottomH).Render(serversContent)
 
 	midRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", propsPanel)
@@ -948,7 +937,7 @@ func (m Model) renderNarrow() string {
 	remaining := totalH - selH
 
 	selContent := m.renderSelectorContent(w-4, selH-4)
-	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(padContent(m.selectorTitle(), selContent))
+	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(shared.PadContent(m.selectorTitle(), selContent))
 
 	if m.SelectedImage() == nil {
 		return selPanel
@@ -964,26 +953,14 @@ func (m Model) renderNarrow() string {
 		}
 	}
 
-	infoPanel := m.panelBorder(FocusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(FocusInfo), m.renderInfoContent(w-4)))
-	propsPanel := m.panelBorder(FocusProperties).Width(w).Height(propsH).Render(padContent(m.panelTitle(FocusProperties), m.renderPropertiesContent(w-4)))
-	serversPanel := m.panelBorder(FocusServers).Width(w).Height(serversH).Render(padContent(m.panelTitle(FocusServers), m.renderServersContent(w-4, serversH-4)))
+	infoPanel := m.panelBorder(FocusInfo).Width(w).Height(infoH).Render(shared.PadContent(m.panelTitle(FocusInfo), m.renderInfoContent(w-4)))
+	propsPanel := m.panelBorder(FocusProperties).Width(w).Height(propsH).Render(shared.PadContent(m.panelTitle(FocusProperties), m.renderPropertiesContent(w-4)))
+	serversPanel := m.panelBorder(FocusServers).Width(w).Height(serversH).Render(shared.PadContent(m.panelTitle(FocusServers), m.renderServersContent(w-4, serversH-4)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, propsPanel, serversPanel)
 }
 
 // --- Panel helpers ---
-
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "")
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) selectorTitle() string {
 	borderColor := shared.ColorMuted
@@ -1066,15 +1043,8 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		title := col.Title
 		idx := visIdx
 		visIdx++
-		indicator := ""
-		if idx == m.sortCol {
-			if m.sortAsc {
-				indicator = " \u25b2"
-			} else {
-				indicator = " \u25bc"
-			}
-		}
-		if idx == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(idx)
+		if idx == m.order.Col && m.order.Highlight {
 			headerParts = append(headerParts, lipgloss.NewStyle().
 				Width(col.width).
 				Foreground(shared.ColorHighlight).

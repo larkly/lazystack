@@ -40,10 +40,7 @@ type Model struct {
 	refresh         shared.RefreshGate
 	spinner         spinner.Model
 	err             error
-	sortCol         int
-	sortAsc         bool
-	sortHighlight   bool
-	sortClearAt     time.Time
+	order           shared.SortState
 	refreshInterval time.Duration
 	highlight       string // key pair name to put the cursor on once listed
 }
@@ -56,7 +53,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 		client:          client,
 		loading:         true,
 		spinner:         s,
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 		refreshInterval: refreshInterval,
 	}
 }
@@ -75,21 +72,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[keypairlist] loaded %d keypairs", len(msg.keypairs))
-		var cursorName string
-		if m.cursor >= 0 && m.cursor < len(m.pairs) {
-			cursorName = m.pairs[m.cursor].Name
-		}
+		cursorName := m.cursorName()
 		m.loading = false
 		m.pairs = msg.keypairs
 		m.err = nil
 		m.sortPairs()
-		if cursorName != "" {
-			for i, kp := range m.pairs {
-				if kp.Name == cursorName {
-					m.cursor = i
-					break
-				}
-			}
+		if i := shared.RestoreCursor(m.rowNames(), cursorName); i >= 0 {
+			m.cursor = i
 		}
 		m.ensureVisible()
 		m.applyHighlight()
@@ -126,54 +115,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, shared.Keys.Sort):
-			var cursorName string
-			if m.cursor >= 0 && m.cursor < len(m.pairs) {
-				cursorName = m.pairs[m.cursor].Name
-			}
-			m.sortCol = (m.sortCol + 1) % len(kpSortColumns)
-			m.sortAsc = true
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortPairs()
-			if cursorName != "" {
-				for i, kp := range m.pairs {
-					if kp.Name == cursorName {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			m.ensureVisible()
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+			m.order = shared.NextSort(m.order, len(kpSortColumns))
+			return m.resort()
 		case key.Matches(msg, shared.Keys.ReverseSort):
-			var cursorName string
-			if m.cursor >= 0 && m.cursor < len(m.pairs) {
-				cursorName = m.pairs[m.cursor].Name
-			}
-			m.sortAsc = !m.sortAsc
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortPairs()
-			if cursorName != "" {
-				for i, kp := range m.pairs {
-					if kp.Name == cursorName {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			m.ensureVisible()
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+			m.order = shared.ReverseSort(m.order)
+			return m.resort()
 		case key.Matches(msg, shared.Keys.Up):
 			m.cursor--
 			m.ensureVisible()
@@ -218,15 +170,8 @@ func (m Model) View() string {
 	var headerParts []string
 	for i, h := range headerTitles {
 		title := h.title
-		indicator := ""
-		if i == m.sortCol {
-			if m.sortAsc {
-				indicator = " ▲"
-			} else {
-				indicator = " ▼"
-			}
-		}
-		if i == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(i)
+		if i == m.order.Col && m.order.Highlight {
 			headerParts = append(headerParts, lipgloss.NewStyle().
 				Foreground(shared.ColorHighlight).
 				Bold(true).
@@ -253,6 +198,36 @@ func (m Model) View() string {
 	}
 
 	return b.String()
+}
+
+// cursorName is the name (a key pair's ID) of the key pair under the
+// cursor, or "".
+func (m Model) cursorName() string {
+	if kp := m.SelectedKeyPair(); kp != nil {
+		return kp.Name
+	}
+	return ""
+}
+
+// rowNames lists the names of the listed key pairs in display order.
+func (m Model) rowNames() []string {
+	names := make([]string, len(m.pairs))
+	for i, kp := range m.pairs {
+		names[i] = kp.Name
+	}
+	return names
+}
+
+// resort re-sorts the list after a sort change, keeping the cursor on the
+// same key pair, and highlights the sort column for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	name := m.cursorName()
+	m.sortPairs()
+	if i := shared.RestoreCursor(m.rowNames(), name); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
 // SetHighlight puts the cursor on the key pair with the given name as soon
@@ -301,8 +276,8 @@ func (m *Model) sortPairs() {
 	if len(m.pairs) == 0 {
 		return
 	}
-	colKey := kpSortColumns[m.sortCol]
-	asc := m.sortAsc
+	colKey := kpSortColumns[m.order.Col]
+	asc := m.order.Asc
 	sort.SliceStable(m.pairs, func(i, j int) bool {
 		a, b := m.pairs[i], m.pairs[j]
 		if !asc {

@@ -864,10 +864,10 @@ func (m Model) serverPickerView() string {
 				"%s%-*s  %-*s  %s",
 				cursor,
 				nameWidth,
-				truncateString(srv.name, nameWidth),
+				shared.TruncateCells(srv.name, nameWidth),
 				addressWidth,
-				truncateString(srv.address, addressWidth),
-				statusStyle.Render(truncateString(statusText, statusWidth)),
+				shared.TruncateCells(srv.address, addressWidth),
+				statusStyle.Render(shared.TruncateCells(statusText, statusWidth)),
 			)
 			lines = append(lines, style.Render(line))
 		}
@@ -882,7 +882,7 @@ func (m Model) serverPickerView() string {
 		filterLine = shared.StyleHelp.Render(filterLine)
 	}
 
-	content := title + "\n\n" + body + "\n\n" + truncateString(filterLine, contentWidth) + "\n\n" + shared.StyleHelp.Render("↑↓ navigate • enter select • / filter • esc close")
+	content := title + "\n\n" + body + "\n\n" + shared.TruncateCells(filterLine, contentWidth) + "\n\n" + shared.StyleHelp.Render("↑↓ navigate • enter select • / filter • esc close")
 	box := shared.StyleModal.Width(pickerWidth).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
@@ -907,7 +907,7 @@ func (m Model) selectedServerView() string {
 	if !ok {
 		return lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("Press enter to choose server")
 	}
-	return truncateString(fmt.Sprintf("%s (%s)", selected.name, selected.address), maxInt(24, m.formWidth()-18))
+	return shared.TruncateCells(fmt.Sprintf("%s (%s)", selected.name, selected.address), maxInt(24, m.formWidth()-18))
 }
 
 func (m Model) selectedServer() (memberServerOption, bool) {
@@ -1106,19 +1106,6 @@ func (m Model) pickerWidth() int {
 		return 96
 	}
 	return maxInt(56, minInt(110, m.width-4))
-}
-
-func truncateString(s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if len(s) <= width {
-		return s
-	}
-	if width == 1 {
-		return "…"
-	}
-	return s[:width-1] + "…"
 }
 
 func keyText(msg tea.KeyMsg) string {

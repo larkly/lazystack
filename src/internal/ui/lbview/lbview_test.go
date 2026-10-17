@@ -30,7 +30,7 @@ func TestSortColumnsPreserveSelection(t *testing.T) {
 		for _, asc := range []bool{true, false} {
 			m := New(nil, time.Second)
 			m.lbs = []loadbalancer.LoadBalancer{{ID: "b", Name: "Zulu", VipAddress: "2", ProvisioningStatus: "PENDING_CREATE", OperatingStatus: "ONLINE"}, {ID: "a", Name: "alpha", VipAddress: "1", ProvisioningStatus: "ACTIVE", OperatingStatus: "OFFLINE"}}
-			m.sortCol, m.sortAsc = col, asc
+			m.order.Col, m.order.Asc = col, asc
 			m.sortLBs()
 			want := "a"
 			if !asc {
@@ -41,15 +41,15 @@ func TestSortColumnsPreserveSelection(t *testing.T) {
 			}
 			selected := m.LBID()
 			m, cmd := m.reverseSort()
-			if m.LBID() != selected || !m.sortHighlight || cmd == nil {
+			if m.LBID() != selected || !m.order.Highlight || cmd == nil {
 				t.Fatal("reverse lost selected identity or highlight")
 			}
 			m, _ = m.cycleSort()
-			if m.LBID() != selected || !m.sortAsc || m.sortCol != (col+1)%len(sortColumns) {
+			if m.LBID() != selected || !m.order.Asc || m.order.Col != (col+1)%len(sortColumns) {
 				t.Fatal("cycle lost selection or direction")
 			}
 			m, _ = m.Update(sortClearMsg{})
-			if m.sortHighlight {
+			if m.order.Highlight {
 				t.Fatal("highlight not cleared")
 			}
 		}

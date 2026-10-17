@@ -827,7 +827,7 @@ func (m Model) renderNarrow() string {
 // of the viewport.
 func (m Model) renderPane(pane focusPane, r paneRect, content string) string {
 	innerW, innerH := max(0, r.w-2), max(0, r.h-2)
-	lines := strings.Split(padContent(m.panelTitle(pane), content), "\n")
+	lines := strings.Split(shared.PadContent(m.panelTitle(pane), content), "\n")
 	if len(lines) > innerH {
 		lines = lines[:innerH]
 	}
@@ -838,17 +838,6 @@ func (m Model) renderPane(pane focusPane, r paneRect, content string) string {
 }
 
 // padContent adds the title, a blank line, and 1-char indent to each line of content.
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "") // blank line after title
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) panelTitle(pane focusPane) string {
 	borderColor := shared.ColorMuted

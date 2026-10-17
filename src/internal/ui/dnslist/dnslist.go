@@ -259,7 +259,7 @@ func (m Model) View() string {
 
 		row := fmt.Sprintf("%s%-40s %-10s %s%s",
 			prefix,
-			truncate(z.Name, 39),
+			shared.TruncateCells(z.Name, 39),
 			zoneType,
 			"↓",
 			"",
@@ -295,7 +295,7 @@ func (m Model) View() string {
 					name = "(zone apex)"
 				}
 				row := fmt.Sprintf("  %-35s %-10s %s",
-					truncate(name, 34),
+					shared.TruncateCells(name, 34),
 					rs.Type,
 					formatRecordData(rs.Records),
 				)
@@ -363,13 +363,6 @@ func (m Model) fetchRecordsets(zoneID string) tea.Cmd {
 		}
 		return recordsetsLoadedMsg{zoneID: zoneID, recordsets: rs}
 	}
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }
 
 func formatRecordData(records []string) string {

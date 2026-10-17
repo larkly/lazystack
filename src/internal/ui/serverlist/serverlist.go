@@ -18,6 +18,7 @@ import (
 	img "github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
+	"github.com/larkly/lazystack/internal/ui/filterbar"
 )
 
 type serversLoadedMsg struct {
@@ -47,17 +48,13 @@ type Model struct {
 	loading         bool
 	refresh         shared.RefreshGate
 	spinner         spinner.Model
-	filter          textinput.Model
-	filtering       bool
+	filter          filterbar.Model
 	err             error
 	scrollOff       int
 	refreshInterval time.Duration
 	imageNames      map[string]string // cache of image ID → name
 	selected        map[string]bool   // selected server IDs for bulk actions
-	sortCol         int
-	sortAsc         bool
-	sortHighlight   bool
-	sortClearAt     time.Time
+	order           shared.SortState
 	config          *config.Config // live reference to global config for saving filters
 	filterNameInput textinput.Model
 	namingFilter    bool   // true when user is typing name for save
@@ -70,12 +67,6 @@ func New(client, imageClient *gophercloud.ServiceClient, refreshInterval time.Du
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
-	fi := textinput.New()
-	fi.Prompt = ""
-	fi.Placeholder = "filter..."
-	fi.CharLimit = 64
-	fi.SetVirtualCursor(false)
-
 	return Model{
 		client:          client,
 		imageClient:     imageClient,
@@ -84,9 +75,9 @@ func New(client, imageClient *gophercloud.ServiceClient, refreshInterval time.Du
 		spinner:         s,
 		imageNames:      make(map[string]string),
 		selected:        make(map[string]bool),
-		filter:          fi,
+		filter:          filterbar.New(),
 		refreshInterval: refreshInterval,
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 	}
 }
 
@@ -114,7 +105,7 @@ func (m Model) SelectedServer() *compute.Server {
 // IsFiltering reports whether the list is currently in filter input mode,
 // including naming a filter to save.
 func (m Model) IsFiltering() bool {
-	return m.filtering || m.namingFilter
+	return m.filter.Active() || m.namingFilter
 }
 
 // CopyEntries returns the title and copyable fields for the selected server.
@@ -206,20 +197,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.recomputeColumns()
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case tea.KeyMsg:
 		if m.namingFilter {
 			return m.updateNamingFilter(msg)
 		}
-		if m.filtering {
+		if m.filter.Active() {
 			return m.updateFilter(msg)
 		}
 		return m.updateNormal(msg)
@@ -231,50 +220,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, shared.Keys.Sort):
-		visibleCount := m.visibleColCount()
-		if visibleCount > 0 {
-			var cursorID string
-			if m.cursor >= 0 && m.cursor < len(m.filtered) {
-				cursorID = m.filtered[m.cursor].ID
-			}
-			m.sortCol = (m.sortCol + 1) % visibleCount
-			m.sortAsc = true
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortServers()
-			if cursorID != "" {
-				for i, s := range m.filtered {
-					if s.ID == cursorID {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+		if n := m.visibleColCount(); n > 0 {
+			m.order = shared.NextSort(m.order, n)
+			return m.resort()
 		}
 	case key.Matches(msg, shared.Keys.ReverseSort):
 		if m.visibleColCount() > 0 {
-			var cursorID string
-			if m.cursor >= 0 && m.cursor < len(m.filtered) {
-				cursorID = m.filtered[m.cursor].ID
-			}
-			m.sortAsc = !m.sortAsc
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortServers()
-			if cursorID != "" {
-				for i, s := range m.filtered {
-					if s.ID == cursorID {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+			m.order = shared.ReverseSort(m.order)
+			return m.resort()
 		}
 	case key.Matches(msg, shared.Keys.Up):
 		if m.cursor > 0 {
@@ -303,16 +256,13 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.ensureVisible()
 	case key.Matches(msg, shared.Keys.Back):
 		// Clear one layer at a time: the committed filter, then the selection.
-		if m.filter.Value() != "" {
-			m.filter.SetValue("")
+		if m.filter.Clear() {
 			m.applyFilter()
 		} else if len(m.selected) > 0 {
 			m.ClearSelection()
 		}
 	case key.Matches(msg, shared.Keys.Filter):
-		m.filtering = true
-		m.filter.Focus()
-		return m, nil
+		return m, m.filter.Start()
 	case key.Matches(msg, shared.Keys.SaveFilter):
 		if m.filter.Value() != "" {
 			m.namingFilter = true
@@ -356,59 +306,60 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) updateFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.filtering = false
-		m.filter.SetValue("")
-		m.filter.Blur()
-		m.applyFilter()
-		return m, nil
-	case "enter":
-		m.filtering = false
-		m.filter.Blur()
-		return m, nil
-	}
-
 	var cmd tea.Cmd
 	m.filter, cmd = m.filter.Update(msg)
 	m.applyFilter()
 	return m, cmd
 }
 
-func (m *Model) applyFilter() {
-	var cursorID string
-	if m.cursor >= 0 && m.cursor < len(m.filtered) {
-		cursorID = m.filtered[m.cursor].ID
+// cursorID is the ID of the server under the cursor, or "".
+func (m Model) cursorID() string {
+	if s := m.SelectedServer(); s != nil {
+		return s.ID
 	}
-	query := strings.ToLower(m.filter.Value())
-	if query == "" {
+	return ""
+}
+
+// rowIDs lists the IDs of the listed servers in display order.
+func (m Model) rowIDs() []string {
+	ids := make([]string, len(m.filtered))
+	for i, s := range m.filtered {
+		ids[i] = s.ID
+	}
+	return ids
+}
+
+// resort re-sorts the list after a sort change, keeping the cursor on the
+// same server, and highlights the sort column for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	id := m.cursorID()
+	m.sortServers()
+	if i := shared.RestoreCursor(m.rowIDs(), id); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
+}
+
+func (m *Model) applyFilter() {
+	cursorID := m.cursorID()
+	if m.filter.Value() == "" {
 		m.filtered = m.servers
 	} else {
 		m.filtered = nil
 		for _, s := range m.servers {
-			allIPs := strings.ToLower(strings.Join(s.IPv4, " ") + " " + strings.Join(s.IPv6, " ") + " " + strings.Join(s.FloatingIP, " "))
-			if strings.Contains(strings.ToLower(s.Name), query) ||
-				strings.Contains(strings.ToLower(s.ID), query) ||
-				strings.Contains(strings.ToLower(s.Status), query) ||
-				strings.Contains(allIPs, query) ||
-				strings.Contains(strings.ToLower(s.FlavorName), query) ||
-				strings.Contains(strings.ToLower(s.ImageName), query) {
+			if m.filter.Match(s.Name, s.ID, s.Status,
+				strings.Join(s.IPv4, " "), strings.Join(s.IPv6, " "), strings.Join(s.FloatingIP, " "),
+				s.FlavorName, s.ImageName) {
 				m.filtered = append(m.filtered, s)
 			}
 		}
 	}
 	m.sortServers()
-	if cursorID != "" {
-		for i, s := range m.filtered {
-			if s.ID == cursorID {
-				m.cursor = i
-				break
-			}
-		}
+	if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
+		m.cursor = i
 	}
-	if m.cursor >= len(m.filtered) {
-		m.cursor = max(0, len(m.filtered)-1)
-	}
+	m.cursor = shared.ClampCursor(m.cursor, len(m.filtered))
 	// Keep the viewport where it was (a refresh must not snap to the top),
 	// clamped to the new list length, then bring the cursor into view.
 	m.scrollOff = min(m.scrollOff, max(0, len(m.filtered)-m.tableHeight()))
@@ -482,11 +433,11 @@ func (m *Model) sortServers() {
 	if len(m.filtered) == 0 {
 		return
 	}
-	colKey := m.visibleColKey(m.sortCol)
+	colKey := m.visibleColKey(m.order.Col)
 	if colKey == "" {
 		return
 	}
-	asc := m.sortAsc
+	asc := m.order.Asc
 	sort.SliceStable(m.filtered, func(i, j int) bool {
 		a, b := m.filtered[i], m.filtered[j]
 		if !asc {
@@ -582,10 +533,8 @@ func (m Model) View() string {
 	// Filter bar
 	if m.namingFilter {
 		b.WriteString("  save: /" + m.filter.Value() + " as " + m.filterNameInput.View() + "\n")
-	} else if m.filtering {
-		b.WriteString("  / " + m.filter.View() + "\n")
-	} else if m.filter.Value() != "" {
-		b.WriteString(shared.StyleHelp.Render(fmt.Sprintf("  filter: %s (/ to edit, esc to clear)", m.filter.Value())) + "\n")
+	} else if bar := m.filter.View(); bar != "" {
+		b.WriteString(bar + "\n")
 	} else {
 		b.WriteString("\n")
 	}
@@ -602,15 +551,8 @@ func (m Model) View() string {
 		title := col.Title
 		idx := visIdx
 		visIdx++
-		indicator := ""
-		if idx == m.sortCol {
-			if m.sortAsc {
-				indicator = " ▲"
-			} else {
-				indicator = " ▼"
-			}
-		}
-		if idx == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(idx)
+		if idx == m.order.Col && m.order.Highlight {
 			return lipgloss.NewStyle().
 				Width(col.Width()).
 				Foreground(shared.ColorHighlight).
@@ -890,13 +832,13 @@ func (m *Model) SetConfig(cfg *config.Config) {
 }
 
 func (m Model) updateNamingFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
 		m.namingFilter = false
 		m.filterNameInput.Blur()
 		m.filterNameInput.SetValue("")
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		name := strings.TrimSpace(m.filterNameInput.Value())
 		if name != "" && m.config != nil {
 			m.config.SavedFilters = append(m.config.SavedFilters, config.SavedFilter{
@@ -935,7 +877,7 @@ func (m Model) Hints() string {
 	if m.namingFilter {
 		return "enter confirm • esc cancel • name your saved filter"
 	}
-	if m.filtering {
+	if m.filter.Active() {
 		return "enter confirm • esc clear"
 	}
 	if n := m.SelectionCount(); n > 0 {
@@ -1062,5 +1004,6 @@ func (m *Model) SetClient(client *gophercloud.ServiceClient) {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.filter.SetWidth(w)
 	m.recomputeColumns()
 }

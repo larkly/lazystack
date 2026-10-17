@@ -622,7 +622,7 @@ func (m Model) renderWide() string {
 	selPanel := m.panelBorder(FocusSelector).
 		Width(m.width).
 		Height(selH).
-		Render(padContent(m.panelTitle(FocusSelector), selContent))
+		Render(shared.PadContent(m.panelTitle(FocusSelector), selContent))
 
 	// Detail top row: info (35%) | rules (65%)
 	topH := dh * 55 / 100
@@ -637,17 +637,17 @@ func (m Model) renderWide() string {
 	leftW := m.width * 35 / 100
 	rightW := m.width - leftW - 1
 
-	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
+	infoContent := shared.PadContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
 	infoPanel := m.panelBorder(focusInfo).Width(leftW).Height(topH).Render(infoContent)
 
-	rulesContent := padContent(m.panelTitle(FocusRules), m.renderRulesContent(rightW-4, topH-4))
+	rulesContent := shared.PadContent(m.panelTitle(FocusRules), m.renderRulesContent(rightW-4, topH-4))
 	rulesPanel := m.panelBorder(FocusRules).Width(rightW).Height(topH).Render(rulesContent)
 
 	// Detail bottom row: servers (35%) | ports (65%)
-	serversContent := padContent(m.panelTitle(focusServers), m.renderServersContent(leftW-4, bottomH-4))
+	serversContent := shared.PadContent(m.panelTitle(focusServers), m.renderServersContent(leftW-4, bottomH-4))
 	serversPanel := m.panelBorder(focusServers).Width(leftW).Height(bottomH).Render(serversContent)
 
-	portsContent := padContent(m.panelTitle(focusPorts), m.renderPortsContent(rightW-4, bottomH-4))
+	portsContent := shared.PadContent(m.panelTitle(focusPorts), m.renderPortsContent(rightW-4, bottomH-4))
 	portsPanel := m.panelBorder(focusPorts).Width(rightW).Height(bottomH).Render(portsContent)
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", rulesPanel)
@@ -679,29 +679,17 @@ func (m Model) renderNarrow() string {
 	}
 
 	selContent := m.renderSelectorContent(w-4, selH-2)
-	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(padContent(m.panelTitle(FocusSelector), selContent))
+	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(shared.PadContent(m.panelTitle(FocusSelector), selContent))
 
-	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4)))
-	rulesPanel := m.panelBorder(FocusRules).Width(w).Height(rulesH).Render(padContent(m.panelTitle(FocusRules), m.renderRulesContent(w-4, rulesH-4)))
-	serversPanel := m.panelBorder(focusServers).Width(w).Height(serversH).Render(padContent(m.panelTitle(focusServers), m.renderServersContent(w-4, serversH-4)))
-	portsPanel := m.panelBorder(focusPorts).Width(w).Height(portsH).Render(padContent(m.panelTitle(focusPorts), m.renderPortsContent(w-4, portsH-4)))
+	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(shared.PadContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4)))
+	rulesPanel := m.panelBorder(FocusRules).Width(w).Height(rulesH).Render(shared.PadContent(m.panelTitle(FocusRules), m.renderRulesContent(w-4, rulesH-4)))
+	serversPanel := m.panelBorder(focusServers).Width(w).Height(serversH).Render(shared.PadContent(m.panelTitle(focusServers), m.renderServersContent(w-4, serversH-4)))
+	portsPanel := m.panelBorder(focusPorts).Width(w).Height(portsH).Render(shared.PadContent(m.panelTitle(focusPorts), m.renderPortsContent(w-4, portsH-4)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, rulesPanel, serversPanel, portsPanel)
 }
 
 // --- Panel helpers ---
-
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "")
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) panelTitle(pane focusPane) string {
 	borderColor := shared.ColorMuted

@@ -163,7 +163,7 @@ func (m Model) View() string {
 			num = "  "
 		}
 		label := padRight(e.Label, labelW)
-		value := truncate(e.Value, valueW)
+		value := shared.TruncateCells(e.Value, valueW)
 		lines = append(lines, cursor+rowStyle.Render(num+" "+label+"  "+value))
 	}
 	body := strings.Join(lines, "\n")
@@ -201,16 +201,6 @@ func padRight(s string, n int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", n-len(s))
-}
-
-func truncate(s string, n int) string {
-	if n <= 0 || len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return "…"
-	}
-	return s[:n-1] + "…"
 }
 
 // Hints returns the key hints shown in the status bar.

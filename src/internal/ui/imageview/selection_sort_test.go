@@ -18,8 +18,8 @@ func TestDescendingImageSortKeepsEqualRowsStable(t *testing.T) {
 		img.Image{ID: "c", Name: "other"},
 		img.Image{ID: "d", Name: "same"},
 	)
-	m.sortCol = 0 // name
-	m.sortAsc = false
+	m.order.Col = 0 // name
+	m.order.Asc = false
 	for round := 0; round < 3; round++ {
 		m.sortImages()
 		var ids []string
@@ -40,7 +40,7 @@ func TestImageSortNeverOrdersEqualValuesBothWays(t *testing.T) {
 	m := loadedModel(x, y)
 	for col := 0; col < m.visibleColCount(); col++ {
 		for _, asc := range []bool{true, false} {
-			m.sortCol, m.sortAsc = col, asc
+			m.order.Col, m.order.Asc = col, asc
 			m.sortImages()
 			if m.images[0].ID != "x" || m.images[1].ID != "y" {
 				t.Fatalf("col %s asc=%v reordered equal rows", m.visibleColKey(col), asc)

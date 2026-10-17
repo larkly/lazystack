@@ -184,7 +184,7 @@ func (m Model) View() string {
 		body.WriteString("  " + value.Render(m.plain) + "\n\n")
 	case m.encrypted != "":
 		body.WriteString("  " + label.Render("Encrypted (base64)") + "\n")
-		body.WriteString("  " + muted.Render(truncate(m.encrypted, 60)) + "\n\n")
+		body.WriteString("  " + muted.Render(shared.TruncateCells(m.encrypted, 60)) + "\n\n")
 	default:
 		body.WriteString("  " + muted.Render("No password set — this is likely not a Windows instance,") + "\n")
 		body.WriteString("  " + muted.Render("or the password has not been generated yet.") + "\n\n")
@@ -241,13 +241,6 @@ func (m Model) credentialsView() string {
 	}
 	body.WriteString(shared.StyleHelp.Render(help))
 	return m.renderModal(title + "\n\n" + body.String())
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-3] + "..."
 }
 
 func (m Model) renderModal(content string) string {

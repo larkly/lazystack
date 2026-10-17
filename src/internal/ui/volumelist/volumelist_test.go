@@ -28,8 +28,8 @@ func TestDescendingVolumeSortKeepsEqualRowsStable(t *testing.T) {
 		volume.Volume{ID: "c", Name: "other"},
 		volume.Volume{ID: "d", Name: "same"},
 	)
-	m.sortCol = 0 // name
-	m.sortAsc = false
+	m.order.Col = 0 // name
+	m.order.Asc = false
 	m.cursor = 1 // "b"
 	for round := 0; round < 3; round++ {
 		m.sortVolumes()
@@ -56,7 +56,7 @@ func TestVolumeSortNeverOrdersEqualValuesBothWays(t *testing.T) {
 			continue // IDs differ by construction
 		}
 		for _, asc := range []bool{true, false} {
-			m.sortCol, m.sortAsc = col, asc
+			m.order.Col, m.order.Asc = col, asc
 			m.sortVolumes()
 			if m.volumes[0].ID != "x" || m.volumes[1].ID != "y" {
 				t.Fatalf("col %s asc=%v reordered equal rows", m.visibleColKey(col), asc)

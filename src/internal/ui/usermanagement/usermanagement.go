@@ -359,11 +359,11 @@ func (m Model) View() string {
 
 		row := fmt.Sprintf("%s%-30s %-35s %-8s %-20s %-30s",
 			prefix,
-			truncate(u.Name, 29),
-			truncate(u.Email, 34),
+			shared.TruncateCells(u.Name, 29),
+			shared.TruncateCells(u.Email, 34),
 			enabledStr,
-			truncate(u.DomainID, 19),
-			truncate(u.Description, 29),
+			shared.TruncateCells(u.DomainID, 19),
+			shared.TruncateCells(u.Description, 29),
 		)
 
 		style := lipgloss.NewStyle()
@@ -460,14 +460,4 @@ func userAudit(p pendingAction, err error) shared.Audit {
 	}
 	return shared.NewAudit(action, "user", p.user.ID, p.user.Name, err).
 		WithDetails(map[string]string{"domain_id": p.user.DomainID})
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 0 {
-		return ""
-	}
-	return s[:n-1] + "…"
 }

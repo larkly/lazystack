@@ -209,7 +209,7 @@ func (m Model) View() string {
 			indicator,
 			statusStyle.Render(status),
 			serviceFg.Render(e.Name),
-			mutedSt.Render(truncateStr(endpoint, 48)),
+			mutedSt.Render(shared.TruncateCells(endpoint, 48)),
 		)
 
 		if i == m.cursor {
@@ -229,11 +229,4 @@ func (m Model) View() string {
 		lipgloss.Left, lipgloss.Top,
 		b.String(),
 	)
-}
-
-func truncateStr(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }

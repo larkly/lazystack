@@ -74,7 +74,7 @@ func TestEncryptedDisplayTruncatesWithoutTruncatingCopy(t *testing.T) {
 	blob := strings.Repeat("A", 100)
 	m := New("vm", "", "", "", blob, "")
 	m.SetSize(100, 40)
-	if truncate(blob, 60) != strings.Repeat("A", 57)+"..." || !strings.Contains(m.View(), strings.Repeat("A", 57)) || strings.Contains(m.View(), blob) {
+	if !strings.Contains(m.View(), strings.Repeat("A", 57)) || !strings.Contains(m.View(), "…") || strings.Contains(m.View(), blob) {
 		t.Fatalf("long blob display not truncated: %q", m.View())
 	}
 	if value, _ := m.copyValue(); value != blob {

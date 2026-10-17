@@ -41,10 +41,7 @@ type Model struct {
 	err             error
 	scrollOff       int
 	refreshInterval time.Duration
-	sortCol         int
-	sortAsc         bool
-	sortHighlight   bool
-	sortClearAt     time.Time
+	order           shared.SortState
 }
 
 // New creates a floating IP list model.
@@ -56,7 +53,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 		loading:         true,
 		spinner:         s,
 		refreshInterval: refreshInterval,
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 	}
 }
 
@@ -97,25 +94,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[floatingiplist] loaded %d floating IPs", len(msg.fips))
-		var cursorID string
-		if m.cursor >= 0 && m.cursor < len(m.fips) {
-			cursorID = m.fips[m.cursor].ID
-		}
+		cursorID := m.cursorID()
 		m.loading = false
 		m.fips = msg.fips
 		m.err = nil
 		m.sortFIPs()
-		if cursorID != "" {
-			for i, f := range m.fips {
-				if f.ID == cursorID {
-					m.cursor = i
-					break
-				}
-			}
+		if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
+			m.cursor = i
 		}
-		if m.cursor >= len(m.fips) {
-			m.cursor = max(0, len(m.fips)-1)
-		}
+		m.cursor = shared.ClampCursor(m.cursor, len(m.fips))
 		return m, nil
 
 	case fipsErrMsg:
@@ -150,52 +137,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, shared.Keys.Sort):
-			var cursorID string
-			if m.cursor >= 0 && m.cursor < len(m.fips) {
-				cursorID = m.fips[m.cursor].ID
-			}
-			m.sortCol = (m.sortCol + 1) % len(fipSortColumns)
-			m.sortAsc = true
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortFIPs()
-			if cursorID != "" {
-				for i, f := range m.fips {
-					if f.ID == cursorID {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+			m.order = shared.NextSort(m.order, len(fipSortColumns))
+			return m.resort()
 		case key.Matches(msg, shared.Keys.ReverseSort):
-			var cursorID string
-			if m.cursor >= 0 && m.cursor < len(m.fips) {
-				cursorID = m.fips[m.cursor].ID
-			}
-			m.sortAsc = !m.sortAsc
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortFIPs()
-			if cursorID != "" {
-				for i, f := range m.fips {
-					if f.ID == cursorID {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+			m.order = shared.ReverseSort(m.order)
+			return m.resort()
 		case key.Matches(msg, shared.Keys.Up):
 			if m.cursor > 0 {
 				m.cursor--
@@ -224,6 +176,35 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// cursorID is the ID of the floating IP under the cursor, or "".
+func (m Model) cursorID() string {
+	if f := m.SelectedFIP(); f != nil {
+		return f.ID
+	}
+	return ""
+}
+
+// rowIDs lists the IDs of the listed floating IPs in display order.
+func (m Model) rowIDs() []string {
+	ids := make([]string, len(m.fips))
+	for i, f := range m.fips {
+		ids[i] = f.ID
+	}
+	return ids
+}
+
+// resort re-sorts the list after a sort change, keeping the cursor on the
+// same floating IP, and highlights the sort column for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	id := m.cursorID()
+	m.sortFIPs()
+	if i := shared.RestoreCursor(m.rowIDs(), id); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
 func (m *Model) ensureVisible() {
@@ -272,15 +253,8 @@ func (m Model) View() string {
 	var headerParts []string
 	for i, h := range headerTitles {
 		title := h.title
-		indicator := ""
-		if i == m.sortCol {
-			if m.sortAsc {
-				indicator = " ▲"
-			} else {
-				indicator = " ▼"
-			}
-		}
-		if i == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(i)
+		if i == m.order.Col && m.order.Highlight {
 			headerParts = append(headerParts, lipgloss.NewStyle().
 				Foreground(shared.ColorHighlight).
 				Bold(true).
@@ -335,8 +309,8 @@ func (m *Model) sortFIPs() {
 	if len(m.fips) == 0 {
 		return
 	}
-	colKey := fipSortColumns[m.sortCol]
-	asc := m.sortAsc
+	colKey := fipSortColumns[m.order.Col]
+	asc := m.order.Asc
 	sort.SliceStable(m.fips, func(i, j int) bool {
 		a, b := m.fips[i], m.fips[j]
 		if !asc {

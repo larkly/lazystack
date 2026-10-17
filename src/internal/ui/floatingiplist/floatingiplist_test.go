@@ -19,8 +19,8 @@ func TestDescendingSortKeepsTiesStable(t *testing.T) {
 		{ID: "3", FloatingIP: "2001:db8::3", Status: "DOWN"},
 		{ID: "4", FloatingIP: "2001:db8::4", Status: "DOWN"},
 	}
-	m.sortCol = 1 // status
-	m.sortAsc = false
+	m.order.Col = 1 // status
+	m.order.Asc = false
 	m.sortFIPs()
 
 	want := []string{"1", "3", "4", "2"}

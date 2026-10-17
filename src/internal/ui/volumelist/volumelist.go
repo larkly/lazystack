@@ -143,10 +143,7 @@ type Model struct {
 	scrollOff       int
 	refreshInterval time.Duration
 	serverNames     map[string]string
-	sortCol         int
-	sortAsc         bool
-	sortHighlight   bool
-	sortClearAt     time.Time
+	order           shared.SortState
 	highlight       map[string]bool // volume IDs to highlight (from cross-resource navigation)
 	selected        map[string]bool // selected volume IDs for bulk actions
 }
@@ -164,7 +161,7 @@ func New(client, computeClient *gophercloud.ServiceClient, refreshInterval time.
 		refreshInterval: refreshInterval,
 		serverNames:     make(map[string]string),
 		selected:        make(map[string]bool),
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 	}
 }
 
@@ -283,26 +280,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[volumelist] loaded %d volumes", len(msg.volumes))
-		var cursorID string
-		if m.cursor >= 0 && m.cursor < len(m.volumes) {
-			cursorID = m.volumes[m.cursor].ID
-		}
+		cursorID := m.cursorID()
 		m.loading = false
 		m.volumes = msg.volumes
 		m.err = nil
 		m.pruneSelection()
 		m.sortVolumes()
-		if cursorID != "" {
-			for i, v := range m.volumes {
-				if v.ID == cursorID {
-					m.cursor = i
-					break
-				}
-			}
+		if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
+			m.cursor = i
 		}
-		if m.cursor >= len(m.volumes) {
-			m.cursor = max(0, len(m.volumes)-1)
-		}
+		m.cursor = shared.ClampCursor(m.cursor, len(m.volumes))
 		m.applyHighlight()
 		return m, m.fetchMissingServerNames()
 
@@ -345,56 +332,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, shared.Keys.Sort):
-			visibleCount := m.visibleColCount()
-			if visibleCount > 0 {
-				var cursorID string
-				if m.cursor >= 0 && m.cursor < len(m.volumes) {
-					cursorID = m.volumes[m.cursor].ID
-				}
-				m.sortCol = (m.sortCol + 1) % visibleCount
-				m.sortAsc = true
-				m.sortHighlight = true
-				m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-				m.sortVolumes()
-				if cursorID != "" {
-					for i, v := range m.volumes {
-						if v.ID == cursorID {
-							m.cursor = i
-							break
-						}
-					}
-				}
-				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-					return sortClearMsg{}
-				})
+			if n := m.visibleColCount(); n > 0 {
+				m.order = shared.NextSort(m.order, n)
+				return m.resort()
 			}
 		case key.Matches(msg, shared.Keys.ReverseSort):
 			if m.visibleColCount() > 0 {
-				var cursorID string
-				if m.cursor >= 0 && m.cursor < len(m.volumes) {
-					cursorID = m.volumes[m.cursor].ID
-				}
-				m.sortAsc = !m.sortAsc
-				m.sortHighlight = true
-				m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-				m.sortVolumes()
-				if cursorID != "" {
-					for i, v := range m.volumes {
-						if v.ID == cursorID {
-							m.cursor = i
-							break
-						}
-					}
-				}
-				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-					return sortClearMsg{}
-				})
+				m.order = shared.ReverseSort(m.order)
+				return m.resort()
 			}
 		case key.Matches(msg, shared.Keys.Up):
 			if m.cursor > 0 {
@@ -436,6 +387,35 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// cursorID is the ID of the volume under the cursor, or "".
+func (m Model) cursorID() string {
+	if v := m.SelectedVolume(); v != nil {
+		return v.ID
+	}
+	return ""
+}
+
+// rowIDs lists the IDs of the listed volumes in display order.
+func (m Model) rowIDs() []string {
+	ids := make([]string, len(m.volumes))
+	for i, v := range m.volumes {
+		ids[i] = v.ID
+	}
+	return ids
+}
+
+// resort re-sorts the list after a sort change, keeping the cursor on the
+// same volume, and highlights the sort column for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	id := m.cursorID()
+	m.sortVolumes()
+	if i := shared.RestoreCursor(m.rowIDs(), id); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
 func (m *Model) ensureVisible() {
@@ -483,11 +463,11 @@ func (m *Model) sortVolumes() {
 	if len(m.volumes) == 0 {
 		return
 	}
-	colKey := m.visibleColKey(m.sortCol)
+	colKey := m.visibleColKey(m.order.Col)
 	if colKey == "" {
 		return
 	}
-	asc := m.sortAsc
+	asc := m.order.Asc
 	sort.SliceStable(m.volumes, func(i, j int) bool {
 		a, b := m.volumes[i], m.volumes[j]
 		// Descending swaps the operands so equal keys still compare false
@@ -552,15 +532,8 @@ func (m Model) View() string {
 		title := col.Title
 		idx := visIdx
 		visIdx++
-		indicator := ""
-		if idx == m.sortCol {
-			if m.sortAsc {
-				indicator = " ▲"
-			} else {
-				indicator = " ▼"
-			}
-		}
-		if idx == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(idx)
+		if idx == m.order.Col && m.order.Highlight {
 			return lipgloss.NewStyle().
 				Width(col.width).
 				Foreground(shared.ColorHighlight).
