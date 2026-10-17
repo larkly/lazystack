@@ -1,11 +1,14 @@
 package help
 
 import (
+	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/gkampitakis/go-snaps/snaps"
 	"github.com/larkly/lazystack/internal/shared"
@@ -102,8 +105,8 @@ func TestNewerViewsHaveContextualHelp(t *testing.T) {
 		{"hypervisorlist", "Hypervisors", []entry{{"↑/k ↓/j", "navigate"}, {bindingKeys(shared.Keys.Refresh), "refresh"}, {"esc", "back"}}},
 		{"servicecatalog", "Service Catalog", []entry{{"↑/k ↓/j", "navigate"}, {"esc", "back"}}},
 		{"dnslist", "DNS", []entry{{"↑/k ↓/j", "zone"}, {bindingKeys(shared.Keys.Refresh), "refresh"}, {"esc", "clear filter"}}},
-		{"usermanagement", "User Management", []entry{{"enter", "enable/disable"}, {"d", "delete user"}, {"esc", "back"}}},
-		{"auditlog", "Audit Trail", []entry{{"a", "action"}, {"r", "resource"}, {"d", "date"}, {"c", "clear"}, {"esc", "back"}}},
+		{"usermanagement", "User Management", []entry{{bindingKeys(shared.Keys.Enter), "enable/disable"}, {bindingKeys(shared.Keys.Delete), "delete user"}, {"esc", "back"}}},
+		{"auditlog", "Audit Trail", []entry{{bindingKeys(shared.Keys.AuditFilterAction), "action"}, {bindingKeys(shared.Keys.AuditFilterResource), "resource"}, {bindingKeys(shared.Keys.AuditFilterDate), "date"}, {bindingKeys(shared.Keys.AuditFilterClear), "clear"}, {"esc", "back"}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.view, func(t *testing.T) {
@@ -192,8 +195,8 @@ func TestServerBindingsMatchKeyMap(t *testing.T) {
 func TestImageHelpMatchesImageViewRoutes(t *testing.T) {
 	img := profiled(t, "imageview")["Images"]
 	for _, c := range []struct{ keys, desc string }{
-		{bindingKeys(shared.Keys.Deactivate), "deactivate/reactivate"},
-		{"ctrl+g", "download"}, // app routes the literal ctrl+g in the properties pane
+		{bindingKeys(shared.Keys.Deactivate), "(de)activate"},
+		{bindingKeys(shared.Keys.Download), "download"},
 		{"enter", "edit image"},
 		{bindingKeys(shared.Keys.Create), "upload"},
 	} {
@@ -237,7 +240,7 @@ func TestEveryProfiledSectionExists(t *testing.T) {
 func TestNoLiteralReservedKeys(t *testing.T) {
 	for _, s := range allSections {
 		for _, b := range s.binds {
-			if b.binding != nil {
+			if len(b.bindings) > 0 {
 				continue
 			}
 			k := strings.ToLower(b.key)
@@ -256,16 +259,16 @@ func TestListViewsDocumentFilterAndSort(t *testing.T) {
 		view, section string
 		sort          bool
 	}{
-		{"volumelist", "Volume List", false},
-		{"floatingiplist", "Floating IPs", false},
-		{"keypairlist", "Key Pairs", false},
+		{"volumelist", "Volume List", true},
+		{"floatingiplist", "Floating IPs", true},
+		{"keypairlist", "Key Pairs", true},
 		{"secgroupview", "Security Groups", true},
 		{"networkview", "Networks", true},
 		{"routerview", "Routers", true},
 		{"dnslist", "DNS", true},
 		{"lbview", "LB List", true},
 		{"imageview", "Images", true},
-		{"serverlist", "Server List", false},
+		{"serverlist", "Server List", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.view, func(t *testing.T) {
@@ -282,5 +285,72 @@ func TestListViewsDocumentFilterAndSort(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// navigationOnly are the KeyMap fields help shows as arrow shorthand
+// ("↑/k ↓/j", "←/→ h/l", "pgup/pgdn") rather than through the binding.
+var navigationOnly = map[string]bool{
+	"Up": true, "Down": true, "Left": true, "Right": true,
+	"PageUp": true, "PageDown": true,
+}
+
+// TestEveryBindingIsDocumented guards that each rebindable key in
+// shared.Keys appears in some help section, so a binding added to the key
+// map cannot silently go missing from the user's key reference.
+func TestEveryBindingIsDocumented(t *testing.T) {
+	documented := map[*key.Binding]bool{}
+	for _, s := range allSections {
+		for _, b := range s.binds {
+			for _, kb := range b.bindings {
+				documented[kb] = true
+			}
+		}
+	}
+	v := reflect.ValueOf(&shared.Keys).Elem()
+	for i := 0; i < v.NumField(); i++ {
+		name := v.Type().Field(i).Name
+		if navigationOnly[name] {
+			continue
+		}
+		b, ok := v.Field(i).Addr().Interface().(*key.Binding)
+		if !ok {
+			continue
+		}
+		if !documented[b] {
+			t.Errorf("shared.Keys.%s appears in no help section", name)
+		}
+	}
+}
+
+// TestListViewSortFollowsRebinding checks the sort entries are built from
+// the Sort and ReverseSort bindings rather than a fixed "s/S".
+func TestListViewSortFollowsRebinding(t *testing.T) {
+	prevS, prevR := shared.Keys.Sort, shared.Keys.ReverseSort
+	defer func() { shared.Keys.Sort, shared.Keys.ReverseSort = prevS, prevR }()
+	shared.Keys.Sort = key.NewBinding(key.WithKeys("o"))
+	shared.Keys.ReverseSort = key.NewBinding(key.WithKeys("O"))
+
+	for view, section := range map[string]string{"volumelist": "Volume List", "networkview": "Networks"} {
+		e, ok := find(profiled(t, view)[section], "sort")
+		if !ok || e.keys != "o/O" {
+			t.Errorf("%s sort entry = %+v, want keys o/O", section, e)
+		}
+	}
+}
+
+// TestEntriesFitOnOneLine guards that no help entry wraps inside the box:
+// a wrapped description lands under the key column and misreads.
+func TestEntriesFitOnOneLine(t *testing.T) {
+	if inner := helpWidth - shared.StyleModal.GetHorizontalFrameSize(); inner != entryWidth {
+		t.Fatalf("entryWidth = %d, but the box holds %d columns", entryWidth, inner)
+	}
+	for _, s := range allSections {
+		for _, b := range s.binds {
+			line := fmt.Sprintf("  %-14s %s", b.keys(), b.desc)
+			if w := lipgloss.Width(line); w > entryWidth {
+				t.Errorf("%s: %q is %d columns, wider than %d", s.name, line, w, entryWidth)
+			}
+		}
 	}
 }
