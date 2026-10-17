@@ -260,6 +260,7 @@ func TestListViewsDocumentFilterAndSort(t *testing.T) {
 		{"floatingiplist", "Floating IPs", false},
 		{"keypairlist", "Key Pairs", false},
 		{"secgroupview", "Security Groups", true},
+		{"networkview", "Networks", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.view, func(t *testing.T) {

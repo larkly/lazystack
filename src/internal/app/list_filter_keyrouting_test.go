@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
+	"github.com/larkly/lazystack/internal/ui/networkview"
 	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 )
@@ -60,6 +61,15 @@ func listFilterCases() []listFilterCase {
 				m.secGroupView, _ = m.secGroupView.Update(keyText('/'))
 			},
 			value: func(m Model) string { return m.secGroupView.FilterValue() },
+		},
+		{
+			name: "networks",
+			open: func(m *Model) {
+				m.view = viewNetworkList
+				m.networkView = networkview.New(nil, 5*time.Second)
+				m.networkView, _ = m.networkView.Update(keyText('/'))
+			},
+			value: func(m Model) string { return m.networkView.FilterValue() },
 		},
 	}
 }

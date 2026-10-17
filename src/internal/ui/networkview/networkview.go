@@ -16,6 +16,7 @@ import (
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
+	"github.com/larkly/lazystack/internal/ui/filterbar"
 )
 
 type focusPane int
@@ -59,7 +60,10 @@ type Model struct {
 	computeClient *gophercloud.ServiceClient
 
 	// Selector state
-	networks       []network.Network
+	allNetworks    []network.Network // every network, as last fetched
+	networks       []network.Network // the listed networks: filtered and sorted
+	filter         filterbar.Model
+	order          shared.SortState
 	allSubnets     map[string]network.Subnet // ID → Subnet (all subnets)
 	externalIDs    map[string]bool
 	cursor         int
@@ -103,8 +107,21 @@ func New(networkClient *gophercloud.ServiceClient, refreshInterval time.Duration
 		spinner:         s,
 		allSubnets:      make(map[string]network.Subnet),
 		refreshInterval: refreshInterval,
+		filter:          filterbar.New(),
+		order:           shared.NewSortState(),
 	}
 }
+
+// netSortColumns are the network list's sort keys, cycled with s.
+var netSortColumns = []string{"name", "status", "subnets"}
+
+type sortClearMsg struct{}
+
+// IsFiltering reports whether the "/" network filter input has focus.
+func (m Model) IsFiltering() bool { return m.filter.Active() }
+
+// FilterValue is the current network filter text.
+func (m Model) FilterValue() string { return m.filter.Value() }
 
 // SetComputeClient sets the compute client for server name resolution.
 func (m *Model) SetComputeClient(client *gophercloud.ServiceClient) {
@@ -275,27 +292,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[networkview] networksLoadedMsg: %d networks", len(msg.networks))
-		var cursorID string
-		if m.cursor >= 0 && m.cursor < len(m.networks) {
-			cursorID = m.networks[m.cursor].ID
-		}
 		m.loading = false
-		m.networks = msg.networks
+		m.allNetworks = msg.networks
 		m.allSubnets = msg.allSubnets
 		m.externalIDs = msg.externalIDs
 		m.err = nil
-		// Restore cursor position
-		if cursorID != "" {
-			for i, n := range m.networks {
-				if n.ID == cursorID {
-					m.cursor = i
-					break
-				}
-			}
-		}
-		if m.cursor >= len(m.networks) && len(m.networks) > 0 {
-			m.cursor = len(m.networks) - 1
-		}
+		m.applyFilter()
 		m.applyHighlightNames()
 		fetchCmd := m.takePendingDetailFetch()
 		// Fetch detail for selected network if changed
@@ -375,14 +377,86 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.SetSize(msg.Width, msg.Height)
+		return m, nil
+
+	case sortClearMsg:
+		m.order.Highlight = false
 		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+// rowIDs lists the IDs of the listed networks in display order.
+func (m Model) rowIDs() []string {
+	ids := make([]string, len(m.networks))
+	for i, n := range m.networks {
+		ids[i] = n.ID
+	}
+	return ids
+}
+
+// applyFilter rebuilds the listed networks from every network under the
+// current filter and sort, keeping the cursor on the same network while it
+// is still listed and the selector viewport where it was.
+func (m *Model) applyFilter() {
+	cursorID := m.SelectedNetworkID()
+	m.networks = m.networks[:0:0]
+	for _, n := range m.allNetworks {
+		if m.filter.Match(n.Name, n.ID, n.Status) {
+			m.networks = append(m.networks, n)
+		}
+	}
+	m.sortNetworks()
+	if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
+		m.cursor = i
+	}
+	m.cursor = shared.ClampCursor(m.cursor, len(m.networks))
+	m.selectorScroll = min(m.selectorScroll, max(0, len(m.networks)-m.selectorVisibleLines()))
+	m.ensureSelectorCursorVisible()
+}
+
+func (m *Model) sortNetworks() {
+	col := netSortColumns[m.order.Col]
+	asc := m.order.Asc
+	sort.SliceStable(m.networks, func(i, j int) bool {
+		a, b := m.networks[i], m.networks[j]
+		// Descending swaps the operands so equal keys keep their order.
+		if !asc {
+			a, b = b, a
+		}
+		switch col {
+		case "status":
+			return a.Status < b.Status
+		case "subnets":
+			return len(a.SubnetIDs) < len(b.SubnetIDs)
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	})
+}
+
+// resort re-sorts the networks after a sort change, keeping the cursor on
+// the same network, and highlights the sort for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	id := m.SelectedNetworkID()
+	m.sortNetworks()
+	if i := shared.RestoreCursor(m.rowIDs(), id); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureSelectorCursorVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
+}
+
+// sortLabel names the network list's sort for the selector title.
+func (m Model) sortLabel() string {
+	label := "by " + netSortColumns[m.order.Col] + m.order.Indicator(m.order.Col)
+	if m.order.Highlight {
+		return lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true).Render(label)
+	}
+	return shared.StyleHelp.Render(label)
 }
 
 func (m *Model) resetDetailState() {
@@ -408,7 +482,33 @@ func (m *Model) clampDetailCursors() {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.filter.Active() {
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		m.applyFilter()
+		var sel tea.Cmd
+		m, sel = m.onSelectorChange()
+		return m, tea.Batch(cmd, sel)
+	}
 	switch {
+	case key.Matches(msg, shared.Keys.Filter) && m.focus == FocusSelector:
+		return m, m.filter.Start()
+
+	case key.Matches(msg, shared.Keys.Back):
+		if m.filter.Clear() {
+			m.applyFilter()
+			return m.onSelectorChange()
+		}
+		return m, nil
+
+	case key.Matches(msg, shared.Keys.Sort) && m.focus == FocusSelector:
+		m.order = shared.NextSort(m.order, len(netSortColumns))
+		return m.resort()
+
+	case key.Matches(msg, shared.Keys.ReverseSort) && m.focus == FocusSelector:
+		m.order = shared.ReverseSort(m.order)
+		return m.resort()
+
 	case key.Matches(msg, shared.Keys.Tab):
 		m.focus = (m.focus + 1) % focusPaneCount
 		return m, nil
@@ -501,7 +601,16 @@ func (m Model) scrollDown(n int) (Model, tea.Cmd) {
 
 func (m Model) onSelectorChange() (Model, tea.Cmd) {
 	n := m.selectedNetwork()
-	if n == nil || n.ID == m.lastDetailNetID {
+	if n == nil {
+		// The filter hides every network: show no network's detail.
+		if m.lastDetailNetID != "" {
+			m.lastDetailNetID = ""
+			m.resetDetailState()
+			m.detailLoading = false
+		}
+		return m, nil
+	}
+	if n.ID == m.lastDetailNetID {
 		return m, nil
 	}
 	m.pendingDetailID = "" // manual navigation supersedes any pending highlight fetch
@@ -620,7 +729,7 @@ func (m Model) View() string {
 	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
 	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
-	if len(m.networks) == 0 && !m.loading {
+	if len(m.allNetworks) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No networks found.") + "\n")
 		return b.String()
 	}
@@ -716,7 +825,11 @@ func (m Model) panelTitle(pane focusPane) string {
 
 	switch pane {
 	case FocusSelector:
-		return titleStyle.Render("Networks")
+		t := titleStyle.Render("Networks")
+		if f := m.filter.Inline(); f != "" {
+			t += " " + f
+		}
+		return t + " " + m.sortLabel()
 	case focusInfo:
 		return titleStyle.Render("Info")
 	case FocusSubnets:
@@ -750,6 +863,9 @@ func (m Model) panelBorder(pane focusPane) lipgloss.Style {
 
 func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 	if len(m.networks) == 0 {
+		if m.filter.Value() != "" {
+			return shared.StyleHelp.Render("No networks match the filter.")
+		}
 		return ""
 	}
 
@@ -1277,6 +1393,7 @@ func (m *Model) ForceRefresh() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.filter.SetWidth(w)
 }
 
 // ScrollToNames positions the cursor on the first matching network name.
@@ -1323,6 +1440,9 @@ func (m *Model) takePendingDetailFetch() tea.Cmd {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
+	if m.filter.Active() {
+		return "enter confirm \u2022 esc clear"
+	}
 	switch m.focus {
 	case FocusSubnets:
 		return "\u2191\u2193 navigate \u2022 enter edit \u2022 ^n add subnet \u2022 ^d delete \u2022 tab focus \u2022 R refresh \u2022 ? help"
@@ -1331,7 +1451,7 @@ func (m Model) Hints() string {
 	case focusInfo:
 		return "tab focus \u2022 ^n new \u2022 ^d delete \u2022 R refresh \u2022 ? help"
 	default:
-		return "\u2191\u2193 navigate \u2022 ^n new \u2022 ^d delete \u2022 tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 / filter \u2022 s/S sort \u2022 ^n new \u2022 ^d delete \u2022 tab focus \u2022 R refresh \u2022 ? help"
 	}
 }
 

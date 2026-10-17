@@ -241,8 +241,10 @@ var allSections = []section{
 			l("enter", "expand / collapse subnets"),
 			l("ctrl+n", "create network (or subnet in subnets)"),
 			l("ctrl+d", "delete network (or subnet in subnets)"),
+			k(&shared.Keys.Filter, "filter networks"),
+			l("s/S", "sort networks / reverse sort"),
 			l("Y", "copy field..."),
-			l("esc", "back to network list"),
+			l("esc", "clear filter"),
 		},
 	},
 	{
