@@ -72,21 +72,6 @@ func TestEvacuateServerOmitsSharedStorageFrom214(t *testing.T) {
 	}
 }
 
-func TestMicroversionAtLeast(t *testing.T) {
-	for _, tc := range []struct {
-		v    string
-		want bool
-	}{
-		{"2.14", true}, {"2.100", true}, {"3.0", true},
-		{"2.9", false}, {"2.13", false}, {"1.99", false},
-		{"", false}, {"latest", false}, {"2.x", false},
-	} {
-		if got := microversionAtLeast(tc.v, 2, 14); got != tc.want {
-			t.Errorf("microversionAtLeast(%q, 2, 14)=%v, want %v", tc.v, got, tc.want)
-		}
-	}
-}
-
 // From 2.25 Nova accepts block_migration "auto" and drops disk_over_commit;
 // a hard-coded false rejects instances on local storage. Below 2.25 both
 // booleans are required by the schema.

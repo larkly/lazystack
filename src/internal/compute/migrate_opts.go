@@ -1,27 +1,8 @@
 package compute
 
 import (
-	"strconv"
-	"strings"
-
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 )
-
-// microversionAtLeast reports whether the Nova microversion v ("X.Y") is at
-// least major.minor. An empty or malformed v counts as the 2.1 base, so
-// callers fall back to the legacy request shape.
-func microversionAtLeast(v string, major, minor int) bool {
-	ma, mi, ok := strings.Cut(v, ".")
-	if !ok {
-		return false
-	}
-	vMajor, err1 := strconv.Atoi(ma)
-	vMinor, err2 := strconv.Atoi(mi)
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	return vMajor > major || (vMajor == major && vMinor >= minor)
-}
 
 // evacuateOpts builds the evacuate action body for the client's
 // microversion. gophercloud's EvacuateOpts always sends onSharedStorage,
@@ -35,7 +16,7 @@ type evacuateOpts struct {
 
 // ToEvacuateMap implements servers.EvacuateOptsBuilder.
 func (o evacuateOpts) ToEvacuateMap() (map[string]any, error) {
-	if !microversionAtLeast(o.microversion, 2, 14) {
+	if !microversionAtLeast(o.microversion, "2.14") {
 		return servers.EvacuateOpts{
 			Host:            o.host,
 			OnSharedStorage: o.onSharedStorage,
@@ -68,7 +49,7 @@ func (o liveMigrateOpts) ToLiveMigrateMap() (map[string]any, error) {
 		host = o.host
 	}
 	body := map[string]any{"host": host}
-	if microversionAtLeast(o.microversion, 2, 25) {
+	if microversionAtLeast(o.microversion, "2.25") {
 		body["block_migration"] = "auto"
 	} else {
 		body["block_migration"] = false

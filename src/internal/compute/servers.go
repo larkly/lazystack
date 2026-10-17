@@ -493,9 +493,13 @@ func ResetServerState(ctx context.Context, client *gophercloud.ServiceClient, id
 	return nil
 }
 
-// GetRemoteConsole retrieves a noVNC console URL for a server.
+// GetRemoteConsole retrieves a noVNC console URL for a server. The
+// remote-consoles API exists from Nova microversion 2.6.
 func GetRemoteConsole(ctx context.Context, client *gophercloud.ServiceClient, id string) (string, error) {
 	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return "", err
+	}
+	if err := RequireMicroversion(client, "2.6", "remote console"); err != nil {
 		return "", err
 	}
 	shared.Debugf("[compute] getting remote console for server %s", id)
