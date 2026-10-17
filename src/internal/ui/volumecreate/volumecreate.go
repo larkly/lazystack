@@ -413,6 +413,9 @@ func (m *Model) updateFocus() {
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
+	if m.submitting {
+		return m, nil
+	}
 	name := strings.TrimSpace(m.nameInput.Value())
 	if name == "" {
 		m.err = "Volume name is required"
