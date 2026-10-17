@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/loadbalancer"
+	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
@@ -334,13 +335,21 @@ func (m Model) openSGRuleEdit() (Model, tea.Cmd) {
 }
 
 func (m Model) openSGRename() (Model, tea.Cmd) {
-	m.sgCreate = sgcreate.NewRename(m.client.Network, m.secGroupView.SelectedGroupID(), m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
+	sgID := m.secGroupView.SelectedGroupID()
+	if sgID == "" {
+		return m, nil
+	}
+	m.sgCreate = sgcreate.NewRename(m.client.Network, sgID, m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
 	m.sgCreate.SetSize(m.width, m.height)
 	return m, m.sgCreate.Init()
 }
 
 func (m Model) openSGClone() (Model, tea.Cmd) {
-	m.sgCreate = sgcreate.NewClone(m.client.Network, m.secGroupView.SelectedGroupID(), m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
+	sgID := m.secGroupView.SelectedGroupID()
+	if sgID == "" {
+		return m, nil
+	}
+	m.sgCreate = sgcreate.NewClone(m.client.Network, sgID, m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
 	m.sgCreate.SetSize(m.width, m.height)
 	return m, m.sgCreate.Init()
 }
@@ -427,15 +436,21 @@ func (m Model) openPortEdit() (Model, tea.Cmd) {
 	return m, m.portEdit.Init()
 }
 
+// portDisplayName names a port for confirmations, falling back to its
+// abbreviated ID when it has no name.
+func portDisplayName(p network.Port) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return shared.AbbrevID(p.ID)
+}
+
 func (m Model) openPortDeleteConfirm() (Model, tea.Cmd) {
 	p := m.networkView.SelectedPort()
 	if p == nil {
 		return m, nil
 	}
-	name := p.Name
-	if name == "" {
-		name = p.ID[:8] + "..."
-	}
+	name := portDisplayName(*p)
 	m.confirm = modal.NewConfirm("delete_port", p.ID, name)
 	m.confirm.Title = "Delete Port"
 	if p.DeviceOwner != "" {
