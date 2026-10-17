@@ -231,7 +231,7 @@ func transferCancelledHint(kind, name string, err error) string {
 	if err != shared.ErrTransferCanceled {
 		return fmt.Sprintf("%s %s cancelled: %s", shared.Glyph("✗", "FAIL"), what, shared.ParseError(err).FriendlyMessage)
 	}
-	return what + " cancelled"
+	return shared.Glyph("–", "-") + " " + what + " cancelled"
 }
 
 // updateAnyModalBackground routes non-key messages to active modals.

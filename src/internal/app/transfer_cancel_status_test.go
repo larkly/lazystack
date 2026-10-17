@@ -15,11 +15,11 @@ import (
 func TestCancelledTransferStatus(t *testing.T) {
 	m, _ := listFixture(t)
 	m.updateImageDownloadBackground(imagedownload.DownloadFinishedMsg{ImageID: "i", Name: "jammy", Err: shared.ErrTransferCanceled})
-	if hint := m.statusBar.StickyHint; !strings.Contains(hint, "Image download of jammy cancelled") || strings.Contains(hint, "failed") {
+	if hint := m.statusBar.StickyHint; hint != shared.Glyph("–", "-")+" Image download of jammy cancelled" {
 		t.Fatalf("download hint=%q", hint)
 	}
 	m.updateImageUploadBackground(imagecreate.UploadFinishedMsg{Name: "disk", Err: shared.ErrTransferCanceled})
-	if hint := m.statusBar.StickyHint; !strings.Contains(hint, "Image upload of disk cancelled") || strings.Contains(hint, "failed") {
+	if hint := m.statusBar.StickyHint; hint != shared.Glyph("–", "-")+" Image upload of disk cancelled" {
 		t.Fatalf("upload hint=%q", hint)
 	}
 	orphan := fmt.Errorf("%w (cleanup failed, image img-1 may be left behind: boom)", shared.ErrTransferCanceled)

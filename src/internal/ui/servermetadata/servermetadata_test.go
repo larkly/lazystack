@@ -391,6 +391,9 @@ func TestDeleteAsksForConfirmation(t *testing.T) {
 		if !strings.Contains(m.Hints(), "y delete") {
 			t.Fatalf("hints=%q", m.Hints())
 		}
+		if v := m.View(); !strings.Contains(v, "y delete • n/esc cancel") || strings.Contains(v, "a add") {
+			t.Fatalf("footer does not match the delete question:\n%s", v)
+		}
 		m, cmd = press(m, cancel)
 		if cmd != nil || !m.Active || m.mode != "" {
 			t.Fatalf("%s: active=%v mode=%q", cancel.String(), m.Active, m.mode)

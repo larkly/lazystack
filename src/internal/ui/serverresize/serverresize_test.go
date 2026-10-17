@@ -140,7 +140,7 @@ func TestSubmittingBlocksRepeatAndEscape(t *testing.T) {
 	m, rec := newBulk(t)
 	m, _ = m.Update(keyDown)
 	m, _ = m.Update(keyEnter)
-	m, first := m.Update(keyEnter) // confirm
+	m, first := m.Update(keyY) // confirm
 	if !m.submitting {
 		t.Fatal("not submitting after confirm")
 	}
@@ -170,6 +170,32 @@ func TestSubmittingBlocksRepeatAndEscape(t *testing.T) {
 	}
 	if got, ok := out[0].(shared.ServerActionMsg); !ok || got.Action != "Resize" {
 		t.Fatalf("completion=%#v", out[0])
+	}
+}
+
+// Enter opens the confirmation but never answers it, so a double Enter or
+// a repeating key cannot resize (and reboot) a server.
+func TestEnterDoesNotConfirmResize(t *testing.T) {
+	for _, mk := range []func(*testing.T) (Model, *resizeRecorder){newSingle, newBulk} {
+		m, rec := mk(t)
+		m, _ = m.Update(keyDown)
+		m, _ = m.Update(keyEnter)
+		if !m.confirming {
+			t.Fatal("enter did not open the confirmation")
+		}
+		for range 3 {
+			var cmd tea.Cmd
+			m, cmd = m.Update(keyEnter)
+			if msgs := run(cmd); len(msgs) != 0 || m.submitting || rec.count() != 0 {
+				t.Fatalf("enter confirmed the resize: msgs=%v submitting=%v posts=%d", msgs, m.submitting, rec.count())
+			}
+		}
+		if !m.confirming {
+			t.Fatal("enter dismissed the confirmation")
+		}
+		if strings.Contains(m.View(), "enter confirm") || strings.Contains(m.Hints(), "enter confirm") {
+			t.Fatalf("enter still offered as confirm: hints=%q\n%s", m.Hints(), m.View())
+		}
 	}
 }
 

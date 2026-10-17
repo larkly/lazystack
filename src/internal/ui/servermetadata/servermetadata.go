@@ -443,9 +443,13 @@ func (m Model) View() string {
 		width = m.width - 4
 	}
 
+	footerText := "a add • e edit • d delete • ↑↓ navigate • esc back"
+	if m.mode == "delete" {
+		footerText = m.Hints()
+	}
 	footer := lipgloss.NewStyle().
 		Foreground(shared.ColorMuted).
-		Render("  a add • e edit • d delete • ↑↓ navigate • esc back")
+		Render("  " + footerText)
 
 	return lipgloss.NewStyle().
 		Width(width).

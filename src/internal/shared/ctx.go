@@ -48,8 +48,12 @@ func (t *TransferCancel) Bind(cancel context.CancelFunc) {
 	}
 }
 
-// Cancel cancels the transfer. Repeated calls have no further effect.
+// Cancel cancels the transfer. Repeated calls, and calls on a nil
+// holder, have no further effect.
 func (t *TransferCancel) Cancel() {
+	if t == nil {
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.canceled {

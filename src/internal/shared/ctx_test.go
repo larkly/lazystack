@@ -80,6 +80,7 @@ func TestStallCtxCancelsOnlyStalledTransfers(t *testing.T) {
 // cancels before or after the transfer has bound it, and only once.
 func TestTransferCancel(t *testing.T) {
 	var nilT *TransferCancel
+	nilT.Cancel() // must not panic
 	if nilT.Canceled() {
 		t.Fatal("nil holder reports canceled")
 	}

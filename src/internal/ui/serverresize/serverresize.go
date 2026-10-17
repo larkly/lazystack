@@ -178,7 +178,9 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) updateConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, shared.Keys.Confirm), key.Matches(msg, shared.Keys.Enter):
+	case key.Matches(msg, shared.Keys.Confirm):
+		// Only y answers: Enter opened this step, so a double Enter or a
+		// repeating key must not resize (and reboot) the server.
 		m.confirming = false
 		return m.doResize(m.confirmFlavor)
 	case key.Matches(msg, shared.Keys.Deny), key.Matches(msg, shared.Keys.Back):
@@ -328,7 +330,7 @@ func (m Model) View() string {
 		b.WriteString(fmt.Sprintf("Resize %s to flavor %s (%d vCPU, %dMB RAM, %dGB disk)?\n",
 			m.serverName, f.Name, f.VCPUs, f.RAM, f.Disk))
 		b.WriteString("\n")
-		b.WriteString(shared.StyleHelp.Render("y/enter confirm • n/esc cancel"))
+		b.WriteString(shared.StyleHelp.Render("y confirm • n/esc cancel"))
 		return m.renderBox(b.String())
 	}
 
@@ -441,7 +443,7 @@ func (m *Model) SetSize(w, h int) {
 func (m Model) Hints() string {
 	switch {
 	case m.confirming:
-		return "y/enter confirm • n/esc cancel"
+		return "y confirm • n/esc cancel"
 	case m.filtering:
 		return "type to filter • enter apply • esc clear"
 	}
