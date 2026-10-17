@@ -2,9 +2,11 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/routerview"
 )
 
 var (
@@ -68,5 +70,27 @@ func TestEscOnDNSListStaysOnTheTab(t *testing.T) {
 		if vc, ok := cmd().(shared.ViewChangeMsg); ok {
 			t.Fatalf("esc on DNS asked for view %q", vc.View)
 		}
+	}
+}
+
+// On the router view esc from a detail pane first returns focus to the
+// router list; only then does it mean back-navigation.
+func TestEscFromRouterDetailReturnsToListFirst(t *testing.T) {
+	m := newTestModel("dev", false)
+	m.returnToView = viewServerDetail
+	m.serverDetail = testServerDetailWithServer("srv-1", "srv-1")
+	m.view = viewRouterView
+	m.routerView = routerview.New(nil, 5*time.Second)
+	m, _ = escStep(t, m, tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	if m.routerView.FocusedPane() == routerview.FocusSelector {
+		t.Fatal("setup: tab did not leave the router list")
+	}
+	m, _ = escStep(t, m, escPress)
+	if m.view != viewRouterView || m.routerView.FocusedPane() != routerview.FocusSelector {
+		t.Fatalf("first esc: view=%v pane=%v, want the router list", m.view, m.routerView.FocusedPane())
+	}
+	m, _ = escStep(t, m, escPress)
+	if m.view != viewServerDetail {
+		t.Fatalf("second esc: view=%v, want back to server detail", m.view)
 	}
 }

@@ -252,7 +252,7 @@ var allSections = []section{
 		binds: []bind{
 			l("↑/k ↓/j", "navigate"),
 			l("tab/shift+tab", "cycle panes"),
-			l("enter", "view detail (interfaces)"),
+			l("enter", "view detail (focus interfaces)"),
 			l("ctrl+n", "create router"),
 			l("ctrl+d", "delete router"),
 			k(&shared.Keys.Filter, "filter routers"),
@@ -260,7 +260,7 @@ var allSections = []section{
 			k(&shared.Keys.Attach, "add interface (from detail)"),
 			k(&shared.Keys.Detach, "remove interface (from detail)"),
 			l("Y", "copy field..."),
-			l("esc", "clear filter"),
+			l("esc", "clear filter / back to router list (detail)"),
 		},
 	},
 	{

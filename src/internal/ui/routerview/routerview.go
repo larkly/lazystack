@@ -125,14 +125,20 @@ func (m Model) escHint() string {
 // FilterValue is the current router filter text.
 func (m Model) FilterValue() string { return m.filter.Value() }
 
-// Escape clears the committed filter and reports whether there was one;
-// when there was not, esc goes on to mean back-navigation in the root model.
+// Escape clears one layer of state per esc press: the committed filter,
+// then focus on a detail pane, which returns to the router list. It
+// reports whether anything was cleared; when nothing was, esc goes on to
+// mean back-navigation in the root model.
 func (m *Model) Escape() (handled bool) {
-	if !m.filter.Clear() {
-		return false
+	if m.filter.Clear() {
+		m.applyFilter()
+		return true
 	}
-	m.applyFilter()
-	return true
+	if m.focus != FocusSelector {
+		m.focus = FocusSelector
+		return true
+	}
+	return false
 }
 
 // Init starts the initial fetch.
@@ -402,6 +408,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.ReverseSort) && m.focus == FocusSelector:
 			m.order = shared.ReverseSort(m.order)
 			return m.resort()
+		case key.Matches(msg, shared.Keys.Enter) && m.focus == FocusSelector:
+			// Open the router's detail: its interfaces.
+			if m.selectedRouter() != nil {
+				m.focus = FocusInterfaces
+			}
+			return m, nil
 		case key.Matches(msg, shared.Keys.Tab):
 			m.focus = (m.focus + 1) % focusPaneCount
 			return m, nil
@@ -1252,15 +1264,20 @@ func (m Model) Hints() string {
 	if m.filter.Active() {
 		return "enter confirm \u2022 esc clear"
 	}
+	// From a detail pane esc clears a filter first, then returns to the list.
+	escList := "esc list \u2022 "
+	if m.filter.Value() != "" {
+		escList = m.escHint()
+	}
 	switch m.focus {
 	case FocusInterfaces:
-		return "\u2191\u2193 navigate \u2022 " + shared.Keys.Attach.Help().Key + " add interface \u2022 ^t remove \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 " + shared.Keys.Attach.Help().Key + " add interface \u2022 ^t remove \u2022 tab/shift+tab focus \u2022 R refresh \u2022 " + escList + "? help"
 	case focusRoutes:
-		return "\u2191\u2193 navigate \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 tab/shift+tab focus \u2022 R refresh \u2022 " + escList + "? help"
 	case focusInfo:
-		return "tab/shift+tab focus \u2022 ^n new \u2022 ^d delete \u2022 R refresh \u2022 ? help"
+		return "tab/shift+tab focus \u2022 ^n new \u2022 ^d delete \u2022 R refresh \u2022 " + escList + "? help"
 	default:
-		return "\u2191\u2193 navigate \u2022 / filter \u2022 s/S sort \u2022 ^n new \u2022 ^d delete \u2022 tab/shift+tab focus \u2022 R refresh \u2022 " + m.escHint() + "? help"
+		return "\u2191\u2193 navigate \u2022 enter interfaces \u2022 / filter \u2022 s/S sort \u2022 ^n new \u2022 ^d delete \u2022 tab/shift+tab focus \u2022 R refresh \u2022 " + m.escHint() + "? help"
 	}
 }
 
