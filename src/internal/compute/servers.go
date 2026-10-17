@@ -66,6 +66,9 @@ func VolumeAttachmentIDs(attachments []VolumeAttachment) []string {
 
 // ListServers fetches all servers from Nova.
 func ListServers(ctx context.Context, client *gophercloud.ServiceClient) ([]Server, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[compute] listing servers")
 	opts := servers.ListOpts{
 		AllTenants: false,
@@ -92,6 +95,9 @@ func ListServers(ctx context.Context, client *gophercloud.ServiceClient) ([]Serv
 
 // GetServer fetches a single server by ID.
 func GetServer(ctx context.Context, client *gophercloud.ServiceClient, id string) (*Server, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[compute] getting server %s", id)
 	r := servers.Get(ctx, client, id)
 	s, err := r.Extract()
@@ -489,6 +495,9 @@ func ResetServerState(ctx context.Context, client *gophercloud.ServiceClient, id
 
 // GetRemoteConsole retrieves a noVNC console URL for a server.
 func GetRemoteConsole(ctx context.Context, client *gophercloud.ServiceClient, id string) (string, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return "", err
+	}
 	shared.Debugf("[compute] getting remote console for server %s", id)
 	result := remoteconsoles.Create(ctx, client, id, remoteconsoles.CreateOpts{
 		Protocol: remoteconsoles.ConsoleProtocolVNC,
@@ -513,6 +522,9 @@ func GetRemoteConsole(ctx context.Context, client *gophercloud.ServiceClient, id
 // non-empty encrypted so callers can still surface the blob for manual
 // decryption.
 func GetPassword(ctx context.Context, client *gophercloud.ServiceClient, id, privKeyPath string) (plain, encrypted string, err error) {
+	if err = shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return "", "", err
+	}
 	shared.Debugf("[compute] getting password for server %s", id)
 	r := servers.GetPassword(ctx, client, id)
 	encrypted, err = r.ExtractPassword(nil)
@@ -577,6 +589,9 @@ func loadRSAPrivateKey(path string) (*rsa.PrivateKey, error) {
 
 // GetConsoleOutput retrieves console output for a server.
 func GetConsoleOutput(ctx context.Context, client *gophercloud.ServiceClient, id string, lines int) (string, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return "", err
+	}
 	shared.Debugf("[compute] getting console output for server %s (lines=%d)", id, lines)
 	r := servers.ShowConsoleOutput(ctx, client, id, servers.ShowConsoleOutputOpts{Length: lines})
 	output, err := r.Extract()

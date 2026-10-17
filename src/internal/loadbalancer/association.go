@@ -40,7 +40,7 @@ type ListenerUpdate struct {
 // the default pool is part of the update, confirms from the response that
 // Octavia recorded the requested binding.
 func UpdateListenerWithPool(ctx context.Context, client *gophercloud.ServiceClient, id string, u ListenerUpdate) error {
-	if err := requireLBClient(client); err != nil {
+	if err := shared.RequireClient(client, shared.ServiceLoadBalancer); err != nil {
 		return err
 	}
 	shared.Debugf("[lb] UpdateListenerWithPool: starting, id=%s", id)

@@ -27,39 +27,10 @@ func requireProjectID(projectID string) error {
 	return nil
 }
 
-// requireComputeClient guards against a nil Nova client on clouds lacking the
-// compute service; gophercloud methods panic on nil *ServiceClient receivers.
-func requireComputeClient(client *gophercloud.ServiceClient) error {
-	if client == nil {
-		return fmt.Errorf("compute (Nova) service is not available in this cloud")
-	}
-	return nil
-}
-
-// requireNetworkClient guards against a nil Neutron client on clouds lacking
-// the networking service; gophercloud methods panic on nil *ServiceClient
-// receivers.
-func requireNetworkClient(client *gophercloud.ServiceClient) error {
-	if client == nil {
-		return fmt.Errorf("networking (Neutron) service is not available in this cloud")
-	}
-	return nil
-}
-
-// requireBlockStorageClient guards against a nil Cinder client on clouds
-// lacking the block storage service; gophercloud methods panic on nil
-// *ServiceClient receivers.
-func requireBlockStorageClient(client *gophercloud.ServiceClient) error {
-	if client == nil {
-		return fmt.Errorf("block storage (Cinder) service is not available in this cloud")
-	}
-	return nil
-}
-
 // GetComputeQuotas returns compute quota usage.
 func GetComputeQuotas(ctx context.Context, client *gophercloud.ServiceClient, projectID string) ([]QuotaUsage, error) {
 	shared.Debugf("[quota] GetComputeQuotas: start projectID=%s", projectID)
-	if err := requireComputeClient(client); err != nil {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
 		shared.Debugf("[quota] GetComputeQuotas: %v", err)
 		return nil, err
 	}
@@ -84,7 +55,7 @@ func GetComputeQuotas(ctx context.Context, client *gophercloud.ServiceClient, pr
 // GetNetworkQuotas returns network quota usage.
 func GetNetworkQuotas(ctx context.Context, client *gophercloud.ServiceClient, projectID string) ([]QuotaUsage, error) {
 	shared.Debugf("[quota] GetNetworkQuotas: start projectID=%s", projectID)
-	if err := requireNetworkClient(client); err != nil {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
 		shared.Debugf("[quota] GetNetworkQuotas: %v", err)
 		return nil, err
 	}
@@ -110,7 +81,7 @@ func GetNetworkQuotas(ctx context.Context, client *gophercloud.ServiceClient, pr
 // GetVolumeQuotas returns block storage quota usage.
 func GetVolumeQuotas(ctx context.Context, client *gophercloud.ServiceClient, projectID string) ([]QuotaUsage, error) {
 	shared.Debugf("[quota] GetVolumeQuotas: start projectID=%s", projectID)
-	if err := requireBlockStorageClient(client); err != nil {
+	if err := shared.RequireClient(client, shared.ServiceBlockStorage); err != nil {
 		shared.Debugf("[quota] GetVolumeQuotas: %v", err)
 		return nil, err
 	}

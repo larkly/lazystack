@@ -61,6 +61,9 @@ type SubnetPool struct {
 
 // ListNetworks fetches all available networks.
 func ListNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Network, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing networks")
 	opts := networks.ListOpts{}
 
@@ -91,6 +94,9 @@ func ListNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Net
 
 // ListSubnets fetches all subnets.
 func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subnet, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing subnets")
 	var result []Subnet
 	err := subnets.List(client, subnets.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -136,6 +142,9 @@ func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subn
 
 // ListSubnetPools fetches all subnet pools.
 func ListSubnetPools(ctx context.Context, client *gophercloud.ServiceClient) ([]SubnetPool, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing subnet pools")
 	var result []SubnetPool
 	err := subnetpools.List(client, subnetpools.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -374,6 +383,9 @@ func (o externalListOpts) ToNetworkListQuery() (string, error) {
 // ListExternalNetworks fetches networks where router:external is true,
 // following pagination so large deployments are not silently truncated.
 func ListExternalNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Network, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing external networks")
 	var result []Network
 	err := networks.List(client, externalListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {

@@ -21,6 +21,9 @@ type Flavor struct {
 
 // ListFlavors fetches all available flavors.
 func ListFlavors(ctx context.Context, client *gophercloud.ServiceClient) ([]Flavor, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[compute] listing flavors")
 	opts := flavors.ListOpts{}
 

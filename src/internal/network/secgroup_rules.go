@@ -54,6 +54,9 @@ func derefString(s *string) string {
 
 // GetSecurityRuleSpec fetches a single rule with null-aware fields.
 func GetSecurityRuleSpec(ctx context.Context, client *gophercloud.ServiceClient, id string) (*SecurityRuleSpec, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] getting security group rule %s", id)
 	var body struct {
 		Rule ruleSpecWire `json:"security_group_rule"`

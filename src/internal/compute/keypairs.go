@@ -24,6 +24,9 @@ type KeyPair struct {
 
 // ListKeyPairs fetches all keypairs.
 func ListKeyPairs(ctx context.Context, client *gophercloud.ServiceClient) ([]KeyPair, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[compute] listing keypairs")
 	var result []KeyPair
 	err := keypairs.List(client, keypairs.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -143,6 +146,9 @@ func ImportKeyPair(ctx context.Context, client *gophercloud.ServiceClient, name,
 
 // GetKeyPair fetches a single keypair by name.
 func GetKeyPair(ctx context.Context, client *gophercloud.ServiceClient, name string) (*KeyPairFull, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[compute] getting keypair %q", name)
 	kp, err := keypairs.Get(ctx, client, name, keypairs.GetOpts{}).Extract()
 	if err != nil {

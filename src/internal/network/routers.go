@@ -40,6 +40,9 @@ type RouterInterface struct {
 
 // ListRouters fetches all routers.
 func ListRouters(ctx context.Context, client *gophercloud.ServiceClient) ([]Router, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing routers")
 	var result []Router
 	err := routers.List(client, routers.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -81,6 +84,9 @@ func ListRouters(ctx context.Context, client *gophercloud.ServiceClient) ([]Rout
 
 // GetRouter fetches a single router.
 func GetRouter(ctx context.Context, client *gophercloud.ServiceClient, id string) (*Router, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] getting router %s", id)
 	r, err := routers.Get(ctx, client, id).Extract()
 	if err != nil {
@@ -222,6 +228,9 @@ func isRouterInterfacePort(p ports.Port, routerID string) bool {
 // ListRouterInterfaces lists a router's subnet interface ports, including
 // HA and DVR interfaces.
 func ListRouterInterfaces(ctx context.Context, client *gophercloud.ServiceClient, routerID string) ([]RouterInterface, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing router interfaces for router %s", routerID)
 	var result []RouterInterface
 	err := ports.List(client, ports.ListOpts{

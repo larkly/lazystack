@@ -29,6 +29,9 @@ type Hypervisor struct {
 
 // ListHypervisors returns all hypervisors visible to the user.
 func ListHypervisors(ctx context.Context, client *gophercloud.ServiceClient) ([]Hypervisor, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[compute] listing hypervisors")
 	pager := hypervisors.List(client, nil)
 	var result []Hypervisor

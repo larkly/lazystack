@@ -22,6 +22,9 @@ type Action struct {
 
 // ListActions fetches instance actions for a server.
 func ListActions(ctx context.Context, client *gophercloud.ServiceClient, serverID string) ([]Action, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[compute] listing actions for server %s", serverID)
 	var result []Action
 	err := instanceactions.List(client, serverID, nil).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {

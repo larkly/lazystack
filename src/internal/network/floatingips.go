@@ -28,6 +28,9 @@ type FloatingIP struct {
 
 // ListFloatingIPs fetches all floating IPs.
 func ListFloatingIPs(ctx context.Context, client *gophercloud.ServiceClient) ([]FloatingIP, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing floating IPs")
 	var result []FloatingIP
 	err := floatingips.List(client, floatingips.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -171,6 +174,9 @@ func (t FloatingIPTarget) Label() string {
 // it deterministically. Router discovery failures are logged and leave
 // ExternalNetworkIDs empty rather than failing the lookup.
 func ListFloatingIPTargets(ctx context.Context, client *gophercloud.ServiceClient, serverID string) ([]FloatingIPTarget, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing floating IP targets for server %s", serverID)
 	serverPorts, err := ListPortsByDevice(ctx, client, serverID)
 	if err != nil {
