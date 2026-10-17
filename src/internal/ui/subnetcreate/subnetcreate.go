@@ -484,12 +484,14 @@ func validateAddressing(ipVer int, cidr, gateway string) error {
 		return nil
 	}
 	if !shared.ValidIP(gw) {
+		//lint:ignore ST1005 shown verbatim as the form's error line, like its other messages
 		return fmt.Errorf(`Gateway %q is not a valid IP address (or "none")`, gw)
 	}
 	if cidr == "" {
 		return checkFamily("Gateway", gw, netip.MustParseAddr(gw), ipVer)
 	}
 	if !shared.IPInCIDR(gw, cidr) {
+		//lint:ignore ST1005 shown verbatim as the form's error line, like its other messages
 		return fmt.Errorf("Gateway %s is not inside %s", gw, cidr)
 	}
 	return nil

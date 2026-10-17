@@ -14,7 +14,7 @@ import (
 // new key pair and hand its name to the list so the cursor lands on it.
 func TestImportedKeypairIsAnnouncedAndHighlighted(t *testing.T) {
 	m := New(nil)
-	m, cmd := m.Update(keypairCreatedMsg{kp: &compute.KeyPairFull{Name: "deploy"}})
+	_, cmd := m.Update(keypairCreatedMsg{kp: &compute.KeyPairFull{Name: "deploy"}})
 	got := testutil.CmdMessages(cmd)
 	want := []tea.Msg{
 		shared.ViewChangeMsg{View: "keypairlist", Highlight: "deploy"},
@@ -36,7 +36,7 @@ func TestGeneratedKeypairIsAnnouncedThenHighlightedOnLeave(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("on create: messages = %#v, want %#v", got, want)
 		}
-		m, cmd = m.Update(leave)
+		_, cmd = m.Update(leave)
 		got = testutil.CmdMessages(cmd)
 		want = []tea.Msg{shared.ViewChangeMsg{View: "keypairlist", Highlight: "gen"}}
 		if !reflect.DeepEqual(got, want) {

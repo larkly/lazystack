@@ -34,8 +34,8 @@
 | File | Purpose |
 |---|---|
 | [`nfpm.yaml`](nfpm.yaml) | nFPM packaging configuration for the `.deb`, `.rpm` and Arch `.pkg.tar.zst` release packages. |
-| [`Makefile`](Makefile) | Repository-root targets: `build` (writes `bin/lazystack`, version dev) and `test` (`go test -race ./...`). |
-| [`src/Makefile`](src/Makefile) | Module targets, run from `src/`: `build` (writes `src/lazystack`, version from `git describe`), `test`, `vet`, `clean`, and `all` (vet, test, build). |
+| [`Makefile`](Makefile) | Repository-root targets: `build` (writes `bin/lazystack`, version dev), `test` (`go test -race ./...`) and `lint` (runs the `src/` lint target). |
+| [`src/Makefile`](src/Makefile) | Module targets, run from `src/`: `build` (writes `src/lazystack`, version from `git describe`), `test`, `lint` (fails if `gofmt -l` lists any file, then `go vet ./...` and staticcheck via `go run honnef.co/go/tools/cmd/staticcheck@latest ./...`), `vet`, `clean`, and `all` (vet, test, build). |
 
 The AUR recipe is not kept in this repository: it lives in the separate `larkly/aur-lazystack` repository, which the release workflow notifies (repository dispatch with the new version and source checksum) on every release.
 
@@ -45,5 +45,5 @@ There is no `install` target; copy the built binary onto your `PATH` yourself (s
 
 ## Contributing
 
-- All code is in `src/`. Run `make test` (from the repository root) before committing.
+- All code is in `src/`. Run `make test` and `make lint` (from the repository root) before committing. `make lint` downloads staticcheck on first use.
 - Release workflow is in [`.github/workflows/`](.github/workflows/) — CI workflows removed 2026-07-19 by release-only policy.

@@ -112,7 +112,7 @@ func TestCancelStopsUploadAndDeletesImage(t *testing.T) {
 		t.Fatal("upload did not start")
 	}
 	m, _ = m.Update(keyEsc)
-	m, _ = m.Update(keyY)
+	_, _ = m.Update(keyY)
 
 	select {
 	case msg := <-result:
