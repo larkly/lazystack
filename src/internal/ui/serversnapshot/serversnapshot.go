@@ -162,7 +162,7 @@ func (m Model) View() string {
 
 	label := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Render("Name")
 	body.WriteString("  " + label + "  " + m.nameInput.View() + "\n\n")
-	body.WriteString(shared.StyleHelp.Render("  enter: create  esc: cancel"))
+	body.WriteString(shared.StyleHelp.Render("  enter save • esc cancel"))
 
 	content := title + "\n\n" + body.String()
 	return m.renderModal(content)
@@ -185,5 +185,5 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns the key hints shown in the status bar.
 func (m Model) Hints() string {
-	return "enter create • esc cancel"
+	return "enter save • esc cancel"
 }

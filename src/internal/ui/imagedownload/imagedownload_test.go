@@ -28,7 +28,7 @@ func TestDefaultPathValidationAndCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.pathInput.SetValue(file)
-	m, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd != nil || !strings.Contains(m.err, "already exists") {
 		t.Fatal("overwrite validation")
 	}

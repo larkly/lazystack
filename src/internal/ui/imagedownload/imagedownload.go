@@ -323,12 +323,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.pathInput.Blur()
 			return m, nil
 		case key.Matches(msg, shared.Keys.Enter):
-			// If value is a directory, open picker
+			// Enter only browses: open the picker on the directory named,
+			// or on the one holding the file named. Ctrl+S downloads.
 			p := strings.TrimSpace(m.pathInput.Value())
-			if info, err := os.Stat(p); err == nil && info.IsDir() {
-				return m.openDirPicker(p)
+			if p == "" {
+				p, _ = os.Getwd()
+			} else if info, err := os.Stat(p); err != nil || !info.IsDir() {
+				p = filepath.Dir(p)
 			}
-			return m.submit()
+			return m.openDirPicker(p)
 		case msg.String() == "ctrl+s":
 			return m.submit()
 		default:
@@ -587,6 +590,9 @@ func (m Model) Hints() string {
 			return "y cancel download • n/esc keep downloading"
 		}
 		return "b background • esc cancel • downloading..."
+	}
+	if m.focusField == fieldPath {
+		return "enter browse • ctrl+s download • esc cancel"
 	}
 	return "ctrl+s download • esc cancel"
 }
