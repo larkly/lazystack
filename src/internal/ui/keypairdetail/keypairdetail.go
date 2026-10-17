@@ -88,6 +88,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.scroll > 0 {
 				m.scroll--
 			}
+		case key.Matches(msg, shared.Keys.PageDown):
+			m.scroll += m.keyViewHeight()
+			m.clampScroll()
+		case key.Matches(msg, shared.Keys.PageUp):
+			m.scroll -= m.keyViewHeight()
+			m.clampScroll()
 		}
 	}
 	return m, nil

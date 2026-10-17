@@ -58,3 +58,33 @@ func TestScrollBeforeLoadStaysZero(t *testing.T) {
 		t.Fatalf("scroll=%d before load, want 0", m.scroll)
 	}
 }
+
+// PgDn/PgUp page through a long public key a screen at a time, like the
+// volume detail view, and stay within the content.
+func TestPageKeysScrollByAScreen(t *testing.T) {
+	var lines []string
+	for i := 0; i < 60; i++ {
+		lines = append(lines, fmt.Sprintf("line%02d", i))
+	}
+	m := New(nil, "k")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m, _ = m.Update(keypairLoadedMsg{kp: &compute.KeyPairFull{Name: "k", Type: "ssh", PublicKey: strings.Join(lines, "\n")}})
+	page := m.keyViewHeight()
+
+	m = press(m, tea.KeyPgDown, 1)
+	if m.scroll != page {
+		t.Fatalf("PgDn: scroll=%d, want %d", m.scroll, page)
+	}
+	m = press(m, tea.KeyPgDown, 10)
+	if m.scroll != m.maxScroll() {
+		t.Fatalf("PgDn past the end: scroll=%d, want %d", m.scroll, m.maxScroll())
+	}
+	m = press(m, tea.KeyPgUp, 1)
+	if m.scroll != m.maxScroll()-page {
+		t.Fatalf("PgUp: scroll=%d, want %d", m.scroll, m.maxScroll()-page)
+	}
+	m = press(m, tea.KeyPgUp, 10)
+	if m.scroll != 0 {
+		t.Fatalf("PgUp past the top: scroll=%d, want 0", m.scroll)
+	}
+}
