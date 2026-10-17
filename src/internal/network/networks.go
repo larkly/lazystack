@@ -204,13 +204,25 @@ func DeleteNetwork(ctx context.Context, client *gophercloud.ServiceClient, id st
 	return nil
 }
 
-// SubnetCreateOpts holds options for creating a subnet.
+// NoGatewayKeyword is what subnet forms accept in the gateway field for a
+// subnet without a gateway; IsNoGateway matches it.
+const NoGatewayKeyword = "none"
+
+// IsNoGateway reports whether a gateway field value is NoGatewayKeyword,
+// ignoring case and surrounding space.
+func IsNoGateway(s string) bool {
+	return strings.EqualFold(strings.TrimSpace(s), NoGatewayKeyword)
+}
+
+// SubnetCreateOpts holds options for creating a subnet. A nil GatewayIP lets
+// Neutron assign the subnet's first address; a pointer to "" creates the
+// subnet without a gateway.
 type SubnetCreateOpts struct {
 	NetworkID       string
 	Name            string
 	CIDR            string
 	IPVersion       int
-	GatewayIP       string
+	GatewayIP       *string
 	EnableDHCP      bool
 	SubnetPoolID    string
 	PrefixLen       int
@@ -227,9 +239,8 @@ func CreateSubnet(ctx context.Context, client *gophercloud.ServiceClient, opts S
 		CIDR:       opts.CIDR,
 		IPVersion:  gophercloud.IPVersion(opts.IPVersion),
 		EnableDHCP: &opts.EnableDHCP,
-	}
-	if opts.GatewayIP != "" {
-		createOpts.GatewayIP = &opts.GatewayIP
+		// gophercloud sends a pointer to "" as gateway_ip null.
+		GatewayIP: opts.GatewayIP,
 	}
 	if opts.SubnetPoolID != "" {
 		createOpts.SubnetPoolID = opts.SubnetPoolID

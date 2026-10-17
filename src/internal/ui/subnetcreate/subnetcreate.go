@@ -88,9 +88,9 @@ func New(client *gophercloud.ServiceClient, networkID, networkName string) Model
 
 	gi := textinput.New()
 	gi.Prompt = ""
-	gi.Placeholder = "auto (or e.g. 10.0.0.1)"
+	gi.Placeholder = `IP, blank = auto, "none" = no gateway`
 	gi.CharLimit = 39
-	gi.SetWidth(25)
+	gi.SetWidth(40)
 
 	pi := textinput.New()
 	pi.Prompt = ""
@@ -426,7 +426,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		Name:       strings.TrimSpace(m.nameInput.Value()),
 		CIDR:       cidr,
 		IPVersion:  ipVer,
-		GatewayIP:  strings.TrimSpace(m.gatewayInput.Value()),
+		GatewayIP:  gatewayOpt(m.gatewayInput.Value()),
 		EnableDHCP: m.dhcp == 0,
 		PrefixLen:  prefixLen,
 	}
@@ -456,6 +456,20 @@ func (m Model) submit() (Model, tea.Cmd) {
 		shared.Debugf("[subnetcreate] created subnet %q in network %s", opts.Name, m.networkName)
 		return subnetCreatedMsg{Audit: rec}
 	})
+}
+
+// gatewayOpt maps the gateway field to CreateSubnet's GatewayIP: blank
+// leaves the choice to Neutron (the first address), "none" in any case
+// means no gateway, anything else is used as the address.
+func gatewayOpt(raw string) *string {
+	gw := strings.TrimSpace(raw)
+	switch {
+	case gw == "":
+		return nil
+	case network.IsNoGateway(gw):
+		gw = ""
+	}
+	return &gw
 }
 
 // subnetID returns the ID of a subnet returned by a request, if any.

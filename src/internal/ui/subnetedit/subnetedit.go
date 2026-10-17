@@ -71,10 +71,15 @@ func New(client *gophercloud.ServiceClient, sub network.Subnet) Model {
 
 	gi := textinput.New()
 	gi.Prompt = ""
-	gi.Placeholder = "e.g. 10.0.0.1"
+	// Neutron cannot pick a gateway on update, so blank also means none.
+	gi.Placeholder = `IP, blank or "none" = no gateway`
 	gi.CharLimit = fitLimit(45, sub.GatewayIP)
 	gi.SetWidth(40)
-	gi.SetValue(sub.GatewayIP)
+	if sub.GatewayIP == "" {
+		gi.SetValue(network.NoGatewayKeyword)
+	} else {
+		gi.SetValue(sub.GatewayIP)
+	}
 
 	di := textinput.New()
 	di.Prompt = ""
@@ -297,6 +302,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	gw := strings.TrimSpace(m.gatewayInput.Value())
+	if network.IsNoGateway(gw) {
+		gw = "" // sent as gateway_ip null
+	}
 	if gw != m.subnet.GatewayIP {
 		opts.GatewayIP = &gw
 	}
