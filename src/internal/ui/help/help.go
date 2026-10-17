@@ -262,6 +262,8 @@ var allSections = []section{
 		binds: []bind{
 			l("↑/k ↓/j", "navigate"),
 			l("enter", "view detail (public key)"),
+			k(&shared.Keys.Filter, "filter (list)"),
+			l("esc", "clear filter (list)"),
 			l("ctrl+n", "create / import key pair"),
 			l("ctrl+d", "delete key pair"),
 			l("Y", "copy field..."),

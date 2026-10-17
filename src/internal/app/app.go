@@ -378,6 +378,8 @@ func (m Model) textInputFocused() bool {
 		return m.volumeList.IsFiltering()
 	case viewFloatingIPList:
 		return m.floatingIPList.IsFiltering()
+	case viewKeypairList:
+		return m.keypairList.IsFiltering()
 	case viewLBView:
 		return m.lbView.IsSearching()
 	case viewImageView:

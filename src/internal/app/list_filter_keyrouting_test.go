@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
+	"github.com/larkly/lazystack/internal/ui/keypairlist"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 )
 
@@ -40,6 +41,15 @@ func listFilterCases() []listFilterCase {
 				m.floatingIPList, _ = m.floatingIPList.Update(keyText('/'))
 			},
 			value: func(m Model) string { return m.floatingIPList.FilterValue() },
+		},
+		{
+			name: "key pairs",
+			open: func(m *Model) {
+				m.view = viewKeypairList
+				m.keypairList = keypairlist.New(nil, 5*time.Second)
+				m.keypairList, _ = m.keypairList.Update(keyText('/'))
+			},
+			value: func(m Model) string { return m.keypairList.FilterValue() },
 		},
 	}
 }
