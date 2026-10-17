@@ -88,3 +88,20 @@ func TestEmptyAndFetchError(t *testing.T) {
 		t.Fatal("fetch error")
 	}
 }
+
+// Esc closes the modal while it is still loading, but not mid-submit.
+func TestEscClosesWhileLoading(t *testing.T) {
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	m := New(nil, "rtr-1", "rtr")
+	m, _ = m.Update(esc)
+	if m.Active {
+		t.Fatal("esc while loading did not close the modal")
+	}
+
+	m = New(nil, "rtr-1", "rtr")
+	m.submitting = true
+	m, _ = m.Update(esc)
+	if !m.Active {
+		t.Fatal("esc while submitting closed the modal")
+	}
+}

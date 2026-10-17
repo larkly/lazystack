@@ -56,3 +56,20 @@ func TestExtNetPickerFilterAcceptsJAndK(t *testing.T) {
 		t.Fatalf("esc: open=%v selected=%d", m.pickerOpen, m.selectedExtNet)
 	}
 }
+
+// Esc closes the modal while it is still loading, but not mid-submit.
+func TestEscClosesWhileLoading(t *testing.T) {
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	m := New(nil)
+	m, _ = m.Update(esc)
+	if m.Active {
+		t.Fatal("esc while loading did not close the modal")
+	}
+
+	m = New(nil)
+	m.submitting = true
+	m, _ = m.Update(esc)
+	if !m.Active {
+		t.Fatal("esc while submitting closed the modal")
+	}
+}

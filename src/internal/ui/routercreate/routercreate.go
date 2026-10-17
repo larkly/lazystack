@@ -125,6 +125,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Esc closes the modal while it loads; late results are dropped
+		// because inactive modals receive no messages.
+		if m.loading > 0 && !m.submitting && key.Matches(msg, shared.Keys.Back) {
+			m.Active = false
+			return m, nil
+		}
 		if m.loading > 0 || m.submitting {
 			return m, nil
 		}
