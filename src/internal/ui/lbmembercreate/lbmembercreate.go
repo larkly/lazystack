@@ -435,7 +435,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case keyText(msg) == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		if m.focusField == fieldServer && m.usesServerSelection() {
 			m.openServerPicker()
 			m.serverFiltering = true
@@ -479,21 +479,20 @@ func (m Model) handleServerPickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.serverFiltering = false
 			return m, nil
 		default:
-			s := keyText(msg)
-			switch s {
-			case "backspace":
+			switch {
+			case key.Matches(msg, shared.TextKeys.DeleteChar):
 				if len(m.serverFilter) > 0 {
 					m.serverFilter = m.serverFilter[:len(m.serverFilter)-1]
 					m.applyServerFilter()
 				}
 				return m, nil
-			case "esc":
+			case msg.String() == "esc":
 				m.serverFiltering = false
 				m.serverFilter = ""
 				m.applyServerFilter()
 				return m, nil
 			}
-			if len(s) == 1 && s[0] >= 32 && s[0] < 127 {
+			if s := msg.String(); len(s) == 1 && s[0] >= 32 && s[0] < 127 {
 				m.serverFilter += s
 				m.applyServerFilter()
 				return m, nil
@@ -520,7 +519,7 @@ func (m Model) handleServerPickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case keyText(msg) == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		m.serverFiltering = true
 		if m.serverFilter == "" {
 			m.applyServerFilter()
@@ -1106,10 +1105,6 @@ func (m Model) pickerWidth() int {
 		return 96
 	}
 	return maxInt(56, minInt(110, m.width-4))
-}
-
-func keyText(msg tea.KeyMsg) string {
-	return msg.String()
 }
 
 func minInt(a, b int) int {

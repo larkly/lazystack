@@ -328,21 +328,20 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.subnetFiltering = false
 			return m, nil
 		default:
-			s := keyText(msg)
-			switch s {
-			case "backspace":
+			switch {
+			case key.Matches(msg, shared.TextKeys.DeleteChar):
 				if len(m.subnetFilter) > 0 {
 					m.subnetFilter = m.subnetFilter[:len(m.subnetFilter)-1]
 					m.applySubnetFilter()
 				}
 				return m, nil
-			case "esc":
+			case msg.String() == "esc":
 				m.subnetFiltering = false
 				m.subnetFilter = ""
 				m.applySubnetFilter()
 				return m, nil
 			}
-			if len(s) == 1 && s[0] >= 32 && s[0] < 127 {
+			if s := msg.String(); len(s) == 1 && s[0] >= 32 && s[0] < 127 {
 				m.subnetFilter += s
 				m.applySubnetFilter()
 				return m, nil
@@ -364,7 +363,7 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.pickerCursor++
 		}
 		return m, nil
-	case keyText(msg) == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		m.subnetFiltering = true
 		m.subnetFilter = ""
 		m.applySubnetFilter()
@@ -607,8 +606,4 @@ func (m *Model) applySubnetFilter() {
 		}
 	}
 	m.pickerCursor = 0
-}
-
-func keyText(msg tea.KeyMsg) string {
-	return msg.String()
 }

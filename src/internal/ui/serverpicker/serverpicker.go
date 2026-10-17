@@ -140,7 +140,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		default:
 			// Handle filter typing
 			s := msg.String()
-			if s == "backspace" {
+			if key.Matches(msg, shared.TextKeys.DeleteChar) {
 				if len(m.filter) > 0 {
 					m.filter = m.filter[:len(m.filter)-1]
 					m.cursor = 0
