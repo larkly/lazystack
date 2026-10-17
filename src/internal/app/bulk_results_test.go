@@ -60,8 +60,10 @@ func TestBulkServerPartialFailureReportsCountsAndRefreshes(t *testing.T) {
 	if !hasRefresh(next, func(msg tea.Msg) bool { _, ok := msg.(shared.RefreshServersMsg); return ok }) {
 		t.Error("server data not refreshed after partial success")
 	}
-	if got := m.serverList.SelectionCount(); got != 1 {
-		t.Errorf("failed target not kept selected for retry: selection=%d", got)
+	// The fixture list has no rows loaded, so check the raw selection
+	// rather than the visible-row SelectionCount.
+	if got := m.serverList.SelectedIDs(); len(got) != 1 || got[0] != "bad" {
+		t.Errorf("failed target not kept selected for retry: selection=%v", got)
 	}
 	entries, _ := audit.ReadEntries(path, 20)
 	if len(entries) != 5 {

@@ -283,3 +283,50 @@ func TestEmptyStateHintNamesCreateKey(t *testing.T) {
 		t.Fatalf("empty view = %q, want it to contain %q", got, want)
 	}
 }
+
+// Under a filter, the advertised bulk count must match the servers a bulk
+// action would actually target.
+func TestSelectionCountMatchesFilteredTargets(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.servers = []compute.Server{
+		{ID: "s-1", Name: "alpha"},
+		{ID: "s-2", Name: "alpine"},
+		{ID: "s-3", Name: "beta"},
+	}
+	m.applyFilter()
+	m.SelectIDs([]string{"s-1", "s-3"})
+	m = commitFilter(t, m, "alp")
+
+	if got := len(m.SelectedServers()); got != 1 {
+		t.Fatalf("SelectedServers len = %d, want 1 (beta is filtered out)", got)
+	}
+	if got := m.SelectionCount(); got != 1 {
+		t.Fatalf("SelectionCount = %d, want 1", got)
+	}
+	if h := m.Hints(); !strings.Contains(h, "(1 selected)") {
+		t.Fatalf("hints = %q, want the listed count (1 selected)", h)
+	}
+}
+
+// When every selected server is hidden by the filter, nothing listed is
+// selected: actions fall back to the cursor server, as the hints show.
+func TestHiddenSelectionFallsBackToCursor(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.servers = []compute.Server{
+		{ID: "s-1", Name: "alpha"},
+		{ID: "s-3", Name: "beta"},
+	}
+	m.applyFilter()
+	m.SelectIDs([]string{"s-3"})
+	m = commitFilter(t, m, "alp")
+
+	if got := m.SelectionCount(); got != 0 {
+		t.Fatalf("SelectionCount = %d, want 0", got)
+	}
+	if got := m.SelectedServers(); len(got) != 1 || got[0].ID != "s-1" {
+		t.Fatalf("SelectedServers = %v, want the cursor server s-1", got)
+	}
+	if h := m.Hints(); strings.Contains(h, "selected") {
+		t.Fatalf("hints = %q, want no selection count", h)
+	}
+}

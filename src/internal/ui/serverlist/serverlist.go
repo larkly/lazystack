@@ -934,8 +934,8 @@ func (m Model) Hints() string {
 	if m.filtering {
 		return "enter confirm • esc clear"
 	}
-	if len(m.selected) > 0 {
-		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^o reboot • esc clear • ? help", len(m.selected))
+	if n := m.SelectionCount(); n > 0 {
+		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^o reboot • esc clear • ? help", n)
 	}
 	h := "↑↓ navigate • space select • enter detail • ^n create • ^d delete • ^o reboot • / filter • f save filter • F load filter"
 	if m.filter.Value() != "" {
@@ -945,16 +945,11 @@ func (m Model) Hints() string {
 	return h
 }
 
-// SelectedServers returns all selected servers, or the cursor server if none selected.
+// SelectedServers returns the selected servers in the current (filtered)
+// list, or the cursor server if none of them is listed.
 func (m Model) SelectedServers() []compute.Server {
-	if len(m.selected) > 0 {
-		var result []compute.Server
-		for _, s := range m.filtered {
-			if m.selected[s.ID] {
-				result = append(result, s)
-			}
-		}
-		return result
+	if sel := m.listedSelection(); len(sel) > 0 {
+		return sel
 	}
 	if s := m.SelectedServer(); s != nil {
 		return []compute.Server{*s}
@@ -965,6 +960,19 @@ func (m Model) SelectedServers() []compute.Server {
 // ClearSelection clears all selected servers.
 func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
+}
+
+// SelectedIDs returns every selected server ID, including selections that
+// are currently hidden by the filter or not yet loaded, in sorted order.
+func (m Model) SelectedIDs() []string {
+	ids := make([]string, 0, len(m.selected))
+	for id, on := range m.selected {
+		if on {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // SelectIDs adds the given IDs to the bulk selection (e.g. to keep failed
@@ -984,9 +992,23 @@ func (m Model) HasClearableState() bool {
 	return m.filter.Value() != "" || len(m.selected) > 0
 }
 
-// SelectionCount returns the number of selected servers.
+// SelectionCount returns the number of selected servers bulk actions would
+// target: those visible under the current filter.
 func (m Model) SelectionCount() int {
-	return len(m.selected)
+	return len(m.listedSelection())
+}
+
+func (m Model) listedSelection() []compute.Server {
+	if len(m.selected) == 0 {
+		return nil
+	}
+	var result []compute.Server
+	for _, s := range m.filtered {
+		if m.selected[s.ID] {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // ServerNames returns a set of all server names in the current list.
