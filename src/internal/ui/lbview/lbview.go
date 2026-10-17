@@ -520,10 +520,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		if m.searchFilter != "" {
-			m.searchFilter = ""
 			m.searchInput.SetValue("")
-			m.cursor = 0
-			m.selectorScroll = 0
+			m.setSearchFilter("")
 			return m.onSelectorChange()
 		}
 		return m, nil
@@ -579,37 +577,23 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Back):
 		// Esc: clear filter and exit search
 		m.searchActive = false
-		m.searchFilter = ""
 		m.searchInput.SetValue("")
 		m.searchInput.Blur()
-		m.cursor = 0
-		m.selectorScroll = 0
+		m.setSearchFilter("")
 		return m.onSelectorChange()
 
 	case key.Matches(msg, shared.Keys.Enter):
 		// Enter: keep filter and exit search
 		m.searchActive = false
-		m.searchFilter = m.searchInput.Value()
 		m.searchInput.Blur()
-		m.cursor = 0
-		m.selectorScroll = 0
-		visible := m.visibleLBs()
-		if m.cursor >= len(visible) {
-			m.cursor = max(0, len(visible)-1)
-		}
+		m.setSearchFilter(m.searchInput.Value())
 		return m.onSelectorChange()
 
 	default:
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
 		// Live filter as user types
-		m.searchFilter = m.searchInput.Value()
-		m.cursor = 0
-		m.selectorScroll = 0
-		visible := m.visibleLBs()
-		if m.cursor >= len(visible) {
-			m.cursor = max(0, len(visible)-1)
-		}
+		m.setSearchFilter(m.searchInput.Value())
 		var cmds []tea.Cmd
 		if cmd != nil {
 			cmds = append(cmds, cmd)
@@ -801,6 +785,21 @@ func (m Model) shouldRefreshDetail() (Model, bool) {
 }
 
 // --- Filter/search ---
+
+// setSearchFilter applies a new search filter and keeps the cursor on the
+// selected load balancer while it still matches, as the server list does;
+// when it is filtered out the cursor returns to the top.
+func (m *Model) setSearchFilter(filter string) {
+	var cursorID string
+	if lb := m.SelectedLB(); lb != nil {
+		cursorID = lb.ID
+	}
+	m.searchFilter = filter
+	m.cursor = 0
+	m.restoreCursor(cursorID)
+	m.selectorScroll = min(m.selectorScroll, max(0, len(m.visibleLBs())-m.selectorVisibleLines()))
+	m.ensureSelectorCursorVisible()
+}
 
 func (m Model) visibleLBs() []loadbalancer.LoadBalancer {
 	if m.searchFilter == "" {

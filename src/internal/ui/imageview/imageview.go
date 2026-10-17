@@ -472,10 +472,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		if m.searchFilter != "" {
-			m.searchFilter = ""
 			m.searchInput.SetValue("")
-			m.cursor = 0
-			m.selectorScroll = 0
+			m.setSearchFilter("")
 			return m, nil
 		}
 		if len(m.selected) > 0 {
@@ -548,31 +546,21 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		m.searchActive = false
-		m.searchFilter = ""
 		m.searchInput.SetValue("")
 		m.searchInput.Blur()
-		m.cursor = 0
-		m.selectorScroll = 0
+		m.setSearchFilter("")
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Enter):
 		m.searchActive = false
-		m.searchFilter = m.searchInput.Value()
 		m.searchInput.Blur()
-		m.cursor = 0
-		m.selectorScroll = 0
-		visible := m.visibleImages()
-		if m.cursor >= len(visible) {
-			m.cursor = max(0, len(visible)-1)
-		}
+		m.setSearchFilter(m.searchInput.Value())
 		return m, nil
 
 	default:
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
-		m.searchFilter = m.searchInput.Value()
-		m.cursor = 0
-		m.selectorScroll = 0
+		m.setSearchFilter(m.searchInput.Value())
 		return m, cmd
 	}
 }
@@ -626,6 +614,21 @@ func (m Model) scrollDown(n int) (Model, tea.Cmd) {
 }
 
 // --- Filter/search ---
+
+// setSearchFilter applies a new search filter and keeps the cursor on the
+// selected image while that image still matches, as the server list does;
+// when it is filtered out the cursor returns to the top.
+func (m *Model) setSearchFilter(filter string) {
+	var cursorID string
+	if im := m.SelectedImage(); im != nil {
+		cursorID = im.ID
+	}
+	m.searchFilter = filter
+	m.cursor = 0
+	m.restoreCursor(cursorID)
+	m.selectorScroll = min(m.selectorScroll, max(0, len(m.visibleImages())-m.selectorVisibleLines()))
+	m.ensureSelectorCursorVisible()
+}
 
 func (m Model) visibleImages() []img.Image {
 	if m.searchFilter == "" {
