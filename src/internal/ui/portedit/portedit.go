@@ -459,6 +459,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	})
 }
 
+// parseAddressPairs parses semicolon-separated ip[/prefix][,mac] entries.
 func parseAddressPairs(raw string) ([]network.AddressPair, error) {
 	if raw == "" {
 		return nil, nil
@@ -469,13 +470,15 @@ func parseAddressPairs(raw string) ([]network.AddressPair, error) {
 		if part == "" {
 			continue
 		}
-		if idx := strings.Index(part, ","); idx >= 0 {
-			ip := strings.TrimSpace(part[:idx])
-			mac := strings.TrimSpace(part[idx+1:])
-			result = append(result, network.AddressPair{IPAddress: ip, MACAddress: mac})
-		} else {
-			result = append(result, network.AddressPair{IPAddress: part})
+		ip, mac, hasMAC := strings.Cut(part, ",")
+		ip, mac = strings.TrimSpace(ip), strings.TrimSpace(mac)
+		if _, ok := shared.ParseIPOrCIDR(ip); !ok {
+			return nil, fmt.Errorf("address pair %q: %q is not a valid IP or CIDR", part, ip)
 		}
+		if hasMAC && !shared.ValidMAC(mac) {
+			return nil, fmt.Errorf("address pair %q: %q is not a valid MAC address", part, mac)
+		}
+		result = append(result, network.AddressPair{IPAddress: ip, MACAddress: mac})
 	}
 	return result, nil
 }
