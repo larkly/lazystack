@@ -2,10 +2,12 @@ package compute
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/hypervisors"
 	"github.com/gophercloud/gophercloud/v2/pagination"
+	"github.com/larkly/lazystack/internal/shared"
 )
 
 // Hypervisor is a simplified representation of an OpenStack hypervisor.
@@ -27,6 +29,7 @@ type Hypervisor struct {
 
 // ListHypervisors returns all hypervisors visible to the user.
 func ListHypervisors(ctx context.Context, client *gophercloud.ServiceClient) ([]Hypervisor, error) {
+	shared.Debugf("[compute] listing hypervisors")
 	pager := hypervisors.List(client, nil)
 	var result []Hypervisor
 	err := pager.EachPage(ctx, func(ctx context.Context, page pagination.Page) (bool, error) {
@@ -53,5 +56,10 @@ func ListHypervisors(ctx context.Context, client *gophercloud.ServiceClient) ([]
 		}
 		return true, nil
 	})
-	return result, err
+	if err != nil {
+		shared.Debugf("[compute] list hypervisors: %v", err)
+		return nil, fmt.Errorf("listing hypervisors: %w", err)
+	}
+	shared.Debugf("[compute] listed %d hypervisors", len(result))
+	return result, nil
 }
