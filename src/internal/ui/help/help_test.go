@@ -67,14 +67,14 @@ func find(entries []entry, desc string) (entry, bool) {
 func bindingKeys(b key.Binding) string { return strings.Join(b.Keys(), "/") }
 
 func TestGlobalTabRangeCoversNumberKeys(t *testing.T) {
-	// Number keys 1-9 switch tabs and there can be up to ten resource tabs.
+	// Number keys 1-9 and 0 switch tabs; there can be up to ten resource tabs.
 	g := profiled(t, "serverlist")["Global"]
 	e, ok := find(g, "switch tab")
 	if !ok {
 		t.Fatal("Global section has no tab switching entry")
 	}
-	if !strings.Contains(e.keys, "1-9") {
-		t.Errorf("tab switch keys = %q, want 1-9", e.keys)
+	if !strings.Contains(e.keys, "1-9, 0") {
+		t.Errorf("tab switch keys = %q, want 1-9, 0", e.keys)
 	}
 }
 

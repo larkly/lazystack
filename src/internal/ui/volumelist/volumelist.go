@@ -805,5 +805,5 @@ func (m Model) Hints() string {
 	if n := m.SelectionCount(); n > 0 {
 		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^t detach • esc clear • ? help", n)
 	}
-	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • " + shared.Keys.Attach.Help().Key + " attach • ^t detach • R refresh • 1-9/←→ switch tab • ? help"
+	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • " + shared.Keys.Attach.Help().Key + " attach • ^t detach • R refresh • 1-9, 0/←→ switch tab • ? help"
 }

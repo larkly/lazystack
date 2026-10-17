@@ -196,10 +196,24 @@ func (m Model) switchTab(idx int) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// tabIndexForKey maps the number keys 1-9 to the first nine tabs and 0 to
+// the tenth.
+func tabIndexForKey(s string) (int, bool) {
+	if len(s) != 1 || s[0] < '0' || s[0] > '9' {
+		return 0, false
+	}
+	if s[0] == '0' {
+		return 9, true
+	}
+	return int(s[0] - '1'), true
+}
+
+// renderTabBar renders one line of tabs, each labelled with its number key,
+// truncated to the terminal width so it never wraps.
 func (m Model) renderTabBar() string {
 	var tabs []string
 	for i, td := range m.tabs {
-		label := fmt.Sprintf(" %d:%s ", i+1, td.Name)
+		label := fmt.Sprintf(" %d:%s ", (i+1)%10, td.Name)
 		if i == m.activeTab {
 			tabs = append(tabs, lipgloss.NewStyle().
 				Background(shared.ColorPrimary).
@@ -212,5 +226,6 @@ func (m Model) renderTabBar() string {
 				Render(label))
 		}
 	}
-	return strings.Join(tabs, lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("│"))
+	bar := strings.Join(tabs, lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("│"))
+	return shared.TruncateCells(bar, m.width)
 }

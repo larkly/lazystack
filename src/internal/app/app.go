@@ -556,13 +556,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Tab switching (only from top-level list views)
 			if m.isTopLevelView() {
-				// Number keys 1-9 map to tab indices
-				if s := msg.String(); len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
-					idx := int(s[0] - '1')
-					if idx < len(m.tabs) {
-						m.clearBackNav() // explicit tab choice starts fresh
-						return m.switchTab(idx)
-					}
+				// Number keys 1-9 and 0 map to the first ten tabs
+				if idx, ok := tabIndexForKey(msg.String()); ok && idx < len(m.tabs) {
+					m.clearBackNav() // explicit tab choice starts fresh
+					return m.switchTab(idx)
 				}
 				switch {
 				case key.Matches(msg, shared.Keys.Right):

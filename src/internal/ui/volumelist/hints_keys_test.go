@@ -18,9 +18,9 @@ func TestVolumeHintsUseConfiguredAttachBinding(t *testing.T) {
 	if !strings.Contains(h, "f9 attach") || strings.Contains(h, "^a") {
 		t.Errorf("list hints = %q, want the configured attach key", h)
 	}
-	// Tabs are reachable with number keys 1-9.
-	if !strings.Contains(h, "1-9/←→ switch tab") {
-		t.Errorf("list hints = %q, want the 1-9 tab range", h)
+	// Tabs are reachable with number keys 1-9 and 0.
+	if !strings.Contains(h, "1-9, 0/←→ switch tab") {
+		t.Errorf("list hints = %q, want the 1-9, 0 tab range", h)
 	}
 	if d := (volumedetail.Model{}).Hints(); !strings.Contains(d, "f9 attach") || strings.Contains(d, "^a") {
 		t.Errorf("detail hints = %q, want the configured attach key", d)
