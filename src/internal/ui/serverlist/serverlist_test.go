@@ -271,3 +271,15 @@ func TestEscClearsFilterBeforeSelection(t *testing.T) {
 		t.Fatalf("second esc: selection = %d, want cleared", m.SelectionCount())
 	}
 }
+
+// The empty-state hint must name the create key (c is clone).
+func TestEmptyStateHintNamesCreateKey(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.SetSize(80, 24)
+	m.loading = false
+	got := m.View()
+	want := "Press [" + shared.Keys.Create.Help().Key + "] to create one."
+	if !strings.Contains(got, want) {
+		t.Fatalf("empty view = %q, want it to contain %q", got, want)
+	}
+}

@@ -587,7 +587,8 @@ func (m Model) View() string {
 	}
 
 	if len(m.filtered) == 0 && !m.loading {
-		b.WriteString(shared.StyleHelp.Render("  No servers found. Press [c] to create one.") + "\n")
+		hint := "  No servers found. Press [" + shared.Keys.Create.Help().Key + "] to create one."
+		b.WriteString(shared.StyleHelp.Render(hint) + "\n")
 		return b.String()
 	}
 
