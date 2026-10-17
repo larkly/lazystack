@@ -99,7 +99,9 @@ func BuildArgs(opts Options) []string {
 	if opts.KeyPath != "" {
 		args = append(args, "-i", opts.KeyPath)
 	}
-	args = append(args, opts.User+"@"+opts.IP)
+	// "--" ends option parsing, so a user name starting with "-" cannot
+	// be read by ssh as an option such as -oProxyCommand.
+	args = append(args, "--", opts.User+"@"+opts.IP)
 	shared.Debugf("[ssh] BuildArgs: final args %v", args)
 	return args
 }
@@ -141,7 +143,7 @@ func BuildCommandString(opts Options) string {
 	if opts.KeyPath != "" {
 		parts = append(parts, "-i", shellQuote(opts.KeyPath))
 	}
-	parts = append(parts, shellQuote(opts.User+"@"+opts.IP))
+	parts = append(parts, "--", shellQuote(opts.User+"@"+opts.IP))
 	cmd := strings.Join(parts, " ")
 	shared.Debugf("[ssh] BuildCommandString: result %s", cmd)
 	return cmd

@@ -115,7 +115,7 @@ func TestSSHArgumentCompositionExact(t *testing.T) {
 				if key != "" {
 					want = append(want, "-i", key)
 				}
-				want = append(want, "ubuntu@2001:db8::1")
+				want = append(want, "--", "ubuntu@2001:db8::1")
 				if got := BuildArgs(opts); !reflect.DeepEqual(got, want) {
 					t.Errorf("opts=%+v: got %#v want %#v", opts, got, want)
 				}
@@ -127,7 +127,7 @@ func TestSSHArgumentCompositionExact(t *testing.T) {
 				if key != "" {
 					cmd += ` -i '/tmp/my key'\''s.pem'`
 				}
-				cmd += " ubuntu@2001:db8::1"
+				cmd += " -- ubuntu@2001:db8::1"
 				if got := BuildCommandString(opts); got != cmd {
 					t.Errorf("opts=%+v: got %q want %q", opts, got, cmd)
 				}

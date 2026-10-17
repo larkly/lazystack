@@ -92,8 +92,8 @@ func TestBuildCommandString_NormalPathStaysClean(t *testing.T) {
 	if strings.Contains(cmd, "'") {
 		t.Fatalf("normal components should not be quoted: %q", cmd)
 	}
-	if !strings.Contains(cmd, "ubuntu@192.0.2.10") {
-		t.Fatalf("command missing plain user@ip: %q", cmd)
+	if !strings.HasSuffix(cmd, " -- ubuntu@192.0.2.10") {
+		t.Fatalf("command should end with -- and plain user@ip: %q", cmd)
 	}
 	if !strings.Contains(cmd, "-i /home/u/.ssh/id_rsa") {
 		t.Fatalf("command missing plain key path: %q", cmd)
@@ -121,8 +121,27 @@ func TestBuildArgs_Composition(t *testing.T) {
 	if !containsPair(args, "-i") || !containsValue(args, "/tmp/id_rsa") {
 		t.Fatalf("args missing key path -i /tmp/id_rsa: %v", args)
 	}
-	if last := args[len(args)-1]; last != "ubuntu@192.0.2.10" {
-		t.Fatalf("last arg should be user@ip, got %q", last)
+	if tail := args[len(args)-2:]; tail[0] != "--" || tail[1] != "ubuntu@192.0.2.10" {
+		t.Fatalf("args should end with -- user@ip, got %q", tail)
+	}
+}
+
+// A user name starting with "-" must not be parsed by ssh as an option.
+func TestDestinationCannotBeParsedAsOption(t *testing.T) {
+	opts := Options{User: "-oProxyCommand=x", IP: "192.0.2.10"}
+
+	args := BuildArgs(opts)
+	if tail := args[len(args)-2:]; tail[0] != "--" || tail[1] != "-oProxyCommand=x@192.0.2.10" {
+		t.Fatalf("destination not separated from options: %q", args)
+	}
+	for _, a := range args[:len(args)-2] {
+		if strings.HasPrefix(a, "-oProxyCommand") {
+			t.Fatalf("user name appears among options: %q", args)
+		}
+	}
+
+	if cmd := BuildCommandString(opts); !strings.HasSuffix(cmd, " -- -oProxyCommand=x@192.0.2.10") {
+		t.Fatalf("command does not separate the destination with --: %q", cmd)
 	}
 }
 
