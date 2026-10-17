@@ -300,7 +300,7 @@ func (m Model) openToggleConfirm(action string) (Model, tea.Cmd) {
 		if len(counts) > 1 {
 			summary := formatActionCounts(counts)
 			m.confirm.Title = fmt.Sprintf("Confirm mixed %s", action)
-			m.confirm.Body = fmt.Sprintf("Apply %s to %d servers (%s)?", action, len(refs), summary)
+			m.confirm.Body = fmt.Sprintf("Apply %s to %d servers (%s): %s", action, len(refs), summary, modal.ServerNames(refs))
 		}
 		m.confirm.SetSize(m.width, m.height)
 		m.activeModal = modalConfirm

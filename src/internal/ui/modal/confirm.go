@@ -2,6 +2,7 @@ package modal
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
@@ -55,14 +56,45 @@ func NewConfirm(action, serverID, name string) ConfirmModel {
 	}
 }
 
-// NewBulkConfirm creates a confirmation dialog for multiple servers.
+// NewBulkConfirm creates a confirmation dialog for multiple servers. Its
+// body names the servers, e.g. "Delete 3 servers: a, b, c".
 func NewBulkConfirm(action string, servers []ServerRef) ConfirmModel {
+	verb := action
+	if verb != "" {
+		verb = strings.ToUpper(verb[:1]) + verb[1:]
+	}
 	return ConfirmModel{
 		Action:  action,
 		Servers: servers,
 		Name:    fmt.Sprintf("%d servers", len(servers)),
+		Body:    fmt.Sprintf("%s %d servers: %s", verb, len(servers), ServerNames(servers)),
 		focused: 1,
 	}
+}
+
+// maxListedServers is how many names a bulk confirmation lists before
+// summarizing the rest.
+const maxListedServers = 5
+
+// ServerNames lists up to five server names (the ID when a server has no
+// name), followed by "and N more" for the rest.
+func ServerNames(servers []ServerRef) string {
+	var names []string
+	for i, s := range servers {
+		if i == maxListedServers {
+			break
+		}
+		name := s.Name
+		if name == "" {
+			name = s.ID
+		}
+		names = append(names, name)
+	}
+	out := strings.Join(names, ", ")
+	if rest := len(servers) - len(names); rest > 0 {
+		out += fmt.Sprintf(" and %d more", rest)
+	}
+	return out
 }
 
 func (m ConfirmModel) confirmMsg() tea.Cmd {
