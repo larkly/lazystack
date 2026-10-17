@@ -72,7 +72,7 @@ func New(client *gophercloud.ServiceClient, sub network.Subnet) Model {
 	gi := textinput.New()
 	gi.Prompt = ""
 	// Neutron cannot pick a gateway on update, so blank also means none.
-	gi.Placeholder = `IP, blank or "none" = no gateway`
+	gi.Placeholder = `IP, "none" = no gateway`
 	gi.CharLimit = fitLimit(45, sub.GatewayIP)
 	gi.SetWidth(40)
 	if sub.GatewayIP == "" {

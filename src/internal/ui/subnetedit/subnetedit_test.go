@@ -220,7 +220,7 @@ func TestGatewaylessSubnetPrefillsNone(t *testing.T) {
 
 func TestGatewayPlaceholderExplainsNone(t *testing.T) {
 	m := New(nil, network.Subnet{ID: "sub-1", GatewayIP: "10.0.0.1"})
-	want := `IP, blank or "none" = no gateway`
+	want := `IP, "none" = no gateway`
 	if m.gatewayInput.Placeholder != want {
 		t.Errorf("placeholder = %q, want %q", m.gatewayInput.Placeholder, want)
 	}
