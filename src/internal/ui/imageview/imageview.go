@@ -484,12 +484,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, shared.Keys.Tab):
 		m.focus = (m.focus + 1) % focusPaneCount
-		m.ClearSelection()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.ShiftTab):
 		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
-		m.ClearSelection()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Up):
