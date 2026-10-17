@@ -167,15 +167,6 @@ func (m *Model) cloneTakesBackground() bool {
 	return m.cloneProgress.Running()
 }
 
-// activeModalView returns the view string of whichever modal/overlay is active.
-// Returns ("", false) if no modal is active.
-func (m *Model) activeModalView() (string, bool) {
-	if o, ok := m.topOverlay(); ok {
-		return o.View(), true
-	}
-	return "", false
-}
-
 // updateAnyModal routes a key message to the active modal/overlay.
 // Returns true if the message was consumed by a modal.
 func (m *Model) updateAnyModal(msg tea.Msg) (bool, tea.Cmd) {

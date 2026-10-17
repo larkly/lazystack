@@ -93,8 +93,8 @@ func TestEveryOverlayRendersAndCapturesKeys(t *testing.T) {
 			m := initTestModel()
 			m.view = viewServerList
 			activate(&m)
-			if _, ok := m.activeModalView(); !ok {
-				t.Error("activeModalView does not render the active overlay")
+			if o, ok := m.topOverlay(); !ok || o.View() == "" {
+				t.Error("the active overlay is not rendered")
 			}
 			if ok, _ := m.updateAnyModal(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"})); !ok {
 				t.Error("updateAnyModal does not route keys to the active overlay")
