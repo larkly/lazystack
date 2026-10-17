@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -629,5 +630,66 @@ func TestRetryTransport_RetriedDelete404IsSuccess(t *testing.T) {
 				t.Errorf("204 must be empty: body=%q len=%d type=%q", body, resp.ContentLength, resp.Header.Get("Content-Type"))
 			}
 		})
+	}
+}
+
+// Legacy catalogs register compute as /v2.1/<project_id>; Nova answers
+// discovery there with 404 and only serves the version document one level up.
+func TestNegotiateNovaMicroversion_ProjectSuffixedEndpoint(t *testing.T) {
+	var paths []string
+	compute, closeFn := fakeComputeClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path != "/v2.1/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"version": {"id": "v2.1", "version": "2.95", "min_version": "2.1"}}`))
+	}))
+	defer closeFn()
+	compute.Endpoint += "v2.1/6f0d5e1c9b8a4f2e8d7c6b5a4f3e2d1c/"
+
+	max, used, _ := negotiateNovaMicroversion(context.Background(), compute)
+	if max != "2.95" || used != "2.95" {
+		t.Errorf("got max=%q used=%q, want 2.95/2.95 from the stripped URL", max, used)
+	}
+	want := []string{"/v2.1/6f0d5e1c9b8a4f2e8d7c6b5a4f3e2d1c/", "/v2.1/"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Errorf("discovery requests = %q, want %q", paths, want)
+	}
+}
+
+// When the stripped URL fails too, the base microversion is used with a
+// warning, exactly as for a single failed attempt.
+func TestNegotiateNovaMicroversion_RetryAlsoFailsFallsBack(t *testing.T) {
+	calls := 0
+	compute, closeFn := fakeComputeClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.NotFound(w, r)
+	}))
+	defer closeFn()
+	compute.Endpoint += "v2.1/6f0d5e1c9b8a4f2e8d7c6b5a4f3e2d1c/"
+
+	max, used, warn := negotiateNovaMicroversion(context.Background(), compute)
+	if max != "unknown" || used != "2.1" || warn == "" {
+		t.Errorf("got (%q, %q, %q), want (unknown, 2.1, warning)", max, used, warn)
+	}
+	if calls != 2 {
+		t.Errorf("discovery attempts = %d, want 2 (original + stripped URL)", calls)
+	}
+}
+
+func TestStripLastPathSegment(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://nova.example:8774/v2.1/abc123/": "https://nova.example:8774/v2.1/",
+		"https://nova.example:8774/v2.1/abc123":  "https://nova.example:8774/v2.1/",
+		"https://cloud.example/compute/v2.1/":    "https://cloud.example/compute/",
+		"https://nova.example:8774/v2.1/":        "https://nova.example:8774/",
+		"https://nova.example:8774/":             "",
+		"https://nova.example:8774":              "",
+	} {
+		if got := stripLastPathSegment(in); got != want {
+			t.Errorf("stripLastPathSegment(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
