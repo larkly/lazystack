@@ -217,3 +217,70 @@ func TestSaveToSurfacesChmodErrorAndKeepsContent(t *testing.T) {
 		t.Errorf("config content changed after failed chmod: %q", got)
 	}
 }
+
+func loadYAML(t *testing.T, data string) Config {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	return cfg
+}
+
+// A non-positive interval would make the update checker fire constantly
+// (or never); fall back to the default and say so.
+func TestLoadClampsNonPositiveUpdateCheckInterval(t *testing.T) {
+	for _, v := range []string{"-5", "0"} {
+		cfg := loadYAML(t, "general:\n  update_check_interval: "+v+"\n")
+		if got := cfg.General.UpdateCheckInterval; got != 24 {
+			t.Errorf("%s: UpdateCheckInterval = %d, want default 24", v, got)
+		}
+		if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "update_check_interval") {
+			t.Errorf("%s: Warnings = %q, want one about update_check_interval", v, cfg.Warnings)
+		}
+	}
+	for data, want := range map[string]int{"general:\n  update_check_interval: 6\n": 6, "general:\n  refresh_interval: 5\n": 24} {
+		cfg := loadYAML(t, data)
+		if cfg.General.UpdateCheckInterval != want || len(cfg.Warnings) != 0 {
+			t.Errorf("%q: interval %d warnings %q, want %d and none", data, cfg.General.UpdateCheckInterval, cfg.Warnings, want)
+		}
+	}
+}
+
+func TestLoadDropsInvalidColors(t *testing.T) {
+	cfg := loadYAML(t, "colors:\n"+
+		"  primary: \"#abc\"\n"+
+		"  secondary: \"#A1B2C3\"\n"+
+		"  success: red\n"+
+		"  warning: \"#12345\"\n"+
+		"  error: \"#GGGGGG\"\n"+
+		"  muted: \"123456\"\n")
+	d := Defaults().Colors
+	if cfg.Colors.Primary != "#abc" || cfg.Colors.Secondary != "#A1B2C3" {
+		t.Errorf("valid colors changed: primary %q secondary %q", cfg.Colors.Primary, cfg.Colors.Secondary)
+	}
+	for name, got := range map[string][2]string{
+		"success": {cfg.Colors.Success, d.Success},
+		"warning": {cfg.Colors.Warning, d.Warning},
+		"error":   {cfg.Colors.Error, d.Error},
+		"muted":   {cfg.Colors.Muted, d.Muted},
+		"bg":      {cfg.Colors.Bg, d.Bg},
+	} {
+		if got[0] != got[1] {
+			t.Errorf("%s = %q, want default %q", name, got[0], got[1])
+		}
+	}
+	want := []string{"colors.success", "colors.warning", "colors.error", "colors.muted"}
+	if len(cfg.Warnings) != len(want) {
+		t.Fatalf("Warnings = %q, want one per invalid color", cfg.Warnings)
+	}
+	for i, w := range want {
+		if !strings.Contains(cfg.Warnings[i], w) {
+			t.Errorf("warning %d = %q, want it to name %s", i, cfg.Warnings[i], w)
+		}
+	}
+}

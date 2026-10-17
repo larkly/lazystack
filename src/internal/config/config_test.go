@@ -188,17 +188,17 @@ func TestMalformedYAMLConfig(t *testing.T) {
 func TestPartialConfigOnlyColors(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	os.WriteFile(path, []byte("colors:\n  primary: \"red\"\n  bg: \"blue\"\n"), 0o644)
+	os.WriteFile(path, []byte("colors:\n  primary: \"#FF0000\"\n  bg: \"#00F\"\n"), 0o644)
 
 	loaded, err := LoadFrom(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if loaded.Colors.Primary != "red" {
-		t.Errorf("Primary = %s, want red", loaded.Colors.Primary)
+	if loaded.Colors.Primary != "#FF0000" {
+		t.Errorf("Primary = %s, want #FF0000", loaded.Colors.Primary)
 	}
-	if loaded.Colors.Bg != "blue" {
-		t.Errorf("Bg = %s, want blue", loaded.Colors.Bg)
+	if loaded.Colors.Bg != "#00F" {
+		t.Errorf("Bg = %s, want #00F", loaded.Colors.Bg)
 	}
 	// Unset colors should be filled from defaults
 	if loaded.Colors.Secondary != "#6C71C4" {
