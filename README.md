@@ -209,6 +209,8 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 | `1-9` / `Left` / `Right` (`h` / `l`) | Switch tab (from list views) |
 | `R` | Force refresh |
 | `s` / `S` | Sort column / reverse sort |
+| `/` | Filter the list (every list view; `Enter` keeps it, `Esc` clears it) |
+| `Esc` | In a list: clear the filter, then the selection; then go back |
 | `PgUp` / `PgDn` | Page up / down |
 | `Y` | Copy field (ID, IP, name, …) |
 | `H` | Hypervisors (admin) |
@@ -332,7 +334,8 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 
 | Key | Action |
 |-----|--------|
-| `Enter` | View detail (interfaces) |
+| `Enter` | View detail (focus interfaces) |
+| `Esc` | Clear filter, then back to the router list (from detail) |
 | `Ctrl+N` | Create router |
 | `Ctrl+D` | Delete router |
 | `i` | Add interface (from detail) |
