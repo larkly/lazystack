@@ -167,7 +167,7 @@ func (m ConfirmModel) View() string {
 	if len(m.VolumeIDs) > 0 {
 		modalWidth = 70
 	}
-	box := shared.StyleModal.Width(modalWidth).Render(content)
+	box := shared.StyleModal.Width(shared.ModalWidth(modalWidth, m.Width)).Render(content)
 
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, box)
 }

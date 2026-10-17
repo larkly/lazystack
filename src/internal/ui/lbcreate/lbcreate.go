@@ -549,7 +549,7 @@ func (m Model) View() string {
 		content += "\n\n" + m.renderPicker()
 	}
 
-	box := shared.StyleModal.Width(55).Render(content)
+	box := shared.StyleModal.Width(shared.ModalWidth(55, m.width)).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 

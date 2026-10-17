@@ -66,3 +66,19 @@ func TestStatusIcon_PlainMode(t *testing.T) {
 		t.Errorf("StatusIcon in PlainMode = %q, want empty", got)
 	}
 }
+
+func TestModalWidthClampsToTerminal(t *testing.T) {
+	tests := []struct{ fixed, term, want int }{
+		{55, 0, 55},   // not sized yet: keep the design width
+		{55, 120, 55}, // wide terminal: design width
+		{55, 61, 55},  // exactly fits with the margin
+		{55, 40, 34},  // narrow: terminal minus margin
+		{55, 20, 20},  // very narrow: never below the minimum
+		{40, 10, 20},
+	}
+	for _, tt := range tests {
+		if got := ModalWidth(tt.fixed, tt.term); got != tt.want {
+			t.Errorf("ModalWidth(%d, %d) = %d, want %d", tt.fixed, tt.term, got, tt.want)
+		}
+	}
+}

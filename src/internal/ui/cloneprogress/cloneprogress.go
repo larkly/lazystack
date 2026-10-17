@@ -465,7 +465,7 @@ func (m Model) View() string {
 	b.WriteString("\n")
 	b.WriteString(shared.StyleHelp.Render("  esc dismiss (operations continue in background)") + "\n")
 
-	box := shared.StyleModal.Width(60).Render(b.String())
+	box := shared.StyleModal.Width(shared.ModalWidth(60, m.width)).Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 

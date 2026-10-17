@@ -225,3 +225,17 @@ func RebuildStyles() {
 		"NOSTATE":   ColorWarning,
 	}
 }
+
+// minModalWidth is the narrowest a modal box gets on a tiny terminal.
+const minModalWidth = 20
+
+// ModalWidth returns a modal box width: the design width, narrowed to
+// leave a margin on terminals too small for it, but never below
+// minModalWidth. A terminal width of zero (not sized yet) keeps the design
+// width.
+func ModalWidth(fixed, termWidth int) int {
+	if termWidth <= 0 {
+		return fixed
+	}
+	return max(minModalWidth, min(fixed, termWidth-6))
+}
