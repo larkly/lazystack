@@ -59,12 +59,12 @@ func TestSelectExistingOrAllocate(t *testing.T) {
 		}
 	}
 }
-func TestEmptyAutoAllocatesAndErrorsCanClose(t *testing.T) {
+func TestEmptyListWaitsForEnterAndErrorsCanClose(t *testing.T) {
 	m := New(nil, "server", "web")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
 	m, cmd := m.Update(fipsLoadedMsg{})
-	if m.loading || !m.submitting || cmd == nil {
-		t.Fatal("empty list should allocate")
+	if m.loading || m.submitting || cmd != nil || !strings.Contains(m.View(), "+ Allocate new floating IP") {
+		t.Fatalf("empty list should offer allocation and wait:\n%s", m.View())
 	}
 	for _, msg := range []tea.Msg{fetchErrMsg{errors.New("denied")}, associateErrMsg{err: errors.New("denied")}, allocateErrMsg{err: errors.New("denied")}} {
 		n := New(nil, "server", "web")

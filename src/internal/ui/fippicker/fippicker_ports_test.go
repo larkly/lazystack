@@ -213,7 +213,7 @@ func TestNoIPv4PortOrNeutronErrorIsNotSuccess(t *testing.T) {
 			t.Fatalf("puts=%q emitted=%v view=%s", f.puts, emitted, m.View())
 		}
 	})
-	t.Run("auto allocate without IPv4 port allocates nothing", func(t *testing.T) {
+	t.Run("allocate without IPv4 port allocates nothing", func(t *testing.T) {
 		f := newFakeFIPNeutron()
 		f.fips = `{"floatingips":[]}`
 		f.ports = []map[string]any{port("p6", "", "srv", "compute:nova", "net-6", "sub-6", "2001:db8::5")}
@@ -221,7 +221,9 @@ func TestNoIPv4PortOrNeutronErrorIsNotSuccess(t *testing.T) {
 		defer cleanup()
 		m := New(client, "srv", "web")
 		m.SetSize(80, 30)
-		m, emitted := drive(t, m, m.Init())
+		m, _ = drive(t, m, m.Init())
+		m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m, emitted := drive(t, m, cmd)
 		if f.creates != 0 || len(emitted) != 0 || !m.Active {
 			t.Fatalf("creates=%d emitted=%v", f.creates, emitted)
 		}
@@ -248,7 +250,9 @@ func TestNoIPv4PortOrNeutronErrorIsNotSuccess(t *testing.T) {
 		defer cleanup()
 		m := New(client, "srv", "web")
 		m.SetSize(80, 30)
-		m, emitted := drive(t, m, m.Init())
+		m, _ = drive(t, m, m.Init())
+		m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m, emitted := drive(t, m, cmd)
 		if f.creates != 1 || f.deletes != 1 || len(emitted) != 0 || !m.Active || !strings.Contains(m.View(), "Error") {
 			t.Fatalf("creates=%d deletes=%d emitted=%v view=%s", f.creates, f.deletes, emitted, m.View())
 		}

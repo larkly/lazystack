@@ -6,8 +6,8 @@ import (
 
 	"charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/loadbalancer"
-	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/lbcreate"
@@ -253,30 +253,12 @@ func (m Model) openFIPReleaseConfirm() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) doAllocateFIP() (Model, tea.Cmd) {
-	m.statusBar.Hint = "Allocating floating IP..."
-	networkClient := m.client.Network
-	return m, func() tea.Msg {
-		ctx, cancel := actionCtx()
-		defer cancel()
-		shared.Debugf("[action] allocating floating IP")
-		nets, err := network.ListExternalNetworks(ctx, networkClient)
-		if err != nil {
-			shared.Debugf("[action] allocate floating IP failed: %s", err)
-			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
-		}
-		if len(nets) == 0 {
-			shared.Debugf("[action] allocate floating IP failed: no external networks available")
-			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: fmt.Errorf("no external networks available")}
-		}
-		fip, err := network.AllocateFloatingIP(ctx, networkClient, nets[0].ID)
-		if err != nil {
-			shared.Debugf("[action] allocate floating IP failed: %s", err)
-			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
-		}
-		shared.Debugf("[action] allocated floating IP %s", fip.FloatingIP)
-		return shared.ResourceActionMsg{Action: "Allocated", Name: fip.FloatingIP}
-	}
+// openFIPAllocate opens the allocate-only floating IP picker, which asks for
+// the external network when there is more than one.
+func (m Model) openFIPAllocate() (Model, tea.Cmd) {
+	m.fipPicker = fippicker.NewAllocate(m.client.Network)
+	m.fipPicker.SetSize(m.width, m.height)
+	return m, m.fipPicker.Init()
 }
 
 func (m Model) openFIPDisassociateConfirm() (Model, tea.Cmd) {

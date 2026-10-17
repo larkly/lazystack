@@ -417,8 +417,8 @@ src/
 
 #### Floating IP Management
 - **List**: Columns (Floating IP, Status, Fixed IP, Port ID), auto-refresh, sorting
-- **Allocate** (`Ctrl+N`): Allocates from first external network, shows progress in status bar
-- **Associate** (`Ctrl+U` from server list/detail): Opens FIP picker modal showing unassociated IPs + "Allocate new" option. If no unassociated IPs exist, auto-allocates and assigns
+- **Allocate** (`Ctrl+N`): Opens an allocate modal; allocates directly when there is one external network, otherwise asks which one to allocate from
+- **Associate** (`Ctrl+U` from server list/detail): Opens FIP picker modal showing unassociated IPs + "Allocate new" option. If no unassociated IPs exist, only "Allocate new" is offered and nothing happens until Enter; with several external networks, a network step comes before allocating
 - **Disassociate** (`Ctrl+T`): Confirmation modal, only enabled when FIP has a port
 - **Release** (`Ctrl+D`): Confirmation modal
 

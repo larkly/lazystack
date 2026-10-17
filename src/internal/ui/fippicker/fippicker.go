@@ -37,12 +37,17 @@ type allocateErrMsg struct {
 }
 
 // targetsLoadedMsg carries the server addresses a floating IP could be bound
-// to. fip is nil when a new floating IP will be allocated from extNetID.
+// to. fip is nil when a new floating IP will be allocated: extNetID is then
+// the preferred external network and nets lists all of them.
 type targetsLoadedMsg struct {
 	fip      *network.FloatingIP
 	extNetID string
 	targets  []network.FloatingIPTarget
+	nets     []network.Network
 }
+
+// netsLoadedMsg carries the external networks for the allocate-only picker.
+type netsLoadedMsg struct{ nets []network.Network }
 
 // releaseTimeout bounds the cleanup of a floating IP that was allocated but
 // could not be associated.
@@ -74,6 +79,17 @@ type Model struct {
 	portWarning  string
 	pendingFIP   *network.FloatingIP
 	pendingExtID string
+
+	// Network selection step, shown before allocating when more than one
+	// external network exists.
+	choosingNet    bool
+	netChoices     []network.Network
+	netCursor      int
+	pendingTargets []network.FloatingIPTarget
+
+	// allocOnly marks the picker opened from the floating IP list: it
+	// allocates a floating IP without assigning it to a server.
+	allocOnly bool
 }
 
 // New creates a FIP picker for the given server.
@@ -88,6 +104,21 @@ func New(client *gophercloud.ServiceClient, serverID, serverName string) Model {
 		projectID:  tokenProjectID(client),
 		loading:    true,
 		spinner:    s,
+	}
+}
+
+// NewAllocate creates a picker that allocates a floating IP into the
+// project without assigning it, asking for the external network when there
+// is more than one.
+func NewAllocate(client *gophercloud.ServiceClient) Model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	return Model{
+		Active:    true,
+		client:    client,
+		loading:   true,
+		allocOnly: true,
+		spinner:   s,
 	}
 }
 
@@ -110,8 +141,12 @@ func tokenProjectID(client *gophercloud.ServiceClient) string {
 	return proj.ID
 }
 
-// Init fetches unassociated floating IPs.
+// Init fetches unassociated floating IPs, or the external networks for the
+// allocate-only picker.
 func (m Model) Init() tea.Cmd {
+	if m.allocOnly {
+		return tea.Batch(m.spinner.Tick, m.fetchExternalNetworks())
+	}
 	return tea.Batch(m.spinner.Tick, m.fetchUnassociatedFIPs())
 }
 
@@ -119,14 +154,25 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case fipsLoadedMsg:
+		// Without a free floating IP only the allocate row is offered;
+		// allocating waits for Enter.
 		m.loading = false
 		m.fips = msg.fips
-		// If no unassociated FIPs, auto-allocate
-		if len(m.fips) == 0 {
+		return m, nil
+
+	case netsLoadedMsg:
+		m.loading = false
+		switch len(msg.nets) {
+		case 0:
+			m.err = "no external networks available"
+			return m, nil
+		case 1:
 			m.submitting = true
-			m.resolving = true
-			return m, m.resolveTargets(nil)
+			return m, tea.Batch(m.spinner.Tick, m.allocate(msg.nets[0].ID))
 		}
+		m.choosingNet = true
+		m.netChoices = msg.nets
+		m.netCursor = 0
 		return m, nil
 
 	case fetchErrMsg:
@@ -153,6 +199,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case allocateDoneMsg:
 		m.submitting = false
 		m.Active = false
+		if m.allocOnly {
+			return m, func() tea.Msg {
+				return shared.ResourceActionMsg{Action: "Allocated", Name: msg.fipAddr}
+			}
+		}
 		return m, func() tea.Msg {
 			return shared.ResourceActionMsg{Action: "Allocated & assigned", Name: fmt.Sprintf("%s → %s", msg.fipAddr, msg.serverName)}
 		}
@@ -185,6 +236,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		if m.loading || m.submitting {
 			return m, nil
+		}
+		if m.choosingNet && m.err == "" {
+			return m.handleNetKey(msg)
 		}
 		if m.choosingPort && m.err == "" {
 			return m.handlePortKey(msg)
@@ -231,15 +285,36 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) handleTargets(msg targetsLoadedMsg) (Model, tea.Cmd) {
 	m.resolving = false
 	m.pendingFIP = msg.fip
-	m.pendingExtID = msg.extNetID
 	if len(msg.targets) == 0 {
 		m.submitting = false
 		m.err = "server " + m.serverName + " has no port with an IPv4 address; floating IPs need an IPv4 fixed IP"
 		return m, nil
 	}
+	if msg.fip == nil && len(msg.nets) > 1 {
+		// Ask which external network to allocate from, starting at the
+		// preferred one.
+		m.submitting = false
+		m.choosingNet = true
+		m.netChoices = msg.nets
+		m.netCursor = 0
+		for i, n := range msg.nets {
+			if n.ID == msg.extNetID {
+				m.netCursor = i
+			}
+		}
+		m.pendingTargets = msg.targets
+		return m, nil
+	}
+	return m.chooseTarget(msg.extNetID, msg.targets)
+}
+
+// chooseTarget picks the server address for a floating IP on extNetID,
+// asking when several (or no) addresses are routed to that network.
+func (m Model) chooseTarget(extNetID string, targets []network.FloatingIPTarget) (Model, tea.Cmd) {
+	m.pendingExtID = extNetID
 	var eligible []network.FloatingIPTarget
-	for _, t := range msg.targets {
-		if t.ReachableFrom(msg.extNetID) {
+	for _, t := range targets {
+		if t.ReachableFrom(extNetID) {
 			eligible = append(eligible, t)
 		}
 	}
@@ -252,8 +327,44 @@ func (m Model) handleTargets(msg targetsLoadedMsg) (Model, tea.Cmd) {
 	m.portWarning = ""
 	m.portChoices = eligible
 	if len(eligible) == 0 {
-		m.portChoices = msg.targets
+		m.portChoices = targets
 		m.portWarning = "No router connecting these addresses to the floating IP's network was found; Neutron may reject the association."
+	}
+	return m, nil
+}
+
+// handleNetKey drives the external network step.
+func (m Model) handleNetKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
+		m.choosingNet = false
+		m.netChoices = nil
+		m.pendingTargets = nil
+		if m.allocOnly {
+			m.Active = false
+		}
+		return m, nil
+	case key.Matches(msg, shared.Keys.Up):
+		if m.netCursor > 0 {
+			m.netCursor--
+		}
+	case key.Matches(msg, shared.Keys.Down):
+		if m.netCursor < len(m.netChoices)-1 {
+			m.netCursor++
+		}
+	case key.Matches(msg, shared.Keys.Enter):
+		if m.netCursor >= len(m.netChoices) {
+			return m, nil
+		}
+		netID := m.netChoices[m.netCursor].ID
+		m.choosingNet = false
+		if m.allocOnly {
+			m.submitting = true
+			return m, tea.Batch(m.spinner.Tick, m.allocate(netID))
+		}
+		targets := m.pendingTargets
+		m.pendingTargets = nil
+		return m.chooseTarget(netID, targets)
 	}
 	return m, nil
 }
@@ -263,9 +374,6 @@ func (m Model) handlePortKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Back):
 		m.choosingPort = false
 		m.portChoices = nil
-		if len(m.fips) == 0 {
-			m.Active = false
-		}
 		return m, nil
 	case key.Matches(msg, shared.Keys.Up):
 		if m.portCursor > 0 {
@@ -315,17 +423,24 @@ func (m Model) listHeight() int {
 // View renders the FIP picker modal.
 func (m Model) View() string {
 	title := shared.StyleModalTitle.Render("Assign Floating IP to " + m.serverName)
+	loadingText, submitText := " Loading floating IPs...", " Assigning..."
+	if m.allocOnly {
+		title = shared.StyleModalTitle.Render("Allocate Floating IP")
+		loadingText, submitText = " Loading external networks...", " Allocating..."
+	}
 
 	var body string
 	if m.loading {
-		body = m.spinner.View() + " Loading floating IPs..."
+		body = m.spinner.View() + loadingText
 	} else if m.resolving {
 		body = m.spinner.View() + " Finding server addresses..."
 	} else if m.submitting {
-		body = m.spinner.View() + " Assigning..."
+		body = m.spinner.View() + submitText
 	} else if m.err != "" {
 		body = lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: " + m.err)
 		body += "\n\n" + shared.StyleHelp.Render("esc to close")
+	} else if m.choosingNet {
+		body = m.netChoiceView()
 	} else if m.choosingPort {
 		body = m.portChoiceView()
 	} else {
@@ -370,6 +485,29 @@ func (m Model) View() string {
 	}
 	box := shared.StyleModal.Width(modalWidth).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) netChoiceView() string {
+	lines := []string{"Choose the external network for the new floating IP:", ""}
+	for i, n := range m.netChoices {
+		cursor := "  "
+		style := lipgloss.NewStyle().Foreground(shared.ColorFg)
+		if i == m.netCursor {
+			cursor = "▸ "
+			style = style.Foreground(shared.ColorHighlight).Bold(true)
+		}
+		label := n.Name
+		if label == "" {
+			label = n.ID
+		}
+		lines = append(lines, cursor+style.Render(label))
+	}
+	back := "esc back"
+	if m.allocOnly {
+		back = "esc cancel"
+	}
+	lines = append(lines, "", shared.StyleHelp.Render("↑↓ navigate • enter allocate • "+back))
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) portChoiceView() string {
@@ -475,7 +613,43 @@ func (m Model) resolveTargets(fip *network.FloatingIP) tea.Cmd {
 				}
 			}
 		}
-		return targetsLoadedMsg{extNetID: extNetID, targets: targets}
+		return targetsLoadedMsg{extNetID: extNetID, targets: targets, nets: nets}
+	}
+}
+
+// fetchExternalNetworks lists the external networks for the allocate-only
+// picker.
+func (m Model) fetchExternalNetworks() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		nets, err := network.ListExternalNetworks(ctx, client)
+		if err != nil {
+			shared.Debugf("[fippicker] error listing external networks: %v", err)
+			return fetchErrMsg{err: err}
+		}
+		return netsLoadedMsg{nets: nets}
+	}
+}
+
+// allocate allocates a floating IP from extNetID without assigning it.
+func (m Model) allocate(extNetID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := shared.RequestCtx()
+		defer cancel()
+		shared.Debugf("[fippicker] allocating FIP from %s", extNetID)
+		fip, err := network.AllocateFloatingIP(ctx, client, extNetID)
+		rec := shared.AuditRecord{Action: audit.ActionAllocateFIP, ResourceType: "floating_ip", Err: err,
+			Details: map[string]string{"network_id": extNetID}}
+		if err != nil {
+			shared.Debugf("[fippicker] error allocating FIP: %v", err)
+			return allocateErrMsg{Audit: shared.Audits(rec), err: err}
+		}
+		rec.ResourceID, rec.ResourceName = fip.ID, fip.FloatingIP
+		shared.Debugf("[fippicker] allocated FIP %s", fip.FloatingIP)
+		return allocateDoneMsg{Audit: shared.Audits(rec), fipAddr: fip.FloatingIP}
 	}
 }
 

@@ -91,3 +91,15 @@ func testServerListFiltering(query string) serverlist.Model {
 	}
 	return l
 }
+
+func TestFloatingIPListAllocateOpensPicker(t *testing.T) {
+	m := newTestModel("dev", false)
+	m.client = &cloud.Client{}
+	m.view = viewFloatingIPList
+
+	res, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
+	updated := res.(Model)
+	if !updated.fipPicker.Active {
+		t.Fatal("ctrl+n on the floating IP list should open the allocate picker")
+	}
+}

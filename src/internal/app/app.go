@@ -756,7 +756,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openFIPReleaseConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Allocate) {
-				return m.doAllocateFIP()
+				return m.openFIPAllocate()
 			}
 			if key.Matches(msg, shared.Keys.Detach) {
 				return m.openFIPDisassociateConfirm()
