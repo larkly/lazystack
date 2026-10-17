@@ -306,6 +306,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 		gw = "" // sent as gateway_ip null
 	}
 	if gw != m.subnet.GatewayIP {
+		if gw != "" && !shared.ValidIP(gw) {
+			m.err = fmt.Sprintf(`Gateway %q is not a valid IP address (or "none")`, gw)
+			return m, nil
+		}
+		if gw != "" && !shared.IPInCIDR(gw, m.subnet.CIDR) {
+			m.err = fmt.Sprintf("Gateway %s is not inside %s", gw, m.subnet.CIDR)
+			return m, nil
+		}
 		opts.GatewayIP = &gw
 	}
 
@@ -319,9 +327,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 	if dnsRaw != "" {
 		for _, s := range strings.Split(dnsRaw, ",") {
 			s = strings.TrimSpace(s)
-			if s != "" {
-				dns = append(dns, s)
+			if s == "" {
+				continue
 			}
+			if !shared.ValidIP(s) {
+				m.err = fmt.Sprintf("DNS server %q is not a valid IP address", s)
+				return m, nil
+			}
+			dns = append(dns, s)
 		}
 	}
 	if !stringSliceEqual(dns, m.subnet.DNSNameservers) {
