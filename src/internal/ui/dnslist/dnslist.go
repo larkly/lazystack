@@ -15,10 +15,12 @@ import (
 )
 
 type zonesLoadedMsg struct {
+	seq   uint64
 	zones []zones.Zone
 }
 
 type zonesErrMsg struct {
+	seq uint64
 	err error
 }
 
@@ -45,6 +47,7 @@ type Model struct {
 	loading      bool
 	spinner      spinner.Model
 	err          error
+	refresh      shared.RefreshGate // zone list fetches
 }
 
 // New creates a DNS list model.
@@ -60,25 +63,49 @@ func New(client *gophercloud.ServiceClient) Model {
 
 // Init fetches zones.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchZones())
+	return tea.Batch(m.spinner.Tick, m.fetchZones(m.refresh.Seq()))
 }
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case zonesLoadedMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		m.loading = false
 		m.zones = msg.zones
 		m.err = nil
-		m.cursor = 0
-		m.scroll = 0
-		if len(m.zones) > 0 {
-			m.selectedZone = &m.zones[0]
-			return m, m.fetchRecordsets(m.zones[0].ID)
+		if len(m.zones) == 0 {
+			m.cursor, m.scroll = 0, 0
+			m.selectedZone = nil
+			m.recordsets = nil
+			return m, nil
 		}
-		return m, nil
+		// Keep the cursor on the zone it was on, found by ID; when that zone
+		// is gone, stay at the same position clamped to the new list.
+		prevID := ""
+		if m.selectedZone != nil {
+			prevID = m.selectedZone.ID
+			for i := range m.zones {
+				if m.zones[i].ID == prevID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		m.cursor = max(0, min(m.cursor, len(m.zones)-1))
+		m.scrollTo(m.cursor)
+		m.selectedZone = &m.zones[m.cursor]
+		if m.selectedZone.ID != prevID {
+			m.recordsets = nil
+		}
+		return m, m.fetchRecordsets(m.selectedZone.ID)
 
 	case zonesErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		m.loading = false
 		m.err = msg.err
 		return m, nil
@@ -100,6 +127,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg.err
 		return m, nil
+
+	case shared.TickMsg:
+		if m.loading || m.refresh.Busy() {
+			return m, nil
+		}
+		seq := m.refresh.Start()
+		return m, m.fetchZones(seq)
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -143,14 +177,7 @@ func (m Model) moveCursor(target int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	target = max(0, min(target, len(m.zones)-1))
-	visible := m.visibleRows()
-	if target < m.scroll {
-		m.scroll = target
-	}
-	if target >= m.scroll+visible {
-		m.scroll = target - visible + 1
-	}
-	m.scroll = max(0, m.scroll)
+	m.scrollTo(target)
 	if target == m.cursor && m.selectedZone != nil {
 		return m, nil
 	}
@@ -158,6 +185,18 @@ func (m Model) moveCursor(target int) (Model, tea.Cmd) {
 	m.selectedZone = &m.zones[m.cursor]
 	m.loading = true
 	return m, tea.Batch(m.spinner.Tick, m.fetchRecordsets(m.zones[m.cursor].ID))
+}
+
+// scrollTo adjusts the scroll offset so that zone row i is visible.
+func (m *Model) scrollTo(i int) {
+	visible := m.visibleRows()
+	if i < m.scroll {
+		m.scroll = i
+	}
+	if i >= m.scroll+visible {
+		m.scroll = i - visible + 1
+	}
+	m.scroll = max(0, m.scroll)
 }
 
 func (m Model) visibleRows() int {
@@ -280,7 +319,8 @@ func (m Model) isSelectedZone(zoneID string) bool {
 // ForceRefresh triggers a reload.
 func (m *Model) ForceRefresh() tea.Cmd {
 	m.loading = true
-	return tea.Batch(m.spinner.Tick, m.fetchZones())
+	seq := m.refresh.Start()
+	return tea.Batch(m.spinner.Tick, m.fetchZones(seq))
 }
 
 // SetSize updates dimensions.
@@ -289,20 +329,20 @@ func (m *Model) SetSize(w, h int) {
 	m.height = h
 }
 
-func (m Model) fetchZones() tea.Cmd {
+func (m Model) fetchZones(seq uint64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
 		allPages, err := zones.List(client, nil).AllPages(ctx)
 		if err != nil {
-			return zonesErrMsg{err: err}
+			return zonesErrMsg{seq: seq, err: err}
 		}
 		z, err := zones.ExtractZones(allPages)
 		if err != nil {
-			return zonesErrMsg{err: err}
+			return zonesErrMsg{seq: seq, err: err}
 		}
-		return zonesLoadedMsg{zones: z}
+		return zonesLoadedMsg{seq: seq, zones: z}
 	}
 }
 
