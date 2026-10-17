@@ -146,7 +146,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case sgLoadErrMsg:
 		m.loadingSGs = false
-		m.sgLoadErr = msg.err.Error()
+		m.sgLoadErr = shared.ParseError(msg.err).FriendlyMessage
 		m.err = "Failed to load security groups: " + m.sgLoadErr + " (the server default will apply)"
 		return m, nil
 	case portCreatedMsg:
@@ -157,7 +157,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case portCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		if m.sgLoadErr != "" {
 			m.err += " (security groups could not be loaded; the server default was requested)"
 		}

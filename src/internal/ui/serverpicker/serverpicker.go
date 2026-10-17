@@ -75,7 +75,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case fetchErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case attachDoneMsg:
@@ -90,7 +90,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case attachErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:

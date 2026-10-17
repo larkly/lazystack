@@ -143,7 +143,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case metaOpErrMsg:
 		m.submitting = false
 		m.saved = false
-		m.err = fmt.Sprintf("%s %s: %v", msg.action, msg.name, msg.err)
+		m.err = fmt.Sprintf("%s %s: %s", msg.action, msg.name, shared.ParseError(msg.err).FriendlyMessage)
 		if msg.setKey != "" {
 			m.metadata[msg.setKey] = msg.setValue
 			m.mode = ""
@@ -362,7 +362,7 @@ func (m *Model) updateMetadatum() tea.Cmd {
 				return metaOpErrMsg{
 					action:   "Rename metadata",
 					name:     name,
-					err:      fmt.Errorf("saved %q but failed to remove old key %q: %w", newKey, oldKey, dr.Err),
+					err:      shared.ContextErrorf("saved %q but failed to remove old key %q: %v", newKey, oldKey, dr.Err),
 					setKey:   newKey,
 					setValue: value,
 				}

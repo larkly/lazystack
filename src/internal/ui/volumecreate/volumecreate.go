@@ -138,7 +138,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case fetchErrMsg:
 		m.loading--
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 	case azsLoadedMsg:
 		// A failed zone lookup is not fatal: the volume can still be
@@ -148,7 +148,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.azs = msg.azs
 		m.azErr = ""
 		if msg.err != nil {
-			m.azErr = msg.err.Error()
+			m.azErr = shared.ParseError(msg.err).FriendlyMessage
 		}
 		if m.selectedAZ >= len(m.azs) {
 			m.selectedAZ = -1
@@ -164,7 +164,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, shared.CreatedCmd("volumelist", msg.vol.ID, name)
 	case volumeCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:

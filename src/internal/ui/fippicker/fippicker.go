@@ -210,7 +210,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case associateErrMsg:
 		m.submitting = false
 		m.resolving = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case allocateDoneMsg:
@@ -228,7 +228,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case allocateErrMsg:
 		m.submitting = false
 		m.resolving = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		if m.allocOnly {
 			// A plain allocation; the server flow keeps the raw text,
 			// which says whether a leftover IP was released.
@@ -743,10 +743,10 @@ func releaseAfterFailure(client *gophercloud.ServiceClient, fip *network.Floatin
 	defer cancel()
 	if releaseErr = network.ReleaseFloatingIP(ctx, client, fip.ID); releaseErr != nil {
 		shared.Debugf("[fippicker] error releasing unassociated FIP %s: %v", fip.ID, releaseErr)
-		return fmt.Errorf("%w; floating IP %s (ID %s) is still allocated, release it manually: %v", cause, fip.FloatingIP, fip.ID, releaseErr), releaseErr
+		return shared.ContextErrorf("%v; floating IP %s (ID %s) is still allocated, release it manually: %v", cause, fip.FloatingIP, fip.ID, releaseErr), releaseErr
 	}
 	shared.Debugf("[fippicker] released unassociated FIP %s", fip.ID)
-	return fmt.Errorf("%w (allocated floating IP %s was released)", cause, fip.FloatingIP), nil
+	return shared.ContextErrorf("%v (allocated floating IP %s was released)", cause, fip.FloatingIP), nil
 }
 
 // Hints returns the key hints shown in the status bar.

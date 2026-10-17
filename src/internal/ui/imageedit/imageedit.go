@@ -163,7 +163,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case imageEditErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		shared.Debugf("[imageedit] error: %v", msg.err)
 		return m, nil
 

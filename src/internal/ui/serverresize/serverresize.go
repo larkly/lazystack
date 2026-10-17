@@ -1,6 +1,7 @@
 package serverresize
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -100,7 +101,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case fetchErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case resizeDoneMsg:
@@ -112,7 +113,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case resizeErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -248,7 +249,7 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 		ids = m.serverIDs
 		cmd = func() tea.Msg {
 			shared.Debugf("[serverresize] resizing %d servers to flavor %s", len(ids), flavorID)
-			var errs []string
+			var errs, friendly []string
 			var recs []shared.AuditRecord
 			for _, id := range ids {
 				ctx, cancel := shared.RequestCtx()
@@ -257,12 +258,13 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 				recs = append(recs, shared.AuditRecord{Action: audit.ActionResize, ResourceType: "server", ResourceID: id, Err: err})
 				if err != nil {
 					errs = append(errs, err.Error())
+					friendly = append(friendly, shared.ShortID(id)+": "+shared.ParseError(err).FriendlyMessage)
 				}
 			}
 			rec := shared.Audits(recs...).WithDetails(details)
 			if len(errs) > 0 {
 				shared.Debugf("[serverresize] error resizing servers: %s", strings.Join(errs, "; "))
-				return resizeErrMsg{Audit: rec, err: fmt.Errorf("%s", strings.Join(errs, "; "))}
+				return resizeErrMsg{Audit: rec, err: shared.ContextError(errors.New(strings.Join(errs, "; ")), strings.Join(friendly, "; "))}
 			}
 			shared.Debugf("[serverresize] resized %d servers to flavor %s", len(ids), flavorID)
 			return resizeDoneMsg{Audit: rec, name: name}

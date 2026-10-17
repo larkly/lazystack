@@ -117,7 +117,7 @@ func TestCreateFailureKeepsSecurityGroupContext(t *testing.T) {
 	msg := runCreate(cmd)
 	m, _ = m.Update(msg)
 	view := m.View()
-	if !strings.Contains(view, "quota exceeded") || !strings.Contains(view, "server default") {
+	if !strings.Contains(view, "Quota exceeded") || !strings.Contains(view, "server default") {
 		t.Fatalf("create failure lost context:\n%s", view)
 	}
 }

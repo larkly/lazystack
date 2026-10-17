@@ -122,6 +122,15 @@ func ParseError(err error) *ParsedError {
 		}
 	}
 
+	if ce, ok := asContextError(err); ok {
+		return &ParsedError{
+			FriendlyMessage: ce.friendly,
+			RawError:        urlPattern.ReplaceAllString(ce.raw, "[endpoint]"),
+			HTTPStatusCode:  httpStatus(err),
+			Category:        "unknown",
+		}
+	}
+
 	raw := err.Error()
 	lowerRaw := strings.ToLower(raw)
 

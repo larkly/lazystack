@@ -89,7 +89,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case fetchErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case rebuildDoneMsg:
@@ -102,7 +102,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case rebuildErrMsg:
 		m.submitting = false
 		m.confirming = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:

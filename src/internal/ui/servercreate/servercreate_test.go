@@ -228,6 +228,9 @@ func TestPartialTemplatedCreateReportsCreatedIDs(t *testing.T) {
 			t.Fatalf("error %q missing %q", m.err, want)
 		}
 	}
+	if strings.Contains(m.err, "http") {
+		t.Fatalf("error %q leaks the raw API error", m.err)
+	}
 	if m.submitting {
 		t.Fatal("still submitting after partial failure")
 	}

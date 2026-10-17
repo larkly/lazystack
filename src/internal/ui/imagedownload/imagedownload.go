@@ -247,7 +247,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.downloading = false
 		m.confirmCancel = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		shared.Debugf("[imagedownload] error: %v", msg.err)
 		if m.Active {
 			return m, nil

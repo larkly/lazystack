@@ -91,7 +91,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case fetchErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case interfaceAddedMsg:
@@ -103,7 +103,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case interfaceAddErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -338,7 +338,7 @@ func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, rout
 			cleanupCancel()
 			if delErr != nil {
 				shared.Debugf("[subnetpicker] cleanup of port %s failed: %v", port.ID, delErr)
-				err = fmt.Errorf("%w (cleanup failed, port %s may be left behind: %v)", err, port.ID, delErr)
+				err = shared.ContextErrorf("%v (cleanup failed, port %s may be left behind: %v)", err, port.ID, delErr)
 			}
 			return interfaceAddErrMsg{Audit: record(port.ID, err), err: err}
 		}

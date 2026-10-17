@@ -252,7 +252,7 @@ func TestResizeErrorUnlocksAndRetries(t *testing.T) {
 		t.Fatalf("posts=%d", rec.count())
 	}
 	m, _ = m.Update(msgs[0])
-	if m.submitting || !m.Active || !strings.Contains(m.View(), "resizing server") {
+	if m.submitting || !m.Active || !strings.Contains(m.View(), "Conflict") {
 		t.Fatalf("error not surfaced/unlocked: submitting=%v\n%s", m.submitting, m.View())
 	}
 	rec.fail = false

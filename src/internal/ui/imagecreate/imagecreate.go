@@ -238,7 +238,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.uploading = false
 		m.submitting = false
 		m.confirmCancel = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		shared.Debugf("[imagecreate] error: %v", msg.err)
 		if m.Active {
 			return m, nil
@@ -882,7 +882,7 @@ func cleanupFailedImage(client *gophercloud.ServiceClient, imageID string, prima
 	defer cancel()
 	if err := image.DeleteImage(ctx, client, imageID); err != nil {
 		shared.Debugf("[imagecreate] cleanup of image %s failed: %v", imageID, err)
-		return fmt.Errorf("%w (cleanup failed, image %s may be left behind: %v)", primary, imageID, err)
+		return shared.ContextErrorf("%v (cleanup failed, image %s may be left behind: %v)", primary, imageID, err)
 	}
 	return primary
 }

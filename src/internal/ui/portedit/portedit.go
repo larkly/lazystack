@@ -167,7 +167,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case sgLoadErrMsg:
 		m.loadingSGs = false
-		m.err = "Failed to load security groups: " + msg.err.Error()
+		m.err = "Failed to load security groups: " + shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 	case portUpdatedMsg:
 		m.submitting = false
@@ -177,7 +177,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case portUpdateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting || m.loadingSGs {

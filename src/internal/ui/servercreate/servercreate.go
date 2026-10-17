@@ -250,7 +250,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case fetchErrMsg:
 		m.loading--
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case serverCreatedMsg:
@@ -265,7 +265,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, shared.CreatedCmd("serverlist", msg.server.ID, msg.label)
 	case serverCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -973,7 +973,7 @@ func createNamed(client *gophercloud.ServiceClient, names []string, build func(s
 			if len(created) == 0 {
 				return serverCreateErrMsg{Audit: shared.Audits(recs...), err: err}
 			}
-			return serverCreateErrMsg{Audit: shared.Audits(recs...), err: fmt.Errorf("created %d of %d servers (%s); %s failed: %w",
+			return serverCreateErrMsg{Audit: shared.Audits(recs...), err: shared.ContextErrorf("created %d of %d servers (%s); %s failed: %v",
 				len(created), len(names), strings.Join(created, ", "), n, err)}
 		}
 		shared.Debugf("[servercreate] created server %q (id=%s)", n, srv.ID)

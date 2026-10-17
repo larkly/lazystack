@@ -298,7 +298,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case memberServersErrMsg:
 		m.serversLoading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		m.applyServerFilter()
 		return m, nil
 
