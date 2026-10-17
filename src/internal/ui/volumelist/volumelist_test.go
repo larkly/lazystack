@@ -2,6 +2,7 @@ package volumelist
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -117,5 +118,23 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	}
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")
+	}
+}
+
+// The view gets the full terminal height; the root model prepends a tab bar
+// and keeps the last line for the status bar, so a full list must render in
+// at most height-2 lines or its bottom row is clipped.
+func TestFullListFitsBetweenTabBarAndStatusBar(t *testing.T) {
+	const height = 24
+	vols := make([]volume.Volume, 50)
+	for i := range vols {
+		vols[i] = volume.Volume{ID: fmt.Sprintf("v-%02d", i), Name: fmt.Sprintf("vol-%02d", i), Status: "available", Size: 1}
+	}
+	m := New(nil, nil, time.Minute)
+	m.SetSize(120, height)
+	m, _ = m.Update(volumesLoadedMsg{volumes: vols})
+	lines := strings.Split(strings.TrimSuffix(m.View(), "\n"), "\n")
+	if len(lines) > height-2 {
+		t.Fatalf("full list rendered %d lines, want at most %d", len(lines), height-2)
 	}
 }

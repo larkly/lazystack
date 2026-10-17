@@ -236,12 +236,11 @@ func (m *Model) ensureVisible() {
 	}
 }
 
+// tableHeight is the number of floating IP rows that fit: the app gives the view
+// the full terminal height and adds a tab bar above it and a status bar below
+// it, and the view itself uses title, blank line, header and separator.
 func (m Model) tableHeight() int {
-	h := m.height - 5
-	if h < 1 {
-		h = 1
-	}
-	return h
+	return max(1, m.height-6)
 }
 
 // View renders the floating IP list.

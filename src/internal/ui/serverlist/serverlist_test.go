@@ -330,3 +330,17 @@ func TestHiddenSelectionFallsBackToCursor(t *testing.T) {
 		t.Fatalf("hints = %q, want no selection count", h)
 	}
 }
+
+// The view gets the full terminal height; the root model prepends a tab bar
+// and keeps the last line for the status bar, so a full list must render in
+// at most height-2 lines or its bottom row is clipped.
+func TestFullListFitsBetweenTabBarAndStatusBar(t *testing.T) {
+	const height = 24
+	m := New(nil, nil, 5*time.Second)
+	m.SetSize(120, height)
+	m, _ = m.Update(serversLoadedMsg{seq: m.refresh.Seq(), servers: fiftyServers()})
+	lines := strings.Split(strings.TrimSuffix(m.View(), "\n"), "\n")
+	if len(lines) > height-2 {
+		t.Fatalf("full list rendered %d lines, want at most %d", len(lines), height-2)
+	}
+}
