@@ -5,6 +5,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 )
 
@@ -30,6 +31,15 @@ func listFilterCases() []listFilterCase {
 				m.volumeList, _ = m.volumeList.Update(keyText('/'))
 			},
 			value: func(m Model) string { return m.volumeList.FilterValue() },
+		},
+		{
+			name: "floating IPs",
+			open: func(m *Model) {
+				m.view = viewFloatingIPList
+				m.floatingIPList = floatingiplist.New(nil, 5*time.Second)
+				m.floatingIPList, _ = m.floatingIPList.Update(keyText('/'))
+			},
+			value: func(m Model) string { return m.floatingIPList.FilterValue() },
 		},
 	}
 }

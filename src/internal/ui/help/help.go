@@ -213,6 +213,8 @@ var allSections = []section{
 		name: "Floating IPs",
 		binds: []bind{
 			l("↑/k ↓/j", "navigate"),
+			k(&shared.Keys.Filter, "filter"),
+			l("esc", "clear filter"),
 			k(&shared.Keys.Allocate, "allocate new IP"),
 			k(&shared.Keys.Detach, "disassociate IP"),
 			k(&shared.Keys.Delete, "release floating IP"),

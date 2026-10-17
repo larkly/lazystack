@@ -257,6 +257,7 @@ func TestListViewsDocumentFilterAndSort(t *testing.T) {
 		sort          bool
 	}{
 		{"volumelist", "Volume List", false},
+		{"floatingiplist", "Floating IPs", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.view, func(t *testing.T) {

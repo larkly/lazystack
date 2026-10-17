@@ -14,6 +14,7 @@ import (
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
+	"github.com/larkly/lazystack/internal/ui/filterbar"
 )
 
 type fipsLoadedMsg struct {
@@ -31,7 +32,9 @@ var fipSortColumns = []string{"floatingip", "status", "fixedip", "portid"}
 // Model is the floating IP list view.
 type Model struct {
 	client          *gophercloud.ServiceClient
-	fips            []network.FloatingIP
+	allFIPs         []network.FloatingIP // every floating IP, as last fetched
+	fips            []network.FloatingIP // the listed ones: filtered and sorted
+	filter          filterbar.Model
 	cursor          int
 	width           int
 	height          int
@@ -54,8 +57,15 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 		spinner:         s,
 		refreshInterval: refreshInterval,
 		order:           shared.NewSortState(),
+		filter:          filterbar.New(),
 	}
 }
+
+// IsFiltering reports whether the "/" filter input has focus.
+func (m Model) IsFiltering() bool { return m.filter.Active() }
+
+// FilterValue is the current filter text.
+func (m Model) FilterValue() string { return m.filter.Value() }
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
@@ -94,15 +104,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[floatingiplist] loaded %d floating IPs", len(msg.fips))
-		cursorID := m.cursorID()
 		m.loading = false
-		m.fips = msg.fips
+		m.allFIPs = msg.fips
 		m.err = nil
-		m.sortFIPs()
-		if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
-			m.cursor = i
-		}
-		m.cursor = shared.ClampCursor(m.cursor, len(m.fips))
+		m.applyFilter()
 		return m, nil
 
 	case fipsErrMsg:
@@ -132,8 +137,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case sortClearMsg:
@@ -141,7 +145,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.filter.Active() {
+			var cmd tea.Cmd
+			m.filter, cmd = m.filter.Update(msg)
+			m.applyFilter()
+			return m, cmd
+		}
 		switch {
+		case key.Matches(msg, shared.Keys.Filter):
+			return m, m.filter.Start()
+		case key.Matches(msg, shared.Keys.Back):
+			if m.filter.Clear() {
+				m.applyFilter()
+			}
 		case key.Matches(msg, shared.Keys.Sort):
 			m.order = shared.NextSort(m.order, len(fipSortColumns))
 			return m.resort()
@@ -195,6 +211,26 @@ func (m Model) rowIDs() []string {
 	return ids
 }
 
+// applyFilter rebuilds the listed floating IPs from every floating IP under
+// the current filter and sort, keeping the cursor on the same one while it
+// is still listed and the viewport where it was.
+func (m *Model) applyFilter() {
+	cursorID := m.cursorID()
+	m.fips = m.fips[:0:0]
+	for _, f := range m.allFIPs {
+		if m.filter.Match(f.FloatingIP, f.FixedIP, f.Status, f.PortID, f.ID) {
+			m.fips = append(m.fips, f)
+		}
+	}
+	m.sortFIPs()
+	if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
+		m.cursor = i
+	}
+	m.cursor = shared.ClampCursor(m.cursor, len(m.fips))
+	m.scrollOff = min(m.scrollOff, max(0, len(m.fips)-m.tableHeight()))
+	m.ensureVisible()
+}
+
 // resort re-sorts the list after a sort change, keeping the cursor on the
 // same floating IP, and highlights the sort column for a moment.
 func (m Model) resort() (Model, tea.Cmd) {
@@ -219,9 +255,14 @@ func (m *Model) ensureVisible() {
 
 // tableHeight is the number of floating IP rows that fit: the app gives the view
 // the full terminal height and adds a tab bar above it and a status bar below
-// it, and the view itself uses title, blank line, header and separator.
+// it, and the view itself uses title, error/blank line, header and
+// separator, plus the filter line while a filter is shown.
 func (m Model) tableHeight() int {
-	return max(1, m.height-6)
+	h := m.height - 6
+	if m.filter.Visible() {
+		h--
+	}
+	return max(1, h)
 }
 
 // View renders the floating IP list.
@@ -235,9 +276,16 @@ func (m Model) View() string {
 	count := fmt.Sprintf(" (%d)", len(m.fips))
 	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
 	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
+	if bar := m.filter.View(); bar != "" {
+		b.WriteString(bar + "\n")
+	}
 
 	if len(m.fips) == 0 && !m.loading {
-		b.WriteString(shared.StyleHelp.Render("  No floating IPs found.") + "\n")
+		msg := "  No floating IPs found."
+		if m.filter.Value() != "" {
+			msg = "  No floating IPs match the filter."
+		}
+		b.WriteString(shared.StyleHelp.Render(msg) + "\n")
 		return b.String()
 	}
 
@@ -374,9 +422,13 @@ func (m *Model) ForceRefresh() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.filter.SetWidth(w)
 }
 
 // Hints returns key hints.
 func (m Model) Hints() string {
-	return "↑↓ navigate • ^n allocate • ^t disassociate • ^d release • R refresh • ? help"
+	if m.filter.Active() {
+		return "enter confirm • esc clear"
+	}
+	return "↑↓ navigate • / filter • s/S sort • ^n allocate • ^t disassociate • ^d release • R refresh • ? help"
 }
