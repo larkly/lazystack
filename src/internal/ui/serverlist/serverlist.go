@@ -299,7 +299,11 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		m.ensureVisible()
 	case key.Matches(msg, shared.Keys.Back):
-		if len(m.selected) > 0 {
+		// Clear one layer at a time: the committed filter, then the selection.
+		if m.filter.Value() != "" {
+			m.filter.SetValue("")
+			m.applyFilter()
+		} else if len(m.selected) > 0 {
 			m.ClearSelection()
 		}
 	case key.Matches(msg, shared.Keys.Filter):
@@ -971,6 +975,12 @@ func (m *Model) SelectIDs(ids []string) {
 	for _, id := range ids {
 		m.selected[id] = true
 	}
+}
+
+// HasClearableState reports whether esc has something to clear on the list
+// (a committed filter or a selection) rather than meaning back-navigation.
+func (m Model) HasClearableState() bool {
+	return m.filter.Value() != "" || len(m.selected) > 0
 }
 
 // SelectionCount returns the number of selected servers.

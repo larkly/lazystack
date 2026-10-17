@@ -296,6 +296,42 @@ func TestServerListEscClearsSelection(t *testing.T) {
 	}
 }
 
+// Esc peels back list state one layer at a time: a committed filter first,
+// then the selection, and only then does it navigate back.
+func TestServerListEscClearsCommittedFilterThenSelection(t *testing.T) {
+	m := serverListWithServers(t)
+	m.returnToView = viewServerDetail
+	m.serverDetail = testServerDetailWithServer("srv-1", "srv-1")
+	m, _ = typeKeys(t, m, " ", "/", "l", "enter")
+	if m.serverList.IsFiltering() || m.serverList.SelectionCount() != 1 || !strings.Contains(m.statusBar.Hint, "selected") {
+		t.Fatalf("setup: filtering=%v selection=%d hint=%q", m.serverList.IsFiltering(), m.serverList.SelectionCount(), m.statusBar.Hint)
+	}
+	if !strings.Contains(m.serverList.View(), "filter: l") {
+		t.Fatal("setup: filter not committed")
+	}
+
+	m, _ = typeKeys(t, m, "esc")
+	if m.view != viewServerList || strings.Contains(m.serverList.View(), "filter: l") {
+		t.Fatalf("first esc: view=%v, want the filter cleared on the server list", m.view)
+	}
+	if m.serverList.SelectionCount() != 1 {
+		t.Fatalf("first esc cleared the selection (%d left), want the filter only", m.serverList.SelectionCount())
+	}
+
+	m, _ = typeKeys(t, m, "esc")
+	if m.view != viewServerList || m.serverList.SelectionCount() != 0 {
+		t.Fatalf("second esc: view=%v selection=%d, want selection cleared", m.view, m.serverList.SelectionCount())
+	}
+	if strings.Contains(m.statusBar.Hint, "selected") {
+		t.Fatalf("hint still advertises a selection: %q", m.statusBar.Hint)
+	}
+
+	m, _ = typeKeys(t, m, "esc")
+	if m.view != viewServerDetail {
+		t.Fatalf("third esc should return to detail, got view %v", m.view)
+	}
+}
+
 func TestServerListEscInFilterClearsFilterNotSelection(t *testing.T) {
 	m := serverListWithServers(t)
 	m, _ = typeKeys(t, m, " ", "/", "a")

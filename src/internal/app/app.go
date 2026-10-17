@@ -496,11 +496,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.textInputFocused() {
 				return m.updateActiveView(msg)
 			}
-			// Server list: esc clears selection when items are selected
-			if m.view == viewServerList && m.serverList.SelectionCount() > 0 && key.Matches(msg, shared.Keys.Back) {
-				m.serverList.ClearSelection()
-				m.statusBar.Hint = m.serverList.Hints()
-				return m, nil
+			// Server list: esc clears a committed filter, then the selection,
+			// before it means back-navigation; the list decides the order.
+			if m.view == viewServerList && m.serverList.HasClearableState() && key.Matches(msg, shared.Keys.Back) {
+				return m.updateActiveView(msg)
 			}
 			// Volume list: esc clears selection when items are selected
 			if m.view == viewVolumeList && m.volumeList.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {

@@ -210,3 +210,64 @@ func TestRefreshKeepsCursorRowVisible(t *testing.T) {
 	m, _ = m.Update(imageNamesMsg{"img": "ubuntu"})
 	assertVisible("after image names")
 }
+
+// commitFilter types query into the filter and confirms it with enter, so the
+// filter stays applied after filter input mode ends.
+func commitFilter(t *testing.T, m Model, query string) Model {
+	t.Helper()
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: '/'}))
+	for _, r := range query {
+		m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if m.filtering || m.filter.Value() != query {
+		t.Fatalf("setup: filtering=%v filter=%q, want committed %q", m.filtering, m.filter.Value(), query)
+	}
+	return m
+}
+
+func TestEscClearsCommittedFilter(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.servers = []compute.Server{
+		{ID: "s-1", Name: "alpha"},
+		{ID: "s-2", Name: "beta"},
+	}
+	m.applyFilter()
+	m = commitFilter(t, m, "alp")
+	if len(m.filtered) != 1 {
+		t.Fatalf("setup: filtered len = %d, want 1", len(m.filtered))
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	if got := m.filter.Value(); got != "" {
+		t.Fatalf("filter = %q after esc, want cleared", got)
+	}
+	if len(m.filtered) != len(m.servers) {
+		t.Fatalf("filtered len = %d after esc, want %d", len(m.filtered), len(m.servers))
+	}
+}
+
+// With both a committed filter and a selection, esc clears the filter first
+// and the selection on the next press.
+func TestEscClearsFilterBeforeSelection(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.servers = []compute.Server{
+		{ID: "s-1", Name: "alpha"},
+		{ID: "s-2", Name: "beta"},
+	}
+	m.applyFilter()
+	m = commitFilter(t, m, "alp")
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	if m.SelectionCount() != 1 {
+		t.Fatalf("setup: selection = %d, want 1", m.SelectionCount())
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	if m.filter.Value() != "" || m.SelectionCount() != 1 {
+		t.Fatalf("first esc: filter=%q selection=%d, want filter cleared and selection kept", m.filter.Value(), m.SelectionCount())
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	if m.SelectionCount() != 0 {
+		t.Fatalf("second esc: selection = %d, want cleared", m.SelectionCount())
+	}
+}
