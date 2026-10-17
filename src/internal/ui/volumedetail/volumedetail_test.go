@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/testutil"
 	"github.com/larkly/lazystack/internal/volume"
@@ -106,8 +107,8 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	m, _ = m.Update(volumeDetailLoadedMsg{seq: m.refresh.Seq(), volumeID: "vol-1", vol: &volume.Volume{ID: "vol-1", Status: "in-use"}})
 	m, _ = m.Update(volumeDetailLoadedMsg{seq: staleSeq, volumeID: "vol-1", vol: &volume.Volume{ID: "vol-1", Status: "available"}})
 	m, _ = m.Update(volumeDetailErrMsg{seq: staleSeq, volumeID: "vol-1", err: fmt.Errorf("stale")})
-	if m.volume.Status != "in-use" || m.err != "" {
-		t.Fatalf("stale response applied: status=%q err=%q", m.volume.Status, m.err)
+	if m.volume.Status != "in-use" || m.err != nil {
+		t.Fatalf("stale response applied: status=%q err=%v", m.volume.Status, m.err)
 	}
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")
@@ -127,8 +128,8 @@ func TestReplyForOtherVolumeIsIgnored(t *testing.T) {
 	// A reply tagged with this view's ID but carrying another volume is
 	// rejected as well.
 	m, _ = m.Update(volumeDetailLoadedMsg{seq: seq, volumeID: "vol-b", vol: &volume.Volume{ID: "vol-a", Name: "alpha"}})
-	if m.volume != nil || m.err != "" || !m.loading {
-		t.Fatalf("other volume's reply applied: volume=%+v err=%q loading=%v", m.volume, m.err, m.loading)
+	if m.volume != nil || m.err != nil || !m.loading {
+		t.Fatalf("other volume's reply applied: volume=%+v err=%v loading=%v", m.volume, m.err, m.loading)
 	}
 	if m.SelectedVolumeName() != "vol-b" {
 		t.Fatalf("SelectedVolumeName = %q, want vol-b", m.SelectedVolumeName())
@@ -167,5 +168,29 @@ func TestStalledFetchIsCutOffByDeadline(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("stalled fetch was never cut off")
+	}
+}
+
+// A failed refresh keeps the last good detail on screen and shows the error
+// as one friendly line above it; the next good load clears it.
+func TestRefreshErrorKeepsDetailAndShowsFriendlyError(t *testing.T) {
+	m := loadedModel(t, 0, 40)
+
+	m.ForceRefresh()
+	apiErr := gophercloud.ErrUnexpectedResponseCode{Actual: 503}
+	m, _ = m.Update(volumeDetailErrMsg{seq: m.refresh.Seq(), volumeID: "vol-1", err: apiErr})
+	view := m.View()
+	friendly := shared.ParseError(apiErr).FriendlyMessage
+	if !strings.Contains(view, "data") || !strings.Contains(view, "available") {
+		t.Fatalf("failed refresh wiped the detail:\n%s", view)
+	}
+	if !strings.Contains(view, friendly) {
+		t.Fatalf("view lacks the friendly error %q:\n%s", friendly, view)
+	}
+
+	m.ForceRefresh()
+	m, _ = m.Update(volumeDetailLoadedMsg{seq: m.refresh.Seq(), volumeID: "vol-1", vol: &volume.Volume{ID: "vol-1", Name: "data", Status: "available"}})
+	if strings.Contains(m.View(), friendly) {
+		t.Fatalf("successful load did not clear the error:\n%s", m.View())
 	}
 }

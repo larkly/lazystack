@@ -25,7 +25,7 @@ type Model struct {
 	scroll  int
 	loading bool
 	spinner spinner.Model
-	err     string
+	err     error
 	width   int
 	height  int
 }
@@ -54,12 +54,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case keypairLoadedMsg:
 		m.loading = false
 		m.kp = msg.kp
+		m.err = nil
 		m.clampScroll()
 		shared.Debugf("[keypairdetail] loaded keypair %q", m.name)
 		return m, nil
 	case keypairErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		shared.Debugf("[keypairdetail] error: %v", msg.err)
 		return m, nil
 	case spinner.TickMsg:
@@ -124,12 +125,8 @@ func (m Model) View() string {
 	if m.loading {
 		title += " " + m.spinner.View()
 	}
-	b.WriteString(title + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if m.kp == nil {
 		return b.String()

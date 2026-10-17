@@ -137,7 +137,7 @@ type Model struct {
 	width           int
 	height          int
 	scroll          int // info panel scroll
-	err             string
+	err             error
 	refreshInterval time.Duration
 	pendingAction   string
 
@@ -280,7 +280,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		m.server = msg.server
-		m.err = ""
+		m.err = nil
 		m.clampScrolls()
 		// Fetch volume names if we have attachments and haven't yet
 		if msg.server != nil && len(msg.server.VolAttach) > 0 && m.blockClient != nil {
@@ -300,7 +300,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case serverDetailErrMsg:
 		shared.Debugf("[serverdetail] serverDetailErrMsg: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case consoleLoadedMsg:
@@ -755,14 +755,12 @@ func (m Model) View() string {
 	if m.loading {
 		title += " " + m.spinner.View()
 	}
-	b.WriteString(title + "\n\n")
+	b.WriteString(title + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
-
-	if m.server == nil && m.loading {
+	// Before the first successful load there is nothing to lay out: show the
+	// title with the spinner or the error line only.
+	if m.server == nil && (m.loading || m.err != nil) {
 		return b.String()
 	}
 
@@ -1642,7 +1640,7 @@ func (m *Model) SetServer(s *compute.Server) {
 	}
 	m.server = s
 	m.loading = false
-	m.err = ""
+	m.err = nil
 }
 
 // SetPendingAction marks an action as in-progress.

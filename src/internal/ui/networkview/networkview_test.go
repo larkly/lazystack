@@ -157,8 +157,8 @@ func TestRefreshGateDropsStaleReplies(t *testing.T) {
 	}
 	m, _ = m.Update(networksErrMsg{seq: 1, err: errors.New("old list error")})
 	m, _ = m.Update(detailErrMsg{seq: 2, netID: "n", err: errors.New("old detail error")})
-	if m.err != "" || m.detailErr != "" {
-		t.Fatalf("stale error applied: err=%q detailErr=%q", m.err, m.detailErr)
+	if m.err != nil || m.detailErr != "" {
+		t.Fatalf("stale error applied: err=%v detailErr=%q", m.err, m.detailErr)
 	}
 	if m.refresh.Busy() || m.detailRefresh.Busy() {
 		t.Fatal("newest replies did not end the in-flight period")

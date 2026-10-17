@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -163,8 +164,8 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	m, _ = m.Update(serversLoadedMsg{seq: newSeq, servers: []compute.Server{{ID: "new", Name: "new"}}})
 	m, _ = m.Update(serversLoadedMsg{seq: staleSeq, servers: []compute.Server{{ID: "old", Name: "old"}}})
 	m, _ = m.Update(serversErrMsg{seq: staleSeq, err: errors.New("stale failure")})
-	if len(m.servers) != 1 || m.servers[0].ID != "new" || m.err != "" {
-		t.Fatalf("stale response applied: servers=%v err=%q", m.servers, m.err)
+	if len(m.servers) != 1 || m.servers[0].ID != "new" || m.err != nil {
+		t.Fatalf("stale response applied: servers=%v err=%v", m.servers, m.err)
 	}
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")
@@ -342,5 +343,31 @@ func TestFullListFitsBetweenTabBarAndStatusBar(t *testing.T) {
 	lines := strings.Split(strings.TrimSuffix(m.View(), "\n"), "\n")
 	if len(lines) > height-2 {
 		t.Fatalf("full list rendered %d lines, want at most %d", len(lines), height-2)
+	}
+}
+
+// A failed refresh must not wipe the table: the last good rows stay and the
+// error shows as one friendly line, which the next good load clears.
+func TestRefreshErrorKeepsRowsAndShowsFriendlyError(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = m.Update(serversLoadedMsg{seq: m.refresh.Seq(), servers: []compute.Server{{ID: "s-1", Name: "web-01", Status: "ACTIVE"}}})
+
+	seq := m.refresh.Start()
+	apiErr := gophercloud.ErrUnexpectedResponseCode{Actual: 503}
+	m, _ = m.Update(serversErrMsg{seq: seq, err: apiErr})
+	view := m.View()
+	friendly := shared.ParseError(apiErr).FriendlyMessage
+	if !strings.Contains(view, "web-01") {
+		t.Fatalf("failed refresh wiped the rows:\n%s", view)
+	}
+	if !strings.Contains(view, friendly) {
+		t.Fatalf("view lacks the friendly error %q:\n%s", friendly, view)
+	}
+
+	seq = m.refresh.Start()
+	m, _ = m.Update(serversLoadedMsg{seq: seq, servers: []compute.Server{{ID: "s-1", Name: "web-01", Status: "ACTIVE"}}})
+	if strings.Contains(m.View(), friendly) {
+		t.Fatalf("successful load did not clear the error:\n%s", m.View())
 	}
 }

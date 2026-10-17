@@ -20,9 +20,9 @@ func TestUpdateNavigationConfirmationAndViews(t *testing.T) {
 	m.cursor = 9
 	m.pending = &pendingAction{kind: actionDelete, user: compute.User{ID: "old"}}
 	m.busy = true
-	m.err = "old error"
+	m.err = errors.New("old error")
 	m, _ = m.Update(usersLoadedMsg{items: []compute.User{{ID: "a", Name: "Alice", Email: "alice@example.test", Enabled: true}, {ID: "b", Name: "Bob"}, {ID: "c", Name: "Carol"}}})
-	if m.loading || m.cursor != 2 || m.err != "" || m.pending != nil || m.busy {
+	if m.loading || m.cursor != 2 || m.err != nil || m.pending != nil || m.busy {
 		t.Fatal("load did not clear operation state and clamp")
 	}
 	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))

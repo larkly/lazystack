@@ -39,7 +39,7 @@ type Model struct {
 	loading         bool
 	refresh         shared.RefreshGate
 	spinner         spinner.Model
-	err             string
+	err             error
 	sortCol         int
 	sortAsc         bool
 	sortHighlight   bool
@@ -80,7 +80,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.pairs = msg.keypairs
-		m.err = ""
+		m.err = nil
 		m.sortPairs()
 		if cursorName != "" {
 			for i, kp := range m.pairs {
@@ -99,7 +99,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[keypairlist] error: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case shared.TickMsg:
@@ -198,12 +198,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.pairs))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if len(m.pairs) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No key pairs found.") + "\n")

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/volume"
 )
@@ -113,8 +114,8 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	m, _ = m.Update(volumesLoadedMsg{seq: newSeq, volumes: []volume.Volume{{ID: "new", Name: "new"}}})
 	m, _ = m.Update(volumesLoadedMsg{seq: staleSeq, volumes: []volume.Volume{{ID: "old", Name: "old"}}})
 	m, _ = m.Update(volumesErrMsg{seq: staleSeq, err: errors.New("stale failure")})
-	if len(m.volumes) != 1 || m.volumes[0].ID != "new" || m.err != "" {
-		t.Fatalf("stale response applied: volumes=%v err=%q", m.volumes, m.err)
+	if len(m.volumes) != 1 || m.volumes[0].ID != "new" || m.err != nil {
+		t.Fatalf("stale response applied: volumes=%v err=%v", m.volumes, m.err)
 	}
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")
@@ -136,5 +137,29 @@ func TestFullListFitsBetweenTabBarAndStatusBar(t *testing.T) {
 	lines := strings.Split(strings.TrimSuffix(m.View(), "\n"), "\n")
 	if len(lines) > height-2 {
 		t.Fatalf("full list rendered %d lines, want at most %d", len(lines), height-2)
+	}
+}
+
+// A failed refresh must not wipe the table: the last good rows stay and the
+// error shows as one friendly line, which the next good load clears.
+func TestRefreshErrorKeepsRowsAndShowsFriendlyError(t *testing.T) {
+	m := loadedModel(volume.Volume{ID: "v1", Name: "data-disk", Status: "available", Size: 10})
+
+	m.ForceRefresh()
+	apiErr := gophercloud.ErrUnexpectedResponseCode{Actual: 503}
+	m, _ = m.Update(volumesErrMsg{seq: m.refresh.Seq(), err: apiErr})
+	view := m.View()
+	friendly := shared.ParseError(apiErr).FriendlyMessage
+	if !strings.Contains(view, "data-disk") {
+		t.Fatalf("failed refresh wiped the rows:\n%s", view)
+	}
+	if !strings.Contains(view, friendly) {
+		t.Fatalf("view lacks the friendly error %q:\n%s", friendly, view)
+	}
+
+	m.ForceRefresh()
+	m, _ = m.Update(volumesLoadedMsg{seq: m.refresh.Seq(), volumes: []volume.Volume{{ID: "v1", Name: "data-disk", Status: "available", Size: 10}}})
+	if strings.Contains(m.View(), friendly) {
+		t.Fatalf("successful load did not clear the error:\n%s", m.View())
 	}
 }

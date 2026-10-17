@@ -1,6 +1,7 @@
 package routerview
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -633,8 +634,8 @@ func TestRoutersLoadedMsgPreservesCursorByID(t *testing.T) {
 	if upd.loading {
 		t.Errorf("routersLoadedMsg should set loading=false")
 	}
-	if upd.err != "" {
-		t.Errorf("routersLoadedMsg should clear err, got %q", upd.err)
+	if upd.err != nil {
+		t.Errorf("routersLoadedMsg should clear err, got %v", upd.err)
 	}
 	if len(upd.routers) != 2 {
 		t.Errorf("routers count after loaded msg = %d, want 2", len(upd.routers))
@@ -682,8 +683,8 @@ func TestRoutersErrMsgSetsErr(t *testing.T) {
 	if upd.loading {
 		t.Errorf("routersErrMsg should set loading=false")
 	}
-	if upd.err != "boom" {
-		t.Errorf("routersErrMsg should set err='boom', got %q", upd.err)
+	if upd.err == nil || upd.err.Error() != "boom" {
+		t.Errorf("routersErrMsg should set err=boom, got %v", upd.err)
 	}
 	// Routers slice should remain untouched.
 	if len(upd.routers) != 0 {
@@ -840,7 +841,7 @@ func TestViewEmptyRoutersShowsNoRouters(t *testing.T) {
 func TestViewErrorSetsErr(t *testing.T) {
 	m := New(nil, 5*time.Second)
 	m.loading = false
-	m.err = "boom"
+	m.err = errors.New("boom")
 	out := m.View()
 	if out == "" {
 		t.Errorf("View() returned empty string for error state")
@@ -930,8 +931,8 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	m, _ = m.Update(routersErrMsg{seq: staleList, err: fmt.Errorf("stale")})
 	m, _ = m.Update(detailLoadedMsg{seq: staleDetail, routerID: "r1", interfaces: oldIface})
 	m, _ = m.Update(detailErrMsg{seq: staleDetail, routerID: "r1", err: fmt.Errorf("stale")})
-	if m.routers[0].Name != "new" || m.err != "" {
-		t.Fatalf("stale router list applied: %v err=%q", m.routers, m.err)
+	if m.routers[0].Name != "new" || m.err != nil {
+		t.Fatalf("stale router list applied: %v err=%v", m.routers, m.err)
 	}
 	if len(m.interfaces) != 1 || m.interfaces[0].SubnetID != "new" || m.detailErr != "" {
 		t.Fatalf("stale interfaces applied: %v err=%q", m.interfaces, m.detailErr)

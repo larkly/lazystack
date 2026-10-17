@@ -91,7 +91,7 @@ type Model struct {
 	refresh         shared.RefreshGate // group list fetches
 	detailRefresh   shared.RefreshGate // detail (servers/ports) fetches
 	spinner         spinner.Model
-	err             string
+	err             error
 	refreshInterval time.Duration
 	highlightNames  map[string]bool
 	lastDetailSGID  string // tracks which SG's detail is loaded
@@ -248,7 +248,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.cursor >= len(m.groups) && len(m.groups) > 0 {
 			m.cursor = len(m.groups) - 1
 		}
-		m.err = ""
+		m.err = nil
 		m.applyHighlightNames()
 		// Fetch detail for selected SG if changed
 		if sg := m.selectedSG(); sg != nil && sg.ID != m.lastDetailSGID {
@@ -268,7 +268,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[secgroupview] sgErrMsg: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case detailLoadedMsg:
@@ -594,12 +594,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.groups))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if len(m.groups) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No security groups found.") + "\n")

@@ -35,7 +35,7 @@ func TestLoadScrollRefreshAndBack(t *testing.T) {
 		t.Fatal("error state")
 	}
 	m, _ = m.Update(consoleLoadedMsg{"recovered"})
-	if m.err != "" || m.scroll != 0 || !strings.Contains(m.View(), "recovered") {
+	if m.err != nil || m.scroll != 0 || !strings.Contains(m.View(), "recovered") {
 		t.Fatal("recovery")
 	}
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})

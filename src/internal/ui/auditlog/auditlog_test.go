@@ -2,6 +2,7 @@ package auditlog
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"errors"
 	"github.com/larkly/lazystack/internal/audit"
 	"github.com/larkly/lazystack/internal/shared"
 	"strings"
@@ -80,7 +81,7 @@ func TestFilterEditingErrorAndEmpty(t *testing.T) {
 	if m.filterMode != FilterNone {
 		t.Fatal("cancel filter")
 	}
-	m.SetError("read denied")
+	m.SetError(errors.New("read denied"))
 	if !strings.Contains(m.View(), "read denied") || m.loading {
 		t.Fatal("error state")
 	}
@@ -89,7 +90,7 @@ func TestFilterEditingErrorAndEmpty(t *testing.T) {
 func TestNewViewerShowsLoadingUntilEntriesArrive(t *testing.T) {
 	for _, finish := range []func(*Model){
 		func(m *Model) { m.SetEntries([]audit.Entry{{Action: "create", ResourceName: "web"}}) },
-		func(m *Model) { m.SetError("read denied") },
+		func(m *Model) { m.SetError(errors.New("read denied")) },
 	} {
 		m := New()
 		m.SetSize(100, 20)

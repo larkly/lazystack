@@ -33,7 +33,7 @@ type Model struct {
 	height     int
 	loading    bool
 	spinner    spinner.Model
-	err        string
+	err        error
 }
 
 // New creates an action log viewer.
@@ -61,13 +61,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case actionsLoadedMsg:
 		m.loading = false
 		m.actions = msg.actions
-		m.err = ""
+		m.err = nil
 		shared.Debugf("[actionlog] loaded %d actions", len(msg.actions))
 		return m, nil
 
 	case actionsErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		shared.Debugf("[actionlog] error: %v", msg.err)
 		return m, nil
 
@@ -137,12 +137,8 @@ func (m Model) View() string {
 	if m.loading {
 		title += " " + m.spinner.View()
 	}
-	b.WriteString(title + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if len(m.actions) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No actions recorded.") + "\n")

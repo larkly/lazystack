@@ -46,7 +46,7 @@ type Model struct {
 	width         int
 	height        int
 	scroll        int
-	err           string
+	err           error
 }
 
 // New creates a volume detail model.
@@ -114,7 +114,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.loading = false
 		m.volume = msg.vol
 		m.serverName = msg.serverName
-		m.err = ""
+		m.err = nil
 		m.clampScroll()
 		return m, nil
 
@@ -128,7 +128,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[volumedetail] error: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case shared.TickMsg:
@@ -202,12 +202,8 @@ func (m Model) View() string {
 	if m.loading {
 		title += " " + m.spinner.View()
 	}
-	b.WriteString(title + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if m.volume == nil {
 		return b.String()

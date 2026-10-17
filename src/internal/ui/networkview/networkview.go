@@ -84,7 +84,7 @@ type Model struct {
 	loading         bool
 	detailLoading   bool
 	spinner         spinner.Model
-	err             string
+	err             error
 	refreshInterval time.Duration
 	highlightNames  map[string]bool
 	lastDetailNetID string
@@ -283,7 +283,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.networks = msg.networks
 		m.allSubnets = msg.allSubnets
 		m.externalIDs = msg.externalIDs
-		m.err = ""
+		m.err = nil
 		// Restore cursor position
 		if cursorID != "" {
 			for i, n := range m.networks {
@@ -312,7 +312,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[networkview] networksErrMsg: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case detailLoadedMsg:
@@ -617,12 +617,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.networks))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if len(m.networks) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No networks found.") + "\n")

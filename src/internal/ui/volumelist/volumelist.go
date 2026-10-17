@@ -139,7 +139,7 @@ type Model struct {
 	loading         bool
 	refresh         shared.RefreshGate
 	spinner         spinner.Model
-	err             string
+	err             error
 	scrollOff       int
 	refreshInterval time.Duration
 	serverNames     map[string]string
@@ -289,7 +289,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.volumes = msg.volumes
-		m.err = ""
+		m.err = nil
 		m.pruneSelection()
 		m.sortVolumes()
 		if cursorID != "" {
@@ -312,7 +312,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[volumelist] error: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case serverNamesMsg:
@@ -538,12 +538,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.volumes))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if len(m.volumes) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No volumes found.") + "\n")

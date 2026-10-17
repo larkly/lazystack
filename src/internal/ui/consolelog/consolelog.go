@@ -6,7 +6,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
@@ -33,7 +32,7 @@ type Model struct {
 	height     int
 	loading    bool
 	spinner    spinner.Model
-	err        string
+	err        error
 }
 
 // New creates a console log viewer.
@@ -64,7 +63,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.output == "" {
 			m.lines = nil
 		}
-		m.err = ""
+		m.err = nil
 		// Scroll to bottom
 		m.scroll = m.maxScroll()
 		shared.Debugf("[consolelog] output loaded %d lines", len(m.lines))
@@ -72,7 +71,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case consoleErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		shared.Debugf("[consolelog] error: %v", msg.err)
 		return m, nil
 
@@ -134,6 +133,9 @@ func (m Model) maxScroll() int {
 
 func (m Model) viewHeight() int {
 	h := m.height - 3 // title + status bar
+	if m.err != nil {
+		h-- // error line under the title
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -149,10 +151,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	b.WriteString(title + "\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
+	if m.err != nil {
+		b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 	}
 
 	if len(m.lines) == 0 && !m.loading {

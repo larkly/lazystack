@@ -44,7 +44,7 @@ type Model struct {
 	height       int
 	loading      bool
 	spinner      spinner.Model
-	err          string
+	err          error
 }
 
 // New creates a DNS list model.
@@ -69,7 +69,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case zonesLoadedMsg:
 		m.loading = false
 		m.zones = msg.zones
-		m.err = ""
+		m.err = nil
 		m.cursor = 0
 		m.scroll = 0
 		if len(m.zones) > 0 {
@@ -80,7 +80,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case zonesErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case recordsetsLoadedMsg:
@@ -90,7 +90,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.recordsets = msg.recordsets
-		m.err = ""
+		m.err = nil
 		return m, nil
 
 	case recordsetsErrMsg:
@@ -98,7 +98,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case spinner.TickMsg:
@@ -162,6 +162,9 @@ func (m Model) moveCursor(target int) (Model, tea.Cmd) {
 
 func (m Model) visibleRows() int {
 	h := m.height - 6 // title + status bar + header + zone header + padding
+	if m.err != nil {
+		h-- // error line under the title
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -177,10 +180,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	b.WriteString(title + "\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
+	if m.err != nil {
+		b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 	}
 
 	if len(m.zones) == 0 && !m.loading {

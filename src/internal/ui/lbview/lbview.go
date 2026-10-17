@@ -104,7 +104,7 @@ type Model struct {
 	loading         bool
 	detailLoading   bool
 	spinner         spinner.Model
-	err             string
+	err             error
 	refreshInterval time.Duration
 
 	// Adaptive polling state
@@ -422,7 +422,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.lbs = msg.lbs
-		m.err = ""
+		m.err = nil
 		m.sortLBs()
 		// Restore cursor position
 		if cursorID != "" {
@@ -447,7 +447,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case lbsErrMsg:
 		shared.Debugf("[lbview] error: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case detailLoadedMsg:
@@ -1062,12 +1062,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.lbs))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if len(m.lbs) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No load balancers found.") + "\n")

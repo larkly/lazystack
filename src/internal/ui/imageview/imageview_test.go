@@ -176,8 +176,8 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	m, _ = m.Update(imagesLoadedMsg{seq: staleImages, images: namedImages("old")})
 	m, _ = m.Update(imagesErrMsg{seq: staleImages, err: fmt.Errorf("stale")})
 	m, _ = m.Update(serversLoadedMsg{seq: staleServers, err: fmt.Errorf("stale")})
-	if len(m.images) != 1 || m.images[0].Name != "new" || m.err != "" {
-		t.Fatalf("stale image list applied: %v err=%q", m.images, m.err)
+	if len(m.images) != 1 || m.images[0].Name != "new" || m.err != nil {
+		t.Fatalf("stale image list applied: %v err=%v", m.images, m.err)
 	}
 	if len(m.servers) != 1 || m.serversErr != "" {
 		t.Fatalf("stale server usage applied: %v err=%q", m.servers, m.serversErr)

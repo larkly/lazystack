@@ -56,8 +56,8 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	m, _ = m.Update(fipsLoadedMsg{seq: newSeq, fips: []network.FloatingIP{{ID: "new"}}})
 	m, _ = m.Update(fipsLoadedMsg{seq: staleSeq, fips: []network.FloatingIP{{ID: "old"}}})
 	m, _ = m.Update(fipsErrMsg{seq: staleSeq, err: errors.New("stale failure")})
-	if len(m.fips) != 1 || m.fips[0].ID != "new" || m.err != "" {
-		t.Fatalf("stale response applied: %v err=%q", m.fips, m.err)
+	if len(m.fips) != 1 || m.fips[0].ID != "new" || m.err != nil {
+		t.Fatalf("stale response applied: %v err=%v", m.fips, m.err)
 	}
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")

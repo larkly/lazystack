@@ -49,7 +49,7 @@ type Model struct {
 	spinner         spinner.Model
 	filter          textinput.Model
 	filtering       bool
-	err             string
+	err             error
 	scrollOff       int
 	refreshInterval time.Duration
 	imageNames      map[string]string // cache of image ID → name
@@ -150,7 +150,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		}
-		m.err = ""
+		m.err = nil
 		m.pruneSelection()
 		m.applyFilter()
 		// Fetch any unknown image names
@@ -177,7 +177,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[serverlist] serversErrMsg: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
+		m.ensureVisible() // the error line takes a table row
 		return m, nil
 
 	case shared.TickMsg:
@@ -551,9 +552,14 @@ func (m *Model) ensureVisible() {
 
 // tableHeight is the number of server rows that fit: the app gives the view
 // the full terminal height and adds a tab bar above it and a status bar below
-// it, and the view itself uses title, filter line, header and separator.
+// it, and the view itself uses title, filter line, header and separator,
+// plus the error line while the last refresh failed.
 func (m Model) tableHeight() int {
-	return max(1, m.height-6)
+	h := m.height - 6
+	if m.err != nil {
+		h--
+	}
+	return max(1, h)
 }
 
 // View renders the server list.
@@ -567,6 +573,9 @@ func (m Model) View() string {
 	}
 	count := fmt.Sprintf(" (%d)", len(m.filtered))
 	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	if m.err != nil {
+		b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
+	}
 
 	// Filter bar
 	if m.namingFilter {
@@ -577,11 +586,6 @@ func (m Model) View() string {
 		b.WriteString(shared.StyleHelp.Render(fmt.Sprintf("  filter: %s (/ to edit, esc to clear)", m.filter.Value())) + "\n")
 	} else {
 		b.WriteString("\n")
-	}
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
 	}
 
 	if len(m.filtered) == 0 && !m.loading {

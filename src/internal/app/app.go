@@ -1321,7 +1321,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case auditLogLoadedMsg:
 		if m.view == viewAuditLog {
-			if msg.err != "" {
+			if msg.err != nil {
 				m.auditLog.SetError(msg.err)
 			} else {
 				m.auditLog.SetEntries(msg.entries)

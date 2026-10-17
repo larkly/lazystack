@@ -398,7 +398,7 @@ func (m Model) openAuditLogCmd() tea.Cmd {
 	return func() tea.Msg {
 		entries, err := audit.ReadEntries(audit.DefaultPath(), 500)
 		if err != nil {
-			return auditLogLoadedMsg{err: err.Error()}
+			return auditLogLoadedMsg{err: err}
 		}
 		return auditLogLoadedMsg{entries: entries}
 	}
@@ -406,7 +406,7 @@ func (m Model) openAuditLogCmd() tea.Cmd {
 
 type auditLogLoadedMsg struct {
 	entries []audit.Entry
-	err     string
+	err     error
 }
 
 func (m Model) openHypervisorList() (Model, tea.Cmd) {
