@@ -228,8 +228,10 @@ var allSections = []section{
 			l("enter", "expand / collapse group"),
 			l("ctrl+n", "create group (or add rule in rules)"),
 			l("ctrl+d", "delete group (or rule in rules)"),
+			k(&shared.Keys.Filter, "filter groups"),
+			l("s/S", "sort groups / reverse sort"),
 			l("Y", "copy field..."),
-			l("esc", "back to group list"),
+			l("esc", "clear filter"),
 		},
 	},
 	{

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/ui/floatingiplist"
 	"github.com/larkly/lazystack/internal/ui/keypairlist"
+	"github.com/larkly/lazystack/internal/ui/secgroupview"
 	"github.com/larkly/lazystack/internal/ui/volumelist"
 )
 
@@ -50,6 +51,15 @@ func listFilterCases() []listFilterCase {
 				m.keypairList, _ = m.keypairList.Update(keyText('/'))
 			},
 			value: func(m Model) string { return m.keypairList.FilterValue() },
+		},
+		{
+			name: "security groups",
+			open: func(m *Model) {
+				m.view = viewSecGroupView
+				m.secGroupView = secgroupview.New(nil, 5*time.Second)
+				m.secGroupView, _ = m.secGroupView.Update(keyText('/'))
+			},
+			value: func(m Model) string { return m.secGroupView.FilterValue() },
 		},
 	}
 }
