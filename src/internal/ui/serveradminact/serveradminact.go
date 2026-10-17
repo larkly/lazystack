@@ -47,6 +47,10 @@ type Model struct {
 	height      int
 	cursor      int
 	promptStage string // "" = picking, "host" = entering host, "state" = picking state, "confirm" = confirming
+	// confirmFrom is the stage the confirmation returns to on n/esc, and
+	// confirmArg the host or state it will submit.
+	confirmFrom string
+	confirmArg  string
 	stateCursor int
 	hostInput   textinput.Model
 	err         string
@@ -87,6 +91,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.promptStage == "confirm" {
+		switch {
+		case key.Matches(msg, shared.Keys.Confirm):
+			return m.submit(m.confirmArg)
+		case key.Matches(msg, shared.Keys.Deny), key.Matches(msg, shared.Keys.Back):
+			m.promptStage = m.confirmFrom
+			if m.promptStage == "host" {
+				return m, m.hostInput.Focus()
+			}
+		}
+		return m, nil
+	}
+
 	if key.Matches(msg, shared.Keys.Back) {
 		if m.promptStage != "" {
 			m.promptStage = ""
@@ -122,7 +139,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.err = "Host name is required"
 				return m, nil
 			}
-			return m.submit(host)
+			m.hostInput.Blur()
+			return m.confirm("host", host)
 		default:
 			var cmd tea.Cmd
 			m.hostInput, cmd = m.hostInput.Update(msg)
@@ -142,18 +160,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.stateCursor = 0
 			}
 		case key.Matches(msg, shared.Keys.Enter):
-			return m.submit(serverStates[m.stateCursor])
-		}
-
-	case "confirm":
-		switch {
-		case key.Matches(msg, shared.Keys.Confirm), msg.String() == "y":
-			return m.submit("")
-		case key.Matches(msg, shared.Keys.Deny), msg.String() == "n":
-			m.promptStage = ""
-			return m, nil
+			return m.confirm("state", serverStates[m.stateCursor])
 		}
 	}
+	return m, nil
+}
+
+// confirm asks for a y before submitting arg; n/esc return to stage from.
+func (m Model) confirm(from, arg string) (Model, tea.Cmd) {
+	m.promptStage = "confirm"
+	m.confirmFrom = from
+	m.confirmArg = arg
+	m.err = ""
 	return m, nil
 }
 
@@ -167,16 +185,13 @@ func (m Model) enterAction() (Model, tea.Cmd) {
 		m.promptStage = "host"
 		m.hostInput.SetValue("")
 		return m, m.hostInput.Focus()
-	case a.apiAction == "Force Delete":
-		m.promptStage = "confirm"
-		return m, nil
 	case a.apiAction == "Reset State":
 		m.promptStage = "state"
 		m.stateCursor = 0
 		return m, nil
 	default:
-		// Cold Migrate: no further input needed
-		return m.submit("")
+		// Cold Migrate and Force Delete need no further input.
+		return m.confirm("", "")
 	}
 }
 
@@ -192,6 +207,7 @@ func (m Model) submit(arg string) (Model, tea.Cmd) {
 	shared.Debugf("[serveradminact] requesting %s on server %s", req.Action, req.ServerID)
 	m.Active = false
 	m.promptStage = ""
+	m.confirmFrom, m.confirmArg = "", ""
 	return m, func() tea.Msg { return req }
 }
 
@@ -294,6 +310,23 @@ func (m Model) renderStatePrompt() string {
 	return strings.Join(lines, "\n")
 }
 
+// confirmQuestion names the server and the target of the pending action.
+func (m Model) confirmQuestion() string {
+	switch adminActions[m.cursor].apiAction {
+	case "Migrate":
+		return fmt.Sprintf("Cold migrate %s?", m.serverName)
+	case "Live Migrate":
+		return fmt.Sprintf("Live migrate %s to host %s?", m.serverName, m.confirmArg)
+	case "Evacuate":
+		return fmt.Sprintf("Evacuate %s to host %s?", m.serverName, m.confirmArg)
+	case "Reset State":
+		return fmt.Sprintf("Reset state of %s to %s?", m.serverName, m.confirmArg)
+	case "Force Delete":
+		return fmt.Sprintf("Force delete %s?", m.serverName)
+	}
+	return fmt.Sprintf("%s %s?", adminActions[m.cursor].label, m.serverName)
+}
+
 func (m Model) renderConfirmPrompt() string {
 	warnStyle := lipgloss.NewStyle().
 		Foreground(shared.ColorWarning).
@@ -301,9 +334,11 @@ func (m Model) renderConfirmPrompt() string {
 	mutedStyle := lipgloss.NewStyle().
 		Foreground(shared.ColorMuted)
 
-	return warnStyle.Render(fmt.Sprintf("  Force delete %s?", m.serverName)) +
-		"\n\n  " + mutedStyle.Render("This cannot be undone. Are you sure?") +
-		"\n\n  " + lipgloss.NewStyle().Foreground(shared.ColorFg).Render("[y] Yes  [n] No")
+	out := warnStyle.Render("  " + m.confirmQuestion())
+	if adminActions[m.cursor].apiAction == "Force Delete" {
+		out += "\n\n  " + mutedStyle.Render("This cannot be undone. Are you sure?")
+	}
+	return out + "\n\n  " + lipgloss.NewStyle().Foreground(shared.ColorFg).Render("[y] Yes  [n] No")
 }
 
 // SetSize updates dimensions.
@@ -320,7 +355,7 @@ func (m Model) Hints() string {
 	case "state":
 		return shared.Glyph("↑↓", "up/down") + " navigate • enter set state • esc back"
 	case "confirm":
-		return "y confirm • n cancel • esc back"
+		return "y confirm • n/esc back"
 	}
 	return shared.Glyph("↑↓", "up/down") + " navigate • enter select • esc close"
 }

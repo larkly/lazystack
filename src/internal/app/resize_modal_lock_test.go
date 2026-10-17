@@ -67,7 +67,9 @@ func TestResizeModalHonorsServerInflightLock(t *testing.T) {
 	}
 
 	m = openResizeModal(t, m)
-	res, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(Model)
+	res, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	m = res.(Model)
 	if msgs := nonSpinner(cmd); len(msgs) != 0 {
 		t.Fatalf("resize of a busy server produced %v", msgs)
@@ -81,7 +83,9 @@ func TestResizeModalHonorsServerInflightLock(t *testing.T) {
 
 	// Once the pause finishes the resize goes through and holds the lock.
 	m, _ = deliver(t, m, pause)
-	res, resize := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(Model)
+	res, resize := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	m = res.(Model)
 	if resize == nil {
 		t.Fatal("resize not submitted after the lock was released")

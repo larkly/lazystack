@@ -42,8 +42,8 @@ type Model struct {
 	height     int
 	metadata   map[string]string
 	cursor     int
-	mode       string // "" = viewing, "add" = adding, "edit" = editing
-	editKey    string
+	mode       string // "" = viewing, "add" = adding, "edit" = editing, "delete" = confirming a delete
+	editKey    string // key being edited, or awaiting delete confirmation
 	keyInput   textinput.Model
 	valueInput textinput.Model
 	loading    bool
@@ -203,10 +203,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				return m, textinput.Blink
 			}
 		case msg.String() == "d":
-			// Delete selected
+			// Delete selected, after confirmation
 			if m.cursor < len(keys) {
-				return m, m.deleteMetadatum(keys[m.cursor])
+				m.mode = "delete"
+				m.editKey = keys[m.cursor]
+				m.err = ""
+				return m, nil
 			}
+		}
+
+	case "delete":
+		switch {
+		case key.Matches(msg, shared.Keys.Confirm):
+			m.mode = ""
+			return m, m.deleteMetadatum(m.editKey)
+		case key.Matches(msg, shared.Keys.Deny):
+			m.mode = ""
+			return m, nil
 		}
 
 	case "add":
@@ -382,6 +395,10 @@ func (m Model) View() string {
 		body = m.renderAddForm("Add")
 	case "edit":
 		body = m.renderAddForm("Edit")
+	case "delete":
+		body = m.renderMetadataList() + "\n\n" + lipgloss.NewStyle().
+			Foreground(shared.ColorWarning).Bold(true).
+			Render(fmt.Sprintf("  Delete metadata key %q from %s? [y/n]", m.editKey, m.serverName))
 	}
 
 	if m.err != "" {
@@ -490,8 +507,11 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns the key hints shown in the status bar.
 func (m Model) Hints() string {
-	if m.mode == "add" || m.mode == "edit" {
+	switch m.mode {
+	case "add", "edit":
 		return "enter save • tab switch • esc cancel"
+	case "delete":
+		return "y delete • n/esc cancel"
 	}
 	return "a add • e edit • d delete • " + shared.Glyph("↑↓", "up/down") + " navigate • esc back"
 }

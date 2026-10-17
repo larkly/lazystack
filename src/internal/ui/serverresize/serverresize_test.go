@@ -173,12 +173,48 @@ func TestSubmittingBlocksRepeatAndEscape(t *testing.T) {
 	}
 }
 
-func TestResizeErrorUnlocksAndRetries(t *testing.T) {
+// A single-server resize names the server and the target flavor and waits
+// for an explicit y before any request is sent.
+func TestSingleResizeRequiresConfirmation(t *testing.T) {
 	m, rec := newSingle(t)
 	m, _ = m.Update(keyDown)
 	m, cmd := m.Update(keyEnter)
+	if msgs := run(cmd); len(msgs) != 0 || rec.count() != 0 || m.submitting {
+		t.Fatalf("enter resized without confirmation: msgs=%v posts=%d submitting=%v", msgs, rec.count(), m.submitting)
+	}
+	if !m.confirming {
+		t.Fatal("enter did not open the confirmation")
+	}
+	view := m.View()
+	if !strings.Contains(view, "Resize web to flavor m1.large") {
+		t.Fatalf("confirmation does not name server and flavor:\n%s", view)
+	}
+	if !strings.Contains(m.Hints(), "confirm") {
+		t.Fatalf("hints=%q", m.Hints())
+	}
+	m, cmd = m.Update(keyN)
+	run(cmd)
+	if m.confirming || !m.Active || rec.count() != 0 {
+		t.Fatalf("deny: confirming=%v active=%v posts=%d", m.confirming, m.Active, rec.count())
+	}
+	m, _ = m.Update(keyEnter)
+	m, cmd = m.Update(keyY)
 	if !m.submitting {
-		t.Fatal("single resize should submit directly")
+		t.Fatal("y did not submit")
+	}
+	run(cmd)
+	if rec.count() != 1 {
+		t.Fatalf("posts=%d want 1", rec.count())
+	}
+}
+
+func TestResizeErrorUnlocksAndRetries(t *testing.T) {
+	m, rec := newSingle(t)
+	m, _ = m.Update(keyDown)
+	m, _ = m.Update(keyEnter)
+	m, cmd := m.Update(keyY)
+	if !m.submitting {
+		t.Fatal("confirmed resize should submit")
 	}
 	m, again := m.Update(keyEnter)
 	if again != nil {
@@ -194,7 +230,8 @@ func TestResizeErrorUnlocksAndRetries(t *testing.T) {
 		t.Fatalf("error not surfaced/unlocked: submitting=%v\n%s", m.submitting, m.View())
 	}
 	rec.fail = false
-	m, cmd = m.Update(keyEnter)
+	m, _ = m.Update(keyEnter)
+	m, cmd = m.Update(keyY)
 	if !m.submitting {
 		t.Fatal("retry not accepted")
 	}

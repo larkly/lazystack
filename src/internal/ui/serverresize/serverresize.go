@@ -41,7 +41,7 @@ type Model struct {
 	filtered      []compute.Flavor
 	loading       bool
 	submitting    bool
-	confirming    bool           // bulk resize awaiting explicit confirmation
+	confirming    bool           // resize awaiting explicit confirmation
 	confirmFlavor compute.Flavor // target flavor while confirming
 	spinner       spinner.Model
 	width         int
@@ -166,14 +166,11 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, shared.Keys.Enter):
 		if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
-			if len(m.serverIDs) > 0 {
-				// Bulk resize affects many servers; confirm first.
-				m.confirming = true
-				m.confirmFlavor = m.filtered[m.cursor]
-				m.err = ""
-				return m, nil
-			}
-			return m.doResize(m.filtered[m.cursor])
+			// Resizing reboots the server; confirm first.
+			m.confirming = true
+			m.confirmFlavor = m.filtered[m.cursor]
+			m.err = ""
+			return m, nil
 		}
 	}
 	return m, nil
@@ -328,8 +325,8 @@ func (m Model) View() string {
 
 	if m.confirming {
 		f := m.confirmFlavor
-		b.WriteString(fmt.Sprintf("Resize %d servers to flavor %s (%d vCPU, %dMB RAM, %dGB disk)?\n",
-			len(m.serverIDs), f.Name, f.VCPUs, f.RAM, f.Disk))
+		b.WriteString(fmt.Sprintf("Resize %s to flavor %s (%d vCPU, %dMB RAM, %dGB disk)?\n",
+			m.serverName, f.Name, f.VCPUs, f.RAM, f.Disk))
 		b.WriteString("\n")
 		b.WriteString(shared.StyleHelp.Render("y/enter confirm • n/esc cancel"))
 		return m.renderBox(b.String())

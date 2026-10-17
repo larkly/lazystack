@@ -137,7 +137,9 @@ func TestServerMetadataReceivesBackgroundResults(t *testing.T) {
 	})
 	m.view = viewServerDetail
 	m.serverMetadata = servermetadata.New(m.client.Compute, "srv", "web", map[string]string{"k": "v"})
-	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
+	m = next.(Model)
+	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Text: "y"}))
 	m = next.(Model)
 	var sawAction bool
 	for _, msg := range commandMessages(cmd) {
