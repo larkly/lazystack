@@ -60,8 +60,9 @@ type Model struct {
 	sortClearAt     time.Time
 	config          *config.Config // live reference to global config for saving filters
 	filterNameInput textinput.Model
-	namingFilter    bool // true when user is typing name for save
-	cycleFilterIdx  int  // next saved-filter index to load (per model, reset on filter changes)
+	namingFilter    bool   // true when user is typing name for save
+	cycleFilterIdx  int    // next saved-filter index to load (per model, reset on filter changes)
+	highlight       string // server ID to put the cursor on once listed
 }
 
 // New creates a new server list model.
@@ -153,6 +154,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.err = nil
 		m.pruneSelection()
 		m.applyFilter()
+		m.applyHighlight()
 		// Fetch any unknown image names
 		cmd := m.fetchMissingImageNames()
 		return m, cmd
@@ -975,6 +977,27 @@ func (m Model) SelectedIDs() []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// SetHighlight puts the cursor on the server with the given ID as soon as
+// it is listed; a server just created may only appear after a refresh.
+func (m *Model) SetHighlight(id string) {
+	m.highlight = id
+	m.applyHighlight()
+}
+
+func (m *Model) applyHighlight() {
+	if m.highlight == "" {
+		return
+	}
+	for i, s := range m.filtered {
+		if s.ID == m.highlight {
+			m.cursor = i
+			m.ensureVisible()
+			m.highlight = ""
+			return
+		}
+	}
 }
 
 // SelectIDs adds the given IDs to the bulk selection (e.g. to keep failed

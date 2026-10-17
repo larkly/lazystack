@@ -157,9 +157,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case volumeCreatedMsg:
 		m.submitting = false
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "volumelist"}
+		name := msg.vol.Name
+		if name == "" {
+			name = msg.vol.ID
 		}
+		return m, shared.CreatedCmd("volumelist", msg.vol.ID, name)
 	case volumeCreateErrMsg:
 		m.submitting = false
 		m.err = msg.err.Error()

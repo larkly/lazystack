@@ -61,7 +61,8 @@ type fetchErrMsg struct{ err error }
 
 type serverCreatedMsg struct {
 	shared.Audit
-	server *compute.Server
+	server *compute.Server // the first server created
+	label  string          // what the status bar reports as created
 }
 type serverCreateErrMsg struct {
 	shared.Audit
@@ -261,9 +262,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return ServerCloneCreatedMsg{Server: srv, VolumeIDs: volIDs}
 			}
 		}
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "serverlist"}
-		}
+		return m, shared.CreatedCmd("serverlist", msg.server.ID, msg.label)
 	case serverCreateErrMsg:
 		m.submitting = false
 		m.err = msg.err.Error()
@@ -944,7 +943,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 			return serverCreateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[servercreate] created server %q (id=%s)", name, srv.ID)
-		return serverCreatedMsg{Audit: rec, server: srv}
+		label := name
+		if count > 1 {
+			label = fmt.Sprintf("%s (%d servers)", name, count)
+		}
+		return serverCreatedMsg{Audit: rec, server: srv, label: label}
 	})
 }
 
@@ -979,7 +982,7 @@ func createNamed(client *gophercloud.ServiceClient, names []string, build func(s
 		}
 		created = append(created, fmt.Sprintf("%s (%s)", n, srv.ID))
 	}
-	return serverCreatedMsg{Audit: shared.Audits(recs...), server: first}
+	return serverCreatedMsg{Audit: shared.Audits(recs...), server: first, label: strings.Join(names, ", ")}
 }
 
 // View renders the create form.

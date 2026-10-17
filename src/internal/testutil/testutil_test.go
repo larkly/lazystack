@@ -4,8 +4,11 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestFakeServiceClient_ReturnsValidClient(t *testing.T) {
@@ -197,5 +200,14 @@ func TestFakeServiceClient_CleanupClosesServer(t *testing.T) {
 	_, err = sc.ProviderClient.HTTPClient.Get(sc.Endpoint + "ping")
 	if err == nil {
 		t.Fatal("expected error after cleanup closed the server, got nil")
+	}
+}
+
+func TestCmdMessagesUnpacksSequencesInOrder(t *testing.T) {
+	msg := func(s string) tea.Cmd { return func() tea.Msg { return s } }
+	got := CmdMessages(tea.Sequence(msg("a"), tea.Batch(msg("b"), msg("c")), msg("d")))
+	want := []tea.Msg{"a", "b", "c", "d"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CmdMessages = %v, want %v", got, want)
 	}
 }

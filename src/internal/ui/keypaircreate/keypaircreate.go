@@ -132,11 +132,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.privateKey = msg.kp.PrivateKey
 			m.publicKey = msg.kp.PublicKey
 			m.keypairName = msg.kp.Name
-			return m, nil
+			// The form stays on the private key; the list highlights
+			// the new key pair when the user leaves.
+			return m, shared.CreatedReportCmd(msg.kp.Name)
 		}
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "keypairlist"}
-		}
+		return m, shared.CreatedCmd("keypairlist", msg.kp.Name, msg.kp.Name)
 	case keypairCreateErrMsg:
 		m.submitting = false
 		m.err = msg.err.Error()
@@ -175,20 +175,14 @@ func (m Model) handlePrivateKeyView(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleSaveInput(msg)
 	}
 
+	leave := func() tea.Msg {
+		return shared.ViewChangeMsg{View: "keypairlist", Highlight: m.keypairName}
+	}
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
-		if m.savedPath != "" {
-			return m, func() tea.Msg {
-				return shared.ViewChangeMsg{View: "keypairlist"}
-			}
-		}
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "keypairlist"}
-		}
+		return m, leave
 	case key.Matches(msg, shared.Keys.Enter):
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "keypairlist"}
-		}
+		return m, leave
 	case key.Matches(msg, shared.Keys.Down):
 		m.privateScroll++
 		lines := strings.Count(m.privateKey, "\n") + 1

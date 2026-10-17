@@ -1,6 +1,7 @@
 package shared
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"github.com/gophercloud/gophercloud/v2"
 )
 
@@ -59,6 +60,26 @@ type TickMsg struct{}
 // ViewChangeMsg requests a view change in the root model.
 type ViewChangeMsg struct {
 	View string
+	// Highlight, when set, is the ID (key pairs: the name) of a resource
+	// the target list puts its cursor on once it is listed, such as one
+	// just created.
+	Highlight string
+}
+
+// CreatedCmd closes a full-screen create form after a successful create: it
+// returns to the given list with the new resource highlighted, then reports
+// the create in the status bar. The view change goes first so the report's
+// refresh reaches the list.
+func CreatedCmd(view, highlight, name string) tea.Cmd {
+	return tea.Sequence(
+		func() tea.Msg { return ViewChangeMsg{View: view, Highlight: highlight} },
+		CreatedReportCmd(name),
+	)
+}
+
+// CreatedReportCmd reports a successful create in the status bar.
+func CreatedReportCmd(name string) tea.Cmd {
+	return func() tea.Msg { return ResourceActionMsg{Action: "Created", Name: name} }
 }
 
 // RestartMsg signals the app should re-exec itself.

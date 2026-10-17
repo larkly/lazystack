@@ -45,6 +45,7 @@ type Model struct {
 	sortHighlight   bool
 	sortClearAt     time.Time
 	refreshInterval time.Duration
+	highlight       string // key pair name to put the cursor on once listed
 }
 
 // New creates a keypair list model.
@@ -91,6 +92,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		m.ensureVisible()
+		m.applyHighlight()
 		return m, nil
 
 	case keypairsErrMsg:
@@ -251,6 +253,27 @@ func (m Model) View() string {
 	}
 
 	return b.String()
+}
+
+// SetHighlight puts the cursor on the key pair with the given name as soon
+// as it is listed; a key pair just created may only appear after a refresh.
+func (m *Model) SetHighlight(name string) {
+	m.highlight = name
+	m.applyHighlight()
+}
+
+func (m *Model) applyHighlight() {
+	if m.highlight == "" {
+		return
+	}
+	for i, kp := range m.pairs {
+		if kp.Name == m.highlight {
+			m.cursor = i
+			m.ensureVisible()
+			m.highlight = ""
+			return
+		}
+	}
 }
 
 // ensureVisible clamps the cursor to the list and scrolls so the cursor row
