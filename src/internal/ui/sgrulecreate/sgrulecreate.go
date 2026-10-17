@@ -3,7 +3,6 @@ package sgrulecreate
 import (
 	"fmt"
 	"net/http"
-	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -580,13 +579,9 @@ func (m Model) buildSpec() (network.SecurityRuleSpec, error) {
 		if spec.RemoteGroupID != "" || spec.RemoteAddressGroupID != "" {
 			return spec, fmt.Errorf("this rule is restricted to a remote %s; a remote IP cannot be combined with it (delete the rule and add a new one to change the remote)", m.remoteKind())
 		}
-		addr, err := netip.ParsePrefix(remoteIP)
-		if err != nil {
-			a, aerr := netip.ParseAddr(remoteIP)
-			if aerr != nil {
-				return spec, fmt.Errorf("invalid remote IP %q", remoteIP)
-			}
-			addr = netip.PrefixFrom(a, a.BitLen())
+		addr, ok := shared.ParseIPOrCIDR(remoteIP)
+		if !ok {
+			return spec, fmt.Errorf("invalid remote IP %q", remoteIP)
 		}
 		if addr.Addr().Is4() != (spec.EtherType == "IPv4") {
 			return spec, fmt.Errorf("remote IP %s does not match ether type %s", remoteIP, spec.EtherType)
