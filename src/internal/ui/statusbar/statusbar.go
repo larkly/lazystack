@@ -30,6 +30,9 @@ func New(version string) Model {
 	}
 }
 
+// minHintCells is the narrowest space a truncated hint is still shown in.
+const minHintCells = 10
+
 // Render renders the status bar.
 func (m Model) Render() string {
 	style := shared.StyleStatusBar
@@ -57,9 +60,13 @@ func (m Model) Render() string {
 
 	right := ""
 	if m.Error != "" {
+		warn := "⚠"
+		if shared.PlainMode {
+			warn = "!"
+		}
 		right = lipgloss.NewStyle().
 			Foreground(shared.ColorError).
-			Render(fmt.Sprintf(" ⚠ %s ", m.Error))
+			Render(fmt.Sprintf(" %s %s ", warn, m.Error))
 	} else if m.StickyHint != "" {
 		right = shared.StyleHelp.Render(fmt.Sprintf(" %s ", m.StickyHint))
 	} else if m.Hint != "" {
@@ -67,15 +74,16 @@ func (m Model) Render() string {
 	}
 
 	leftW := lipgloss.Width(left)
-	rightW := lipgloss.Width(right)
-	gap := m.Width - leftW - rightW
-	if gap < 0 {
-		right = ""
-		gap = m.Width - leftW
-		if gap < 0 {
-			gap = 0
+	if avail := m.Width - leftW; lipgloss.Width(right) > avail {
+		// Shorten the hint to the space left of the cloud info; drop it
+		// only when too little would remain to be useful.
+		if avail >= minHintCells {
+			right = shared.TruncateCells(right, avail)
+		} else {
+			right = ""
 		}
 	}
+	gap := max(0, m.Width-leftW-lipgloss.Width(right))
 
 	bar := left + strings.Repeat(" ", gap) + right
 
