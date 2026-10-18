@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/atotto/clipboard v0.1.4
-	github.com/charmbracelet/x/ansi v0.11.8
+	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/gkampitakis/go-snaps v0.5.23
 	github.com/gophercloud/gophercloud/v2 v2.14.0
 	golang.org/x/crypto v0.57.0
