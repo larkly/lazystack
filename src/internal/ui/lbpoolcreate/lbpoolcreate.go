@@ -320,7 +320,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Enter):
 			m.advanceFocus(1)
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			return m.updateTextInput(msg)
@@ -379,7 +379,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -674,6 +674,6 @@ func (m Model) View() string {
 	}
 
 	content := title + "\n\n" + strings.Join(rows, "\n")
-	box := shared.StyleModal.Width(60).Render(content)
+	box := shared.StyleModal.Width(shared.ModalWidth(60, m.width)).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }

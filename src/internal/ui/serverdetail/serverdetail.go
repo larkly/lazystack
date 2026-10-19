@@ -137,7 +137,7 @@ type Model struct {
 	width           int
 	height          int
 	scroll          int // info panel scroll
-	err             string
+	err             error
 	refreshInterval time.Duration
 	pendingAction   string
 
@@ -280,7 +280,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		m.server = msg.server
-		m.err = ""
+		m.err = nil
 		m.clampScrolls()
 		// Fetch volume names if we have attachments and haven't yet
 		if msg.server != nil && len(msg.server.VolAttach) > 0 && m.blockClient != nil {
@@ -300,7 +300,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case serverDetailErrMsg:
 		shared.Debugf("[serverdetail] serverDetailErrMsg: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case consoleLoadedMsg:
@@ -429,12 +429,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
 		return m, nil
 
-	// Console-specific: g/G for top/bottom when console focused. These must
+	// Console-specific: jump to top/bottom when console focused. These must
 	// precede the resource jumps so g is not taken by JumpSecGroups.
-	case m.focus == focusConsole && msg.String() == "g":
+	case m.focus == focusConsole && key.Matches(msg, shared.Keys.JumpStart):
 		m.consoleScroll = 0
 		return m, nil
-	case m.focus == focusConsole && msg.String() == "G":
+	case m.focus == focusConsole && key.Matches(msg, shared.Keys.JumpEnd):
 		m.consoleScroll = m.consoleMaxScroll()
 		return m, nil
 
@@ -755,14 +755,12 @@ func (m Model) View() string {
 	if m.loading {
 		title += " " + m.spinner.View()
 	}
-	b.WriteString(title + "\n\n")
+	b.WriteString(title + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
-
-	if m.server == nil && m.loading {
+	// Before the first successful load there is nothing to lay out: show the
+	// title with the spinner or the error line only.
+	if m.server == nil && (m.loading || m.err != nil) {
 		return b.String()
 	}
 
@@ -829,7 +827,7 @@ func (m Model) renderNarrow() string {
 // of the viewport.
 func (m Model) renderPane(pane focusPane, r paneRect, content string) string {
 	innerW, innerH := max(0, r.w-2), max(0, r.h-2)
-	lines := strings.Split(padContent(m.panelTitle(pane), content), "\n")
+	lines := strings.Split(shared.PadContent(m.panelTitle(pane), content), "\n")
 	if len(lines) > innerH {
 		lines = lines[:innerH]
 	}
@@ -840,17 +838,6 @@ func (m Model) renderPane(pane focusPane, r paneRect, content string) string {
 }
 
 // padContent adds the title, a blank line, and 1-char indent to each line of content.
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "") // blank line after title
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) panelTitle(pane focusPane) string {
 	borderColor := shared.ColorMuted
@@ -1642,7 +1629,7 @@ func (m *Model) SetServer(s *compute.Server) {
 	}
 	m.server = s
 	m.loading = false
-	m.err = ""
+	m.err = nil
 }
 
 // SetPendingAction marks an action as in-progress.

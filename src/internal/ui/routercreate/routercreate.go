@@ -97,7 +97,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case fetchErrMsg:
 		m.loading--
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case routerCreatedMsg:
@@ -108,7 +108,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case routerCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -125,6 +125,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Esc closes the modal while it loads; late results are dropped
+		// because inactive modals receive no messages.
+		if m.loading > 0 && !m.submitting && key.Matches(msg, shared.Keys.Back) {
+			m.Active = false
+			return m, nil
+		}
 		if m.loading > 0 || m.submitting {
 			return m, nil
 		}
@@ -159,7 +165,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField++
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			var cmd tea.Cmd
@@ -229,7 +235,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -246,12 +252,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	items := m.pickerItems()
 	filtered := m.filteredPickerItems(items)
 
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.pickerOpen = false
 		m.pickerFilter.Blur()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		if len(filtered) > 0 && m.pickerCursor < len(filtered) {
 			m.selectedExtNet = filtered[m.pickerCursor].id
 		}
@@ -260,12 +266,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focusField = (m.focusField + 1) % numFields
 		m.updateFocus()
 		return m, nil
-	case "up":
+	case shared.MatchesNonText(msg, shared.Keys.Up):
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down":
+	case shared.MatchesNonText(msg, shared.Keys.Down):
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
 		}
@@ -510,4 +516,12 @@ func (m Model) fetchExtNetworks() tea.Cmd {
 		}
 		return extNetsLoadedMsg{nets: nets}
 	}
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.pickerOpen {
+		return shared.Glyph("↑↓", "up/down") + " navigate • enter select • esc close"
+	}
+	return "tab/" + shared.Glyph("↑↓", "up/down") + " fields • " + shared.Glyph("←→", "left/right") + " cycle • enter picker • ctrl+s submit • esc cancel"
 }

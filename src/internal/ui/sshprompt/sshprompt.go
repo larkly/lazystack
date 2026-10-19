@@ -257,23 +257,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) updateIPPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.ipPickerOpen = false
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		if m.ipPickerCursor < len(m.ips) {
 			m.ipIndex = m.ipPickerCursor
 		}
 		m.ipPickerOpen = false
 		m.advanceFocus()
 		return m, nil
-	case "up", "k":
+	case key.Matches(msg, shared.Keys.Up):
 		if m.ipPickerCursor > 0 {
 			m.ipPickerCursor--
 		}
 		return m, nil
-	case "down", "j":
+	case key.Matches(msg, shared.Keys.Down):
 		if m.ipPickerCursor < len(m.ips)-1 {
 			m.ipPickerCursor++
 		}
@@ -285,24 +285,24 @@ func (m Model) updateIPPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	filtered := m.filteredPickerFiles()
 
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.closePicker()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		if len(filtered) > 0 && m.pickerCursor < len(filtered) {
 			m.keyInput.SetValue(filtered[m.pickerCursor])
 		}
 		m.closePicker()
 		m.advanceFocus()
 		return m, nil
-	// Only arrows navigate: j/k must reach the filter as text.
-	case "up":
+	// Only non-text keys navigate: j/k must reach the filter as text.
+	case shared.MatchesNonText(msg, shared.Keys.Up):
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down":
+	case shared.MatchesNonText(msg, shared.Keys.Down):
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
 		}
@@ -549,4 +549,19 @@ func listSSHKeys() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	switch {
+	case m.ipPickerOpen:
+		return shared.Glyph("↑↓", "up/down") + " select • enter confirm • esc close"
+	case m.pickerOpen:
+		return shared.Glyph("↑↓", "up/down") + " select • enter choose key • type to filter • esc close"
+	case m.focusField == fieldHost && len(m.ips) > 1:
+		return shared.Glyph("←→", "left/right") + " change IP • enter pick from list • tab next • esc cancel"
+	case m.focusField == fieldKeyPath:
+		return "enter browse keys • tab next • esc cancel"
+	}
+	return "tab next • space toggle • enter connect • esc cancel"
 }

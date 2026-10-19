@@ -30,7 +30,7 @@ type Model struct {
 	scroll       int // top visible index
 	loading      bool
 	spinner      spinner.Model
-	err          string
+	err          error
 	width        int
 	height       int
 	filterMode   FilterType
@@ -50,15 +50,16 @@ func New() Model {
 	}
 }
 
-// SetEntries loads entries into the viewer.
+// SetEntries loads entries into the viewer and clears any earlier error.
 func (m *Model) SetEntries(entries []audit.Entry) {
+	m.err = nil
 	m.entries = entries
 	m.applyFilter()
 	m.loading = false
 }
 
-// SetError sets an error message.
-func (m *Model) SetError(err string) {
+// SetError records a failed load; entries already shown stay visible.
+func (m *Model) SetError(err error) {
 	m.err = err
 	m.loading = false
 }
@@ -98,22 +99,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.adjustScroll()
 			}
 			return m, nil
-		case msg.String() == "a":
+		case key.Matches(msg, shared.Keys.AuditFilterAction):
 			m.filterMode = FilterAction
 			m.filterInput = ""
 			m.filterCursor = 0
 			return m, nil
-		case msg.String() == "r":
+		case key.Matches(msg, shared.Keys.AuditFilterResource):
 			m.filterMode = FilterResource
 			m.filterInput = ""
 			m.filterCursor = 0
 			return m, nil
-		case msg.String() == "d":
+		case key.Matches(msg, shared.Keys.AuditFilterDate):
 			m.filterMode = FilterDate
 			m.filterInput = ""
 			m.filterCursor = 0
 			return m, nil
-		case msg.String() == "c":
+		case key.Matches(msg, shared.Keys.AuditFilterClear):
 			m.filterMode = FilterNone
 			m.filterInput = ""
 			m.applyFilter()
@@ -141,13 +142,13 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.applyFilter()
 		m.filterMode = FilterNone
 		return m, nil
-	case msg.String() == "backspace" || msg.String() == "delete":
+	case key.Matches(msg, shared.TextKeys.DeleteChar):
 		if len(m.filterInput) > 0 {
 			m.filterInput = m.filterInput[:len(m.filterInput)-1]
 			m.applyFilter()
 		}
 		return m, nil
-	case msg.String() == "ctrl+u":
+	case key.Matches(msg, shared.TextKeys.ClearLine):
 		m.filterInput = ""
 		m.applyFilter()
 		return m, nil
@@ -205,7 +206,7 @@ func (m *Model) adjustScroll() {
 
 func (m Model) visibleRows() int {
 	headerRows := 5 // title + help + separator + column headers + separator
-	if m.err != "" {
+	if m.err != nil {
 		headerRows++
 	}
 	if m.filterMode != FilterNone {
@@ -228,8 +229,8 @@ func (m Model) View() string {
 	}
 	b.WriteString(title + "\n")
 
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  ⚠ "+m.err) + "\n")
+	if m.err != nil {
+		b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 	}
 
 	filterLabel := ""

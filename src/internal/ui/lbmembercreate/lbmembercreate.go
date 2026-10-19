@@ -298,7 +298,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case memberServersErrMsg:
 		m.serversLoading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		m.applyServerFilter()
 		return m, nil
 
@@ -385,7 +385,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Enter):
 			m.advanceFocus(1)
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			return m.updateTextInput(msg)
@@ -435,7 +435,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case keyText(msg) == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		if m.focusField == fieldServer && m.usesServerSelection() {
 			m.openServerPicker()
 			m.serverFiltering = true
@@ -460,7 +460,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -479,21 +479,20 @@ func (m Model) handleServerPickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.serverFiltering = false
 			return m, nil
 		default:
-			s := keyText(msg)
-			switch s {
-			case "backspace":
+			switch {
+			case key.Matches(msg, shared.TextKeys.DeleteChar):
 				if len(m.serverFilter) > 0 {
 					m.serverFilter = m.serverFilter[:len(m.serverFilter)-1]
 					m.applyServerFilter()
 				}
 				return m, nil
-			case "esc":
+			case msg.String() == "esc":
 				m.serverFiltering = false
 				m.serverFilter = ""
 				m.applyServerFilter()
 				return m, nil
 			}
-			if len(s) == 1 && s[0] >= 32 && s[0] < 127 {
+			if s := msg.String(); len(s) == 1 && s[0] >= 32 && s[0] < 127 {
 				m.serverFilter += s
 				m.applyServerFilter()
 				return m, nil
@@ -520,7 +519,7 @@ func (m Model) handleServerPickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case keyText(msg) == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		m.serverFiltering = true
 		if m.serverFilter == "" {
 			m.applyServerFilter()
@@ -864,10 +863,10 @@ func (m Model) serverPickerView() string {
 				"%s%-*s  %-*s  %s",
 				cursor,
 				nameWidth,
-				truncateString(srv.name, nameWidth),
+				shared.TruncateCells(srv.name, nameWidth),
 				addressWidth,
-				truncateString(srv.address, addressWidth),
-				statusStyle.Render(truncateString(statusText, statusWidth)),
+				shared.TruncateCells(srv.address, addressWidth),
+				statusStyle.Render(shared.TruncateCells(statusText, statusWidth)),
 			)
 			lines = append(lines, style.Render(line))
 		}
@@ -882,7 +881,7 @@ func (m Model) serverPickerView() string {
 		filterLine = shared.StyleHelp.Render(filterLine)
 	}
 
-	content := title + "\n\n" + body + "\n\n" + truncateString(filterLine, contentWidth) + "\n\n" + shared.StyleHelp.Render("↑↓ navigate • enter select • / filter • esc close")
+	content := title + "\n\n" + body + "\n\n" + shared.TruncateCells(filterLine, contentWidth) + "\n\n" + shared.StyleHelp.Render("↑↓ navigate • enter select • / filter • esc close")
 	box := shared.StyleModal.Width(pickerWidth).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
@@ -907,7 +906,7 @@ func (m Model) selectedServerView() string {
 	if !ok {
 		return lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("Press enter to choose server")
 	}
-	return truncateString(fmt.Sprintf("%s (%s)", selected.name, selected.address), maxInt(24, m.formWidth()-18))
+	return shared.TruncateCells(fmt.Sprintf("%s (%s)", selected.name, selected.address), maxInt(24, m.formWidth()-18))
 }
 
 func (m Model) selectedServer() (memberServerOption, bool) {
@@ -1106,23 +1105,6 @@ func (m Model) pickerWidth() int {
 		return 96
 	}
 	return maxInt(56, minInt(110, m.width-4))
-}
-
-func truncateString(s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if len(s) <= width {
-		return s
-	}
-	if width == 1 {
-		return "…"
-	}
-	return s[:width-1] + "…"
-}
-
-func keyText(msg tea.KeyMsg) string {
-	return msg.String()
 }
 
 func minInt(a, b int) int {

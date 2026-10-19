@@ -28,7 +28,7 @@ type Model struct {
 	height       int
 	loading      bool
 	spinner      spinner.Model
-	err          string
+	err          error
 }
 
 // New creates a service catalog model.
@@ -61,7 +61,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case catalogLoadedMsg:
 		m.loading = false
 		m.entries = msg.entries
-		m.err = ""
+		m.err = nil
 		return m, nil
 
 	case spinner.TickMsg:
@@ -151,20 +151,14 @@ func (m Model) View() string {
 		)
 	}
 
-	if m.err != "" {
-		return lipgloss.Place(m.width, m.height,
-			lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: "+m.err),
-		)
-	}
-
 	var b strings.Builder
 
 	// Header
 	b.WriteString(shared.StyleTitle.Render(" Service Catalog "))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorMuted).Render("Services available in the current OpenStack cloud"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	// Column headers
 	headerStyle := lipgloss.NewStyle().Foreground(shared.ColorMuted).Bold(true)
@@ -215,7 +209,7 @@ func (m Model) View() string {
 			indicator,
 			statusStyle.Render(status),
 			serviceFg.Render(e.Name),
-			mutedSt.Render(truncateStr(endpoint, 48)),
+			mutedSt.Render(shared.TruncateCells(endpoint, 48)),
 		)
 
 		if i == m.cursor {
@@ -235,11 +229,4 @@ func (m Model) View() string {
 		lipgloss.Left, lipgloss.Top,
 		b.String(),
 	)
-}
-
-func truncateStr(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }

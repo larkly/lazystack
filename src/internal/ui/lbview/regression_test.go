@@ -23,8 +23,8 @@ func TestLiveSearchResetsDetailForNewSelection(t *testing.T) {
 func TestDescendingSortKeepsEqualRowsStable(t *testing.T) {
 	for col := range sortColumns {
 		m := New(nil, time.Second)
-		m.sortCol = col
-		m.sortAsc = false
+		m.order.Col = col
+		m.order.Asc = false
 		m.lbs = []loadbalancer.LoadBalancer{{ID: "first", Name: "same", VipAddress: "same", ProvisioningStatus: "same", OperatingStatus: "same"}, {ID: "second", Name: "same", VipAddress: "same", ProvisioningStatus: "same", OperatingStatus: "same"}, {ID: "third", Name: "same", VipAddress: "same", ProvisioningStatus: "same", OperatingStatus: "same"}}
 		m.sortLBs()
 		if m.lbs[0].ID != "first" || m.lbs[1].ID != "second" || m.lbs[2].ID != "third" {

@@ -1,8 +1,12 @@
 package shared
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -28,12 +32,79 @@ var networkPatterns = []string{
 	"temporarily unavailable",
 }
 
+// quotaPatterns match the quota and over-limit wording of Nova, Neutron,
+// Cinder and Octavia. They are checked before the status code because the
+// services disagree on it: Nova answers 403, Neutron 409, Cinder 413.
+var quotaPatterns = []string{
+	"quota exceeded",
+	"limit exceeded",
+	"overquota",
+	"exceeded for",
+}
+
+// httpStatus returns the HTTP status carried by err, or 0 when err is not
+// an unexpected-response-code error.
+func httpStatus(err error) int {
+	var codeErr gophercloud.ErrUnexpectedResponseCode
+	if errors.As(err, &codeErr) {
+		return codeErr.Actual
+	}
+	return 0
+}
+
+// APIFaultMessage extracts the human-readable message from an OpenStack
+// error response body. It understands the Nova/Cinder fault shape
+// {"<fault>": {"message": ...}}, Neutron's {"NeutronError": {"message": ...}}
+// and Octavia's {"faultstring": ...}. It returns "" when err carries no
+// response body or the body has no message.
+func APIFaultMessage(err error) string {
+	var codeErr gophercloud.ErrUnexpectedResponseCode
+	if !errors.As(err, &codeErr) || len(codeErr.Body) == 0 {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(codeErr.Body, &fields) != nil {
+		return ""
+	}
+	var faultstring string
+	if json.Unmarshal(fields["faultstring"], &faultstring) == nil {
+		if m := strings.TrimSpace(faultstring); m != "" {
+			return m
+		}
+	}
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		var fault struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(fields[k], &fault) != nil {
+			continue
+		}
+		if m := strings.TrimSpace(fault.Message); m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+// withAPIFault appends the API's own reason to a friendly message.
+func withAPIFault(friendly string, err error) string {
+	if m := APIFaultMessage(err); m != "" {
+		return friendly + " (" + m + ")"
+	}
+	return friendly
+}
+
 // ParsedError carries both a user-friendly message and the raw error for expandable display.
 type ParsedError struct {
 	FriendlyMessage string // User-friendly, actionable message
 	RawError        string // Original error text for debug/details
 	HTTPStatusCode  int    // HTTP status code (0 if unknown)
-	Category        string // Category: "conflict", "forbidden", "not_found", "bad_request", "quota", "network", "unknown"
+	Category        string // Category: "conflict", "forbidden", "not_found", "bad_request", "quota", "unauthorized", "unavailable", "network", "unknown"
 }
 
 func (e *ParsedError) Error() string {
@@ -51,12 +122,50 @@ func ParseError(err error) *ParsedError {
 		}
 	}
 
-	raw := err.Error()
+	if ce, ok := asContextError(err); ok {
+		return &ParsedError{
+			FriendlyMessage: ce.friendly,
+			RawError:        urlPattern.ReplaceAllString(ce.raw, "[endpoint]"),
+			HTTPStatusCode:  httpStatus(err),
+			Category:        "unknown",
+		}
+	}
 
-	// Check HTTP status codes first.
+	raw := err.Error()
+	lowerRaw := strings.ToLower(raw)
+
+	// Quota text wins over the status code; see quotaPatterns.
+	for _, pattern := range quotaPatterns {
+		if strings.Contains(lowerRaw, pattern) {
+			return &ParsedError{
+				FriendlyMessage: "Quota exceeded — free up resources or contact your cloud admin.",
+				RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
+				HTTPStatusCode:  httpStatus(err),
+				Category:        "quota",
+			}
+		}
+	}
+
+	// Then the HTTP status code.
+	switch status := httpStatus(err); status {
+	case http.StatusUnauthorized:
+		return &ParsedError{
+			FriendlyMessage: "Session expired or credentials rejected — press C to reconnect.",
+			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
+			HTTPStatusCode:  status,
+			Category:        "unauthorized",
+		}
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return &ParsedError{
+			FriendlyMessage: fmt.Sprintf("The cloud API is unavailable (HTTP %d) — try again shortly.", status),
+			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
+			HTTPStatusCode:  status,
+			Category:        "unavailable",
+		}
+	}
 	if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
 		return &ParsedError{
-			FriendlyMessage: "Resource is busy (provisioning in progress). Try again shortly.",
+			FriendlyMessage: withAPIFault("Conflict — the resource is busy, in use, or the name already exists.", err),
 			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
 			HTTPStatusCode:  http.StatusConflict,
 			Category:        "conflict",
@@ -80,7 +189,7 @@ func ParseError(err error) *ParsedError {
 	}
 	if gophercloud.ResponseCodeIs(err, http.StatusBadRequest) {
 		return &ParsedError{
-			FriendlyMessage: "Invalid request — check your input values and try again.",
+			FriendlyMessage: withAPIFault("Invalid request — check your input values and try again.", err),
 			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
 			HTTPStatusCode:  http.StatusBadRequest,
 			Category:        "bad_request",
@@ -91,18 +200,6 @@ func ParseError(err error) *ParsedError {
 			FriendlyMessage: "Quota exceeded — free up resources or contact your cloud admin.",
 			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
 			HTTPStatusCode:  http.StatusRequestEntityTooLarge,
-			Category:        "quota",
-		}
-	}
-
-	lowerRaw := strings.ToLower(raw)
-
-	// Check for quota-related patterns in raw error if status code wasn't enough.
-	if strings.Contains(lowerRaw, "quota exceeded") || strings.Contains(lowerRaw, "limit exceeded") {
-		return &ParsedError{
-			FriendlyMessage: "Quota exceeded — free up resources or contact your cloud admin.",
-			RawError:        urlPattern.ReplaceAllString(raw, "[endpoint]"),
-			HTTPStatusCode:  0,
 			Category:        "quota",
 		}
 	}

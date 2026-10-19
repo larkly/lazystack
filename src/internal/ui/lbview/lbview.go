@@ -66,10 +66,7 @@ type Model struct {
 	lbs            []loadbalancer.LoadBalancer
 	cursor         int
 	selectorScroll int
-	sortCol        int
-	sortAsc        bool
-	sortHighlight  bool
-	sortClearAt    time.Time
+	order          shared.SortState
 
 	// Search/filter
 	searchActive bool
@@ -104,7 +101,7 @@ type Model struct {
 	loading         bool
 	detailLoading   bool
 	spinner         spinner.Model
-	err             string
+	err             error
 	refreshInterval time.Duration
 
 	// Adaptive polling state
@@ -131,7 +128,7 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 		monitors:        make(map[string]*loadbalancer.HealthMonitor),
 		selectedMembers: make(map[string]bool),
 		refreshInterval: refreshInterval,
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 	}
 }
 
@@ -151,6 +148,30 @@ func (m Model) InSelector() bool { return m.focus == FocusSelector }
 
 // IsSearching reports whether the search input has focus.
 func (m Model) IsSearching() bool { return m.searchActive }
+
+// Escape clears one layer of list state per esc press: the committed
+// filter, then the member selection. It reports whether anything was cleared;
+// when nothing was, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if m.searchFilter != "" {
+		m.searchInput.SetValue("")
+		m.setSearchFilter("")
+		return true
+	}
+	if len(m.selectedMembers) > 0 {
+		m.selectedMembers = make(map[string]bool)
+		return true
+	}
+	return false
+}
+
+// FilterValue is the current search filter text, typed or committed.
+func (m Model) FilterValue() string {
+	if m.searchActive {
+		return m.searchInput.Value()
+	}
+	return m.searchFilter
+}
 
 // SelectedLB returns the load balancer under the selector cursor.
 func (m Model) SelectedLB() *loadbalancer.LoadBalancer {
@@ -422,7 +443,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.lbs = msg.lbs
-		m.err = ""
+		m.err = nil
 		m.sortLBs()
 		// Restore cursor position
 		if cursorID != "" {
@@ -447,7 +468,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case lbsErrMsg:
 		shared.Debugf("[lbview] error: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case detailLoadedMsg:
@@ -489,8 +510,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
+
+	case shared.SelectionChangedMsg:
+		return m.onSelectorChange()
 
 	case spinner.TickMsg:
 		if m.loading || m.detailLoading {
@@ -519,11 +543,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
-		if m.searchFilter != "" {
-			m.searchFilter = ""
-			m.searchInput.SetValue("")
-			m.cursor = 0
-			m.selectorScroll = 0
+		if m.Escape() {
 			return m.onSelectorChange()
 		}
 		return m, nil
@@ -558,17 +578,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m.reverseSort()
 		}
 
-	case msg.String() == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		if m.focus == FocusSelector {
 			m.searchActive = true
 			m.searchInput.SetValue(m.searchFilter)
 			m.searchInput.Focus()
 			return m, m.searchInput.Focus()
-		}
-
-	case key.Matches(msg, shared.Keys.Refresh):
-		if !m.searchActive {
-			return m, m.ForceRefresh()
 		}
 	}
 	return m, nil
@@ -579,37 +594,23 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Back):
 		// Esc: clear filter and exit search
 		m.searchActive = false
-		m.searchFilter = ""
 		m.searchInput.SetValue("")
 		m.searchInput.Blur()
-		m.cursor = 0
-		m.selectorScroll = 0
+		m.setSearchFilter("")
 		return m.onSelectorChange()
 
 	case key.Matches(msg, shared.Keys.Enter):
 		// Enter: keep filter and exit search
 		m.searchActive = false
-		m.searchFilter = m.searchInput.Value()
 		m.searchInput.Blur()
-		m.cursor = 0
-		m.selectorScroll = 0
-		visible := m.visibleLBs()
-		if m.cursor >= len(visible) {
-			m.cursor = max(0, len(visible)-1)
-		}
+		m.setSearchFilter(m.searchInput.Value())
 		return m.onSelectorChange()
 
 	default:
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
 		// Live filter as user types
-		m.searchFilter = m.searchInput.Value()
-		m.cursor = 0
-		m.selectorScroll = 0
-		visible := m.visibleLBs()
-		if m.cursor >= len(visible) {
-			m.cursor = max(0, len(visible)-1)
-		}
+		m.setSearchFilter(m.searchInput.Value())
 		var cmds []tea.Cmd
 		if cmd != nil {
 			cmds = append(cmds, cmd)
@@ -802,6 +803,21 @@ func (m Model) shouldRefreshDetail() (Model, bool) {
 
 // --- Filter/search ---
 
+// setSearchFilter applies a new search filter and keeps the cursor on the
+// selected load balancer while it still matches, as the server list does;
+// when it is filtered out the cursor returns to the top.
+func (m *Model) setSearchFilter(filter string) {
+	var cursorID string
+	if lb := m.SelectedLB(); lb != nil {
+		cursorID = lb.ID
+	}
+	m.searchFilter = filter
+	m.cursor = 0
+	m.restoreCursor(cursorID)
+	m.selectorScroll = min(m.selectorScroll, max(0, len(m.visibleLBs())-m.selectorVisibleLines()))
+	m.ensureSelectorCursorVisible()
+}
+
 func (m Model) visibleLBs() []loadbalancer.LoadBalancer {
 	if m.searchFilter == "" {
 		return m.lbs
@@ -824,15 +840,10 @@ func (m Model) cycleSort() (Model, tea.Cmd) {
 	if lb := m.SelectedLB(); lb != nil {
 		cursorID = lb.ID
 	}
-	m.sortCol = (m.sortCol + 1) % len(sortColumns)
-	m.sortAsc = true
-	m.sortHighlight = true
-	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.order = shared.NextSort(m.order, len(sortColumns))
 	m.sortLBs()
 	m.restoreCursor(cursorID)
-	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return sortClearMsg{}
-	})
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
 func (m Model) reverseSort() (Model, tea.Cmd) {
@@ -840,25 +851,22 @@ func (m Model) reverseSort() (Model, tea.Cmd) {
 	if lb := m.SelectedLB(); lb != nil {
 		cursorID = lb.ID
 	}
-	m.sortAsc = !m.sortAsc
-	m.sortHighlight = true
-	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.order = shared.ReverseSort(m.order)
 	m.sortLBs()
 	m.restoreCursor(cursorID)
-	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return sortClearMsg{}
-	})
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
+// restoreCursor puts the cursor back on the load balancer with cursorID
+// when it is still listed.
 func (m *Model) restoreCursor(cursorID string) {
-	if cursorID == "" {
-		return
+	vis := m.visibleLBs()
+	ids := make([]string, len(vis))
+	for i, lb := range vis {
+		ids[i] = lb.ID
 	}
-	for i, lb := range m.visibleLBs() {
-		if lb.ID == cursorID {
-			m.cursor = i
-			return
-		}
+	if i := shared.RestoreCursor(ids, cursorID); i >= 0 {
+		m.cursor = i
 	}
 }
 
@@ -866,8 +874,8 @@ func (m *Model) sortLBs() {
 	if len(m.lbs) == 0 {
 		return
 	}
-	colKey := sortColumns[m.sortCol]
-	asc := m.sortAsc
+	colKey := sortColumns[m.order.Col]
+	asc := m.order.Asc
 	sort.SliceStable(m.lbs, func(i, j int) bool {
 		a, b := m.lbs[i], m.lbs[j]
 		if !asc {
@@ -1062,12 +1070,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.lbs))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if len(m.lbs) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No load balancers found.") + "\n")
@@ -1089,7 +1093,7 @@ func (m Model) renderWide() string {
 	selH := m.selectorHeight()
 
 	// Selector: full width
-	selContent := padContent(m.selectorTitle(), m.renderSelectorContent(m.width-4, selH-4))
+	selContent := shared.PadContent(m.selectorTitle(), m.renderSelectorContent(m.width-4, selH-4))
 	selPanel := m.panelBorder(FocusSelector).
 		Width(m.width).
 		Height(selH).
@@ -1105,16 +1109,16 @@ func (m Model) renderWide() string {
 	leftW := m.width * 35 / 100
 	rightW := m.width - leftW - 1
 
-	infoContent := padContent(m.panelTitle(FocusInfo), m.renderInfoContent(leftW-4))
+	infoContent := shared.PadContent(m.panelTitle(FocusInfo), m.renderInfoContent(leftW-4))
 	infoPanel := m.panelBorder(FocusInfo).Width(leftW).Height(topH).Render(infoContent)
 
-	listenersContent := padContent(m.panelTitle(FocusListeners), m.renderListenersContent(rightW-4, topH-4))
+	listenersContent := shared.PadContent(m.panelTitle(FocusListeners), m.renderListenersContent(rightW-4, topH-4))
 	listenersPanel := m.panelBorder(FocusListeners).Width(rightW).Height(topH).Render(listenersContent)
 
-	poolsContent := padContent(m.panelTitle(FocusPools), m.renderPoolsContent(leftW-4, bottomH-4))
+	poolsContent := shared.PadContent(m.panelTitle(FocusPools), m.renderPoolsContent(leftW-4, bottomH-4))
 	poolsPanel := m.panelBorder(FocusPools).Width(leftW).Height(bottomH).Render(poolsContent)
 
-	membersContent := padContent(m.panelTitle(FocusMembers), m.renderMembersContent(rightW-4, bottomH-4))
+	membersContent := shared.PadContent(m.panelTitle(FocusMembers), m.renderMembersContent(rightW-4, bottomH-4))
 	membersPanel := m.panelBorder(FocusMembers).Width(rightW).Height(bottomH).Render(membersContent)
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", listenersPanel)
@@ -1131,7 +1135,7 @@ func (m Model) renderNarrow() string {
 	remaining := totalH - selH
 
 	selContent := m.renderSelectorContent(w-4, selH-4)
-	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(padContent(m.selectorTitle(), selContent))
+	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(shared.PadContent(m.selectorTitle(), selContent))
 
 	if m.SelectedLB() == nil {
 		return selPanel
@@ -1148,27 +1152,15 @@ func (m Model) renderNarrow() string {
 		}
 	}
 
-	infoPanel := m.panelBorder(FocusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(FocusInfo), m.renderInfoContent(w-4)))
-	listenersPanel := m.panelBorder(FocusListeners).Width(w).Height(listenersH).Render(padContent(m.panelTitle(FocusListeners), m.renderListenersContent(w-4, listenersH-4)))
-	poolsPanel := m.panelBorder(FocusPools).Width(w).Height(poolsH).Render(padContent(m.panelTitle(FocusPools), m.renderPoolsContent(w-4, poolsH-4)))
-	membersPanel := m.panelBorder(FocusMembers).Width(w).Height(membersH).Render(padContent(m.panelTitle(FocusMembers), m.renderMembersContent(w-4, membersH-4)))
+	infoPanel := m.panelBorder(FocusInfo).Width(w).Height(infoH).Render(shared.PadContent(m.panelTitle(FocusInfo), m.renderInfoContent(w-4)))
+	listenersPanel := m.panelBorder(FocusListeners).Width(w).Height(listenersH).Render(shared.PadContent(m.panelTitle(FocusListeners), m.renderListenersContent(w-4, listenersH-4)))
+	poolsPanel := m.panelBorder(FocusPools).Width(w).Height(poolsH).Render(shared.PadContent(m.panelTitle(FocusPools), m.renderPoolsContent(w-4, poolsH-4)))
+	membersPanel := m.panelBorder(FocusMembers).Width(w).Height(membersH).Render(shared.PadContent(m.panelTitle(FocusMembers), m.renderMembersContent(w-4, membersH-4)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, listenersPanel, poolsPanel, membersPanel)
 }
 
 // --- Panel helpers ---
-
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "")
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) selectorTitle() string {
 	borderColor := shared.ColorMuted
@@ -1287,15 +1279,8 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 	var headerParts []string
 	for i, h := range headerTitles {
 		title := h.title
-		indicator := ""
-		if i == m.sortCol {
-			if m.sortAsc {
-				indicator = " \u25b2"
-			} else {
-				indicator = " \u25bc"
-			}
-		}
-		if i == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(i)
+		if i == m.order.Col && m.order.Highlight {
 			headerParts = append(headerParts, lipgloss.NewStyle().
 				Foreground(shared.ColorHighlight).Bold(true).
 				Render(fmt.Sprintf("%-*s", h.width, title+indicator)))
@@ -1356,10 +1341,10 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		}
 
 		parts := []string{
-			nameStyle.Render(truncate(name, nameW)),
-			vipStyle.Render(truncate(lb.VipAddress, 18)),
-			psStyle.Render(provIcon + truncate(lb.ProvisioningStatus, 16)),
-			osStyle.Render(operIcon + truncate(lb.OperatingStatus, 14)),
+			nameStyle.Render(shared.TruncateCells(name, nameW)),
+			vipStyle.Render(shared.TruncateCells(lb.VipAddress, 18)),
+			psStyle.Render(provIcon + shared.TruncateCells(lb.ProvisioningStatus, 16)),
+			osStyle.Render(operIcon + shared.TruncateCells(lb.OperatingStatus, 14)),
 		}
 
 		prefixStyle := lipgloss.NewStyle()
@@ -1925,7 +1910,10 @@ func (m Model) renderActionBar() string {
 			}
 		}
 	}
-	buttons = append(buttons, btn{"tab", "Switch Pane"}, btn{"esc", "Back"})
+	buttons = append(buttons, btn{"tab", "Switch Pane"})
+	if m.searchFilter != "" || len(m.selectedMembers) > 0 {
+		buttons = append(buttons, btn{"esc", "Clear"})
+	}
 
 	var parts []string
 	totalLen := 0
@@ -1948,16 +1936,6 @@ func (m Model) renderActionBar() string {
 }
 
 // --- Style helpers ---
-
-func truncate(s string, w int) string {
-	if len(s) > w && w > 3 {
-		return s[:w-3] + "..."
-	}
-	if len(s) > w {
-		return s[:w]
-	}
-	return s
-}
 
 func provStatusStyle(status string) lipgloss.Style {
 	var fg color.Color = shared.ColorFg
@@ -2130,16 +2108,27 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
+	if m.searchActive {
+		return "enter confirm \u2022 esc clear"
+	}
+	// esc only clears state here; it never leaves the view.
+	esc := ""
+	switch {
+	case m.searchFilter != "":
+		esc = "esc clear filter \u2022 "
+	case len(m.selectedMembers) > 0:
+		esc = "esc clear selection \u2022 "
+	}
 	switch m.focus {
 	case FocusSelector:
-		return "\u2191\u2193 navigate \u2022 / search \u2022 S sort \u2022 ^n create \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 / search \u2022 s/S sort \u2022 ^n create \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 " + esc + "? help"
 	case FocusListeners:
-		return "\u2191\u2193 navigate \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 " + esc + "? help"
 	case FocusPools:
-		return "\u2191\u2193 select pool \u2022 ^h monitor \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 select pool \u2022 ^h monitor \u2022 o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 " + esc + "? help"
 	case FocusMembers:
-		return "\u2191\u2193 navigate \u2022 space select \u2022 x all \u2022 w drain \u2022 o admin \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 space select \u2022 x all \u2022 w drain \u2022 o admin \u2022 ^d delete \u2022 R refresh \u2022 " + esc + "? help"
 	default:
-		return "o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 esc back \u2022 ? help"
+		return "o toggle admin \u2022 tab switch pane \u2022 ^d delete \u2022 R refresh \u2022 " + esc + "? help"
 	}
 }

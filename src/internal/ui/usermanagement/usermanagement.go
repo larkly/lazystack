@@ -60,7 +60,7 @@ type Model struct {
 	height         int
 	loading        bool
 	spinner        spinner.Model
-	err            string
+	err            error
 	notice         string         // result of the last mutation, or why it was refused
 	pending        *pendingAction // mutation awaiting confirmation
 	busy           bool           // a mutation request is in flight
@@ -89,14 +89,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case usersLoadedMsg:
 		m.loading = false
 		m.setItems(msg.items)
-		m.err = ""
+		m.err = nil
 		m.pending = nil
 		m.busy = false
 		return m, nil
 
 	case usersErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
+		// The error line takes a row; keep the cursor on screen.
+		if visible := m.visibleRows(); m.cursor >= m.scroll+visible {
+			m.scroll = m.cursor - visible + 1
+		}
 		m.pending = nil
 		m.busy = false
 		return m, nil
@@ -109,7 +113,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.refreshErr == nil {
-			m.err = ""
+			m.err = nil
 			m.setItems(msg.items)
 			return m, nil
 		}
@@ -290,6 +294,9 @@ func applyMutation(items []compute.User, msg userMutatedMsg) []compute.User {
 
 func (m Model) visibleRows() int {
 	h := m.height - 6 // title + header + footer + status bar
+	if m.err != nil {
+		h-- // error line under the title
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -305,6 +312,9 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	b.WriteString(title + "\n")
+	if m.err != nil {
+		b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
+	}
 
 	if m.pending != nil {
 		u := m.pending.user
@@ -316,11 +326,6 @@ func (m Model) View() string {
 
 	if m.notice != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorWarning).Render("  "+m.notice) + "\n\n")
-	}
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
 	}
 
 	if len(m.items) == 0 && !m.loading {
@@ -354,11 +359,11 @@ func (m Model) View() string {
 
 		row := fmt.Sprintf("%s%-30s %-35s %-8s %-20s %-30s",
 			prefix,
-			truncate(u.Name, 29),
-			truncate(u.Email, 34),
+			shared.TruncateCells(u.Name, 29),
+			shared.TruncateCells(u.Email, 34),
 			enabledStr,
-			truncate(u.DomainID, 19),
-			truncate(u.Description, 29),
+			shared.TruncateCells(u.DomainID, 19),
+			shared.TruncateCells(u.Description, 29),
 		)
 
 		style := lipgloss.NewStyle()
@@ -455,14 +460,4 @@ func userAudit(p pendingAction, err error) shared.Audit {
 	}
 	return shared.NewAudit(action, "user", p.user.ID, p.user.Name, err).
 		WithDetails(map[string]string{"domain_id": p.user.DomainID})
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 0 {
-		return ""
-	}
-	return s[:n-1] + "…"
 }

@@ -145,3 +145,8 @@ func FromServerColumns(serverCols []struct {
 	}
 	return out
 }
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return shared.Glyph("↑↓", "up/down") + " select • " + shared.Glyph("←→", "left/right") + " reorder • space toggle • enter apply • esc cancel"
+}

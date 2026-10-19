@@ -32,7 +32,7 @@ type Model struct {
 	height  int
 	loading bool
 	spinner spinner.Model
-	err     string
+	err     error
 }
 
 // New creates a hypervisor list model.
@@ -57,12 +57,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case hypervisorsLoadedMsg:
 		m.loading = false
 		m.items = msg.items
-		m.err = ""
+		m.err = nil
 		return m, nil
 
 	case hypervisorsErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
+		// The error line takes a row; keep the cursor on screen.
+		if visible := m.visibleRows(); m.cursor >= m.scroll+visible {
+			m.scroll = m.cursor - visible + 1
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -121,6 +125,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) visibleRows() int {
 	h := m.height - 4 // title + status bar + header
+	if m.err != nil {
+		h-- // error line under the title
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -136,10 +143,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	b.WriteString(title + "\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
+	if m.err != nil {
+		b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 	}
 
 	if len(m.items) == 0 && !m.loading {
@@ -171,7 +176,7 @@ func (m Model) View() string {
 
 		row := fmt.Sprintf("%s%-30s %-12s %s/%s %s/%s %s%s",
 			prefix,
-			truncate(h.Name, 29),
+			shared.TruncateCells(h.Name, 29),
 			h.Status,
 			formatInt(h.VCPUsUsed), formatInt(h.VCPUs),
 			formatInt(ramUsedGB), formatInt(ramTotalGB),
@@ -224,13 +229,6 @@ func (m Model) fetch() tea.Cmd {
 		}
 		return hypervisorsLoadedMsg{items: items}
 	}
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }
 
 func formatInt(n int) string {

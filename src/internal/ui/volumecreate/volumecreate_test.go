@@ -70,3 +70,18 @@ func TestShortVolumeTypeIDsDoNotPanic(t *testing.T) {
 		t.Fatal("type picker did not render")
 	}
 }
+
+func TestSubmitTwiceProducesOneCommand(t *testing.T) {
+	m := New(nil)
+	m.nameInput.SetValue("vol")
+	m.sizeInput.SetValue("10")
+	ctrlS := tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
+	m, first := m.Update(ctrlS)
+	if first == nil || !m.submitting {
+		t.Fatalf("first submit: cmd=%v submitting=%v", first != nil, m.submitting)
+	}
+	m, second := m.Update(ctrlS)
+	if second != nil {
+		t.Fatal("second submit while submitting produced a command")
+	}
+}

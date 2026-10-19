@@ -138,7 +138,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case fetchErrMsg:
 		m.loading--
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 	case azsLoadedMsg:
 		// A failed zone lookup is not fatal: the volume can still be
@@ -148,7 +148,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.azs = msg.azs
 		m.azErr = ""
 		if msg.err != nil {
-			m.azErr = msg.err.Error()
+			m.azErr = shared.ParseError(msg.err).FriendlyMessage
 		}
 		if m.selectedAZ >= len(m.azs) {
 			m.selectedAZ = -1
@@ -157,12 +157,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case volumeCreatedMsg:
 		m.submitting = false
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "volumelist"}
+		name := msg.vol.Name
+		if name == "" {
+			name = msg.vol.ID
 		}
+		return m, shared.CreatedCmd("volumelist", msg.vol.ID, name)
 	case volumeCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -211,7 +213,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField++
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			switch m.focusField {
@@ -287,7 +289,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -312,12 +314,12 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	items := m.pickerItems()
 
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.pickerOpen = false
 		m.pickerFilter.Blur()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		filtered := m.filteredPickerItems(items)
 		if len(filtered) > 0 && m.pickerCursor < len(filtered) {
 			m.setPickerSelection(filtered[m.pickerCursor].id)
@@ -327,12 +329,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.focusField = (m.focusField + 1) % numFields
 		m.updateFocus()
 		return m, nil
-	case "up":
+	case shared.MatchesNonText(msg, shared.Keys.Up):
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down":
+	case shared.MatchesNonText(msg, shared.Keys.Down):
 		filtered := m.filteredPickerItems(items)
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
@@ -413,6 +415,9 @@ func (m *Model) updateFocus() {
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
+	if m.submitting {
+		return m, nil
+	}
 	name := strings.TrimSpace(m.nameInput.Value())
 	if name == "" {
 		m.err = "Volume name is required"

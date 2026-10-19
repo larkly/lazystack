@@ -2,6 +2,7 @@ package subnetcreate
 
 import (
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -88,9 +89,9 @@ func New(client *gophercloud.ServiceClient, networkID, networkName string) Model
 
 	gi := textinput.New()
 	gi.Prompt = ""
-	gi.Placeholder = "auto (or e.g. 10.0.0.1)"
+	gi.Placeholder = `IP, blank = auto, "none" = no gateway`
 	gi.CharLimit = 39
-	gi.SetWidth(25)
+	gi.SetWidth(40)
 
 	pi := textinput.New()
 	pi.Prompt = ""
@@ -162,7 +163,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case subnetCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 	case subnetPoolsLoadedMsg:
 		m.loading = false
@@ -209,7 +210,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.ShiftTab):
 			m.moveFocus(-1)
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			switch m.focusField {
@@ -315,7 +316,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -407,6 +408,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 	if m.ipVersion == 1 {
 		ipVer = 6
 	}
+	if err := validateAddressing(ipVer, cidr, m.gatewayInput.Value()); err != nil {
+		m.err = err.Error()
+		return m, nil
+	}
 
 	prefixLen := 0
 	if ipVer == 6 && poolSelected {
@@ -426,7 +431,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		Name:       strings.TrimSpace(m.nameInput.Value()),
 		CIDR:       cidr,
 		IPVersion:  ipVer,
-		GatewayIP:  strings.TrimSpace(m.gatewayInput.Value()),
+		GatewayIP:  gatewayOpt(m.gatewayInput.Value()),
 		EnableDHCP: m.dhcp == 0,
 		PrefixLen:  prefixLen,
 	}
@@ -456,6 +461,66 @@ func (m Model) submit() (Model, tea.Cmd) {
 		shared.Debugf("[subnetcreate] created subnet %q in network %s", opts.Name, m.networkName)
 		return subnetCreatedMsg{Audit: rec}
 	})
+}
+
+// validateAddressing checks the CIDR and gateway against the selected IP
+// version. cidr may be blank when a subnet pool allocates it; the gateway
+// may be blank (auto) or "none".
+func validateAddressing(ipVer int, cidr, gateway string) error {
+	if cidr != "" {
+		prefix, err := netip.ParsePrefix(cidr)
+		if err != nil {
+			return fmt.Errorf("CIDR %q is not a valid CIDR, e.g. 10.0.0.0/24 or 2001:db8::/64", cidr)
+		}
+		if err := checkFamily("CIDR", cidr, prefix.Addr(), ipVer); err != nil {
+			return err
+		}
+		if masked := prefix.Masked(); masked != prefix {
+			return fmt.Errorf("CIDR %s has host bits set, use %s", cidr, masked)
+		}
+	}
+	gw := strings.TrimSpace(gateway)
+	if gw == "" || network.IsNoGateway(gw) {
+		return nil
+	}
+	if !shared.ValidIP(gw) {
+		//lint:ignore ST1005 shown verbatim as the form's error line, like its other messages
+		return fmt.Errorf(`Gateway %q is not a valid IP address (or "none")`, gw)
+	}
+	if cidr == "" {
+		return checkFamily("Gateway", gw, netip.MustParseAddr(gw), ipVer)
+	}
+	if !shared.IPInCIDR(gw, cidr) {
+		//lint:ignore ST1005 shown verbatim as the form's error line, like its other messages
+		return fmt.Errorf("Gateway %s is not inside %s", gw, cidr)
+	}
+	return nil
+}
+
+// checkFamily rejects an address of the other IP family than ipVer.
+func checkFamily(what, raw string, addr netip.Addr, ipVer int) error {
+	got := 6
+	if addr.Is4() {
+		got = 4
+	}
+	if got != ipVer {
+		return fmt.Errorf("%s %s is IPv%d but IPv%d is selected", what, raw, got, ipVer)
+	}
+	return nil
+}
+
+// gatewayOpt maps the gateway field to CreateSubnet's GatewayIP: blank
+// leaves the choice to Neutron (the first address), "none" in any case
+// means no gateway, anything else is used as the address.
+func gatewayOpt(raw string) *string {
+	gw := strings.TrimSpace(raw)
+	switch {
+	case gw == "":
+		return nil
+	case network.IsNoGateway(gw):
+		gw = ""
+	}
+	return &gw
 }
 
 // subnetID returns the ID of a subnet returned by a request, if any.
@@ -593,4 +658,9 @@ func (m Model) renderModal(content string) string {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return "tab/" + shared.Glyph("↑↓", "up/down") + " fields • " + shared.Glyph("←→", "left/right") + " cycle • ctrl+s submit • esc cancel"
 }

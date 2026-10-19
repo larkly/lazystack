@@ -68,7 +68,16 @@ var (
 	keyEsc   = tea.KeyPressMsg{Code: tea.KeyEscape}
 	keyDown  = tea.KeyPressMsg{Code: tea.KeyDown}
 	keyTab   = tea.KeyPressMsg{Code: tea.KeyTab}
+	keyD     = tea.KeyPressMsg{Code: 'd', Text: "d"}
+	keyY     = tea.KeyPressMsg{Code: 'y', Text: "y"}
+	keyN     = tea.KeyPressMsg{Code: 'n', Text: "n"}
 )
+
+// deleteSelected presses d and confirms with y.
+func deleteSelected(m Model) (Model, tea.Cmd) {
+	m, _ = press(m, keyD)
+	return press(m, keyY)
+}
 
 func newModel(t *testing.T, meta map[string]string) (Model, *metaRecorder) {
 	t.Helper()
@@ -146,7 +155,10 @@ func TestSubmittingLocksEditor(t *testing.T) {
 			m, _ = press(m, keyTab)
 			return runes(m, "x")
 		}, []tea.KeyPressMsg{keyEnter}},
-		{"delete", func(m Model) Model { return m }, []tea.KeyPressMsg{{Code: 'd', Text: "d"}}},
+		{"delete", func(m Model) Model {
+			m, _ = press(m, keyD)
+			return m
+		}, []tea.KeyPressMsg{keyY}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -183,7 +195,7 @@ func TestSubmittingLocksEditor(t *testing.T) {
 func TestSubmitErrorUnlocksEditor(t *testing.T) {
 	m, rec := newModel(t, map[string]string{"role": "db"})
 	rec.failDel = true
-	m, cmd := press(m, tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m, cmd := deleteSelected(m)
 	if !m.submitting {
 		t.Fatal("delete did not lock")
 	}
@@ -192,7 +204,7 @@ func TestSubmitErrorUnlocksEditor(t *testing.T) {
 		t.Fatalf("error not surfaced: submitting=%v active=%v\n%s", m.submitting, m.Active, m.View())
 	}
 	rec.failDel = false
-	m, cmd = press(m, tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m, cmd = deleteSelected(m)
 	if cmd == nil || !m.submitting {
 		t.Fatal("retry after error not accepted")
 	}
@@ -219,8 +231,11 @@ func TestRenameWritesNewKeyBeforeRemovingOld(t *testing.T) {
 			t.Fatalf("requests=%v want %v", got, want)
 		}
 		m, done := m.Update(msg)
-		if m.Active || done == nil {
-			t.Fatal("successful rename did not close")
+		if !m.Active || done == nil {
+			t.Fatal("successful rename closed the editor or reported nothing")
+		}
+		if _, ok := m.metadata["old"]; ok || m.metadata["new"] != "v1" {
+			t.Fatalf("local view after rename=%v", m.metadata)
 		}
 	})
 
@@ -282,7 +297,7 @@ func TestCursorClampsToLastKey(t *testing.T) {
 		t.Fatalf("edit not actionable: mode=%q key=%q", m.mode, m.editKey)
 	}
 	m, _ = press(m, keyEsc)
-	_, cmd := press(m, tea.KeyPressMsg{Code: 'd', Text: "d"})
+	_, cmd := deleteSelected(m)
 	if cmd == nil {
 		t.Fatal("delete not actionable")
 	}
@@ -300,8 +315,8 @@ func TestCursorClampsToLastKey(t *testing.T) {
 	if empty.cursor != 0 {
 		t.Fatalf("empty cursor=%d", empty.cursor)
 	}
-	if _, cmd := press(empty, tea.KeyPressMsg{Code: 'd', Text: "d"}); cmd != nil {
-		t.Fatal("delete on empty map produced a command")
+	if empty, cmd := deleteSelected(empty); cmd != nil || empty.mode != "" {
+		t.Fatalf("delete on empty map: cmd=%v mode=%q", cmd != nil, empty.mode)
 	}
 
 	// Removing the selected final key reclamps the cursor.
@@ -310,7 +325,7 @@ func TestCursorClampsToLastKey(t *testing.T) {
 	if m2.cursor != 1 {
 		t.Fatalf("cursor=%d", m2.cursor)
 	}
-	m2, cmd = press(m2, tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m2, cmd = deleteSelected(m2)
 	m2, _ = m2.Update(cmd())
 	if m2.cursor != 0 {
 		t.Fatalf("cursor after deleting last key=%d", m2.cursor)
@@ -319,7 +334,7 @@ func TestCursorClampsToLastKey(t *testing.T) {
 
 func TestDeleteReportsDeletion(t *testing.T) {
 	m, _ := newModel(t, map[string]string{"role": "db"})
-	m, cmd := press(m, tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m, cmd := deleteSelected(m)
 	_, done := m.Update(cmd())
 	if done == nil {
 		t.Fatal("no completion message")
@@ -357,5 +372,114 @@ func TestRenderSelectedRowKeepsBaseStyles(t *testing.T) {
 	unsel := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Bold(true).Width(28).Render("b")
 	if !strings.Contains(lines[1], unsel) {
 		t.Fatalf("unselected key style changed: %q", lines[1])
+	}
+}
+
+// d names the key and the server and waits for y; n and esc keep the key.
+func TestDeleteAsksForConfirmation(t *testing.T) {
+	m, rec := newModel(t, map[string]string{"role": "db", "zone": "a"})
+	m, _ = press(m, keyDown)
+	for _, cancel := range []tea.KeyPressMsg{keyN, keyEsc} {
+		var cmd tea.Cmd
+		m, cmd = press(m, keyD)
+		if cmd != nil || m.submitting {
+			t.Fatal("d deleted without confirmation")
+		}
+		if v := m.View(); !strings.Contains(v, `Delete metadata key "zone" from web?`) {
+			t.Fatalf("prompt does not name the key and server:\n%s", v)
+		}
+		if !strings.Contains(m.Hints(), "y delete") {
+			t.Fatalf("hints=%q", m.Hints())
+		}
+		if v := m.View(); !strings.Contains(v, "y delete • n/esc cancel") || strings.Contains(v, "a add") {
+			t.Fatalf("footer does not match the delete question:\n%s", v)
+		}
+		m, cmd = press(m, cancel)
+		if cmd != nil || !m.Active || m.mode != "" {
+			t.Fatalf("%s: active=%v mode=%q", cancel.String(), m.Active, m.mode)
+		}
+	}
+	if got := rec.got(); len(got) != 0 {
+		t.Fatalf("requests after cancel=%v", got)
+	}
+	m, cmd := deleteSelected(m)
+	if cmd == nil || !m.submitting {
+		t.Fatal("y did not delete")
+	}
+	cmd()
+	if got := rec.got(); len(got) != 1 || got[0] != "DELETE /servers/srv-1/metadata/zone" {
+		t.Fatalf("requests=%v", got)
+	}
+}
+
+// The editor stays open after each change, mirrors it locally and says it
+// was saved; Esc closes it.
+func TestEditorStaysOpenAfterEachOperation(t *testing.T) {
+	saved := shared.Glyph("✓", "OK") + " saved"
+	m, rec := newModel(t, map[string]string{"role": "db"})
+	finish := func(m Model, cmd tea.Cmd) Model {
+		t.Helper()
+		if cmd == nil {
+			t.Fatal("no request command")
+		}
+		m, done := m.Update(cmd())
+		if done == nil {
+			t.Fatal("no completion message for the app")
+		}
+		if got, ok := done().(shared.ServerActionMsg); !ok || got.Name != "web" {
+			t.Fatalf("completion=%#v", got)
+		}
+		if !m.Active || m.submitting || m.mode != "" {
+			t.Fatalf("after save: active=%v submitting=%v mode=%q", m.Active, m.submitting, m.mode)
+		}
+		if !strings.Contains(m.View(), saved) {
+			t.Fatalf("no saved status:\n%s", m.View())
+		}
+		return m
+	}
+
+	// Add.
+	m = runes(m, "a")
+	m = runes(m, "owner")
+	m, _ = press(m, keyTab)
+	m = runes(m, "ops")
+	m, cmd := press(m, keyEnter)
+	m = finish(m, cmd)
+	if m.metadata["owner"] != "ops" || m.metadata["role"] != "db" {
+		t.Fatalf("after add=%v", m.metadata)
+	}
+	if keys := m.sortedKeys(); keys[m.cursor] != "owner" {
+		t.Fatalf("cursor on %q, want the saved key", keys[m.cursor])
+	}
+
+	// Any key clears the status.
+	m, _ = press(m, keyDown)
+	if strings.Contains(m.View(), saved) {
+		t.Fatal("saved status outlived the next key")
+	}
+
+	// Edit with rename: role -> tier.
+	m = runes(m, "e")
+	m.keyInput.SetValue("tier")
+	m.valueInput.SetValue("web")
+	m, cmd = press(m, keyEnter)
+	m = finish(m, cmd)
+	if _, ok := m.metadata["role"]; ok || m.metadata["tier"] != "web" {
+		t.Fatalf("after rename=%v", m.metadata)
+	}
+
+	// Delete.
+	m, cmd = deleteSelected(m)
+	m = finish(m, cmd)
+	if _, ok := m.metadata["tier"]; ok || len(m.metadata) != 1 {
+		t.Fatalf("after delete=%v", m.metadata)
+	}
+
+	if n := len(rec.got()); n != 4 {
+		t.Fatalf("requests=%v", rec.got())
+	}
+	m, _ = press(m, keyEsc)
+	if m.Active {
+		t.Fatal("esc did not close the editor")
 	}
 }

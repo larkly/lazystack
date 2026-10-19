@@ -132,14 +132,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.privateKey = msg.kp.PrivateKey
 			m.publicKey = msg.kp.PublicKey
 			m.keypairName = msg.kp.Name
-			return m, nil
+			// The form stays on the private key; the list highlights
+			// the new key pair when the user leaves.
+			return m, shared.CreatedReportCmd(msg.kp.Name)
 		}
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "keypairlist"}
-		}
+		return m, shared.CreatedCmd("keypairlist", msg.kp.Name, msg.kp.Name)
 	case keypairCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -175,20 +175,14 @@ func (m Model) handlePrivateKeyView(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleSaveInput(msg)
 	}
 
+	leave := func() tea.Msg {
+		return shared.ViewChangeMsg{View: "keypairlist", Highlight: m.keypairName}
+	}
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
-		if m.savedPath != "" {
-			return m, func() tea.Msg {
-				return shared.ViewChangeMsg{View: "keypairlist"}
-			}
-		}
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "keypairlist"}
-		}
+		return m, leave
 	case key.Matches(msg, shared.Keys.Enter):
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "keypairlist"}
-		}
+		return m, leave
 	case key.Matches(msg, shared.Keys.Down):
 		m.privateScroll++
 		lines := strings.Count(m.privateKey, "\n") + 1
@@ -204,7 +198,7 @@ func (m Model) handlePrivateKeyView(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.privateScroll--
 		}
 	default:
-		if msg.String() == "s" && m.savedPath == "" {
+		if key.Matches(msg, shared.Keys.SaveKey) && m.savedPath == "" {
 			m.showSaveInput = true
 			home, _ := os.UserHomeDir()
 			defaultPath := filepath.Join(home, ".ssh", m.keypairName)
@@ -362,7 +356,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField++
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			switch m.focusField {
@@ -442,7 +436,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 

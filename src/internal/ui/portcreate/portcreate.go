@@ -146,7 +146,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case sgLoadErrMsg:
 		m.loadingSGs = false
-		m.sgLoadErr = msg.err.Error()
+		m.sgLoadErr = shared.ParseError(msg.err).FriendlyMessage
 		m.err = "Failed to load security groups: " + m.sgLoadErr + " (the server default will apply)"
 		return m, nil
 	case portCreatedMsg:
@@ -157,7 +157,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case portCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		if m.sgLoadErr != "" {
 			m.err += " (security groups could not be loaded; the server default was requested)"
 		}
@@ -211,7 +211,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField++
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			return m.routeToInput(msg)
@@ -263,7 +263,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.Active = false
 			return m, nil
 		}
-	case msg.String() == "ctrl+s":
+	case key.Matches(msg, shared.Keys.Submit):
 		return m.submit()
 	}
 
@@ -273,18 +273,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) updateSGPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	filtered := m.filteredSGs()
 
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.sgPickerOpen = false
 		m.sgPickerFilter.Blur()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		m.sgPickerOpen = false
 		m.sgPickerFilter.Blur()
 		m.focusField++
 		m.updateFocus()
 		return m, nil
-	case "space":
+	case shared.MatchesNonText(msg, shared.Keys.Select):
 		if len(filtered) > 0 && m.sgPickerCursor < len(filtered) {
 			idx := filtered[m.sgPickerCursor].id
 			if m.selectedSGs[idx] {
@@ -294,12 +294,12 @@ func (m Model) updateSGPicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "up":
+	case shared.MatchesNonText(msg, shared.Keys.Up):
 		if m.sgPickerCursor > 0 {
 			m.sgPickerCursor--
 		}
 		return m, nil
-	case "down":
+	case shared.MatchesNonText(msg, shared.Keys.Down):
 		if m.sgPickerCursor < len(filtered)-1 {
 			m.sgPickerCursor++
 		}
@@ -484,7 +484,7 @@ func (m Model) parseFixedIPs(raw string) ([]network.FixedIP, error) {
 			return nil, fmt.Errorf("missing subnet before %q", part[idx:])
 		}
 		if ip != "" {
-			if _, err := netip.ParseAddr(ip); err != nil {
+			if !shared.ValidIP(ip) {
 				return nil, fmt.Errorf("invalid IP address %q for subnet %q", ip, subnetName)
 			}
 		}
@@ -552,6 +552,7 @@ func (m Model) resolveSubnet(name string) (string, error) {
 	return "", fmt.Errorf("unknown subnet %q", name)
 }
 
+// parseAddressPairs parses semicolon-separated ip[/prefix][,mac] entries.
 func parseAddressPairs(raw string) ([]network.AddressPair, error) {
 	var result []network.AddressPair
 	for _, part := range strings.Split(raw, ";") {
@@ -559,13 +560,15 @@ func parseAddressPairs(raw string) ([]network.AddressPair, error) {
 		if part == "" {
 			continue
 		}
-		if idx := strings.Index(part, ","); idx >= 0 {
-			ip := strings.TrimSpace(part[:idx])
-			mac := strings.TrimSpace(part[idx+1:])
-			result = append(result, network.AddressPair{IPAddress: ip, MACAddress: mac})
-		} else {
-			result = append(result, network.AddressPair{IPAddress: part})
+		ip, mac, hasMAC := strings.Cut(part, ",")
+		ip, mac = strings.TrimSpace(ip), strings.TrimSpace(mac)
+		if _, ok := shared.ParseIPOrCIDR(ip); !ok {
+			return nil, fmt.Errorf("address pair %q: %q is not a valid IP or CIDR", part, ip)
 		}
+		if hasMAC && !shared.ValidMAC(mac) {
+			return nil, fmt.Errorf("address pair %q: %q is not a valid MAC address", part, mac)
+		}
+		result = append(result, network.AddressPair{IPAddress: ip, MACAddress: mac})
 	}
 	return result, nil
 }
@@ -724,4 +727,12 @@ func (m Model) renderModal(content string) string {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.sgPickerOpen {
+		return shared.Glyph("↑↓", "up/down") + " navigate • space toggle • enter confirm • esc close • type to filter"
+	}
+	return "tab/" + shared.Glyph("↑↓", "up/down") + " fields • " + shared.Glyph("←→", "left/right") + " cycle • ctrl+s submit • esc cancel"
 }

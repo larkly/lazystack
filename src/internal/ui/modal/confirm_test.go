@@ -1,6 +1,7 @@
 package modal
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -42,6 +43,38 @@ func TestNewBulkConfirm(t *testing.T) {
 	}
 	if m.focused != 1 {
 		t.Errorf("focused = %d, want 1 (cancel by default)", m.focused)
+	}
+}
+
+// A bulk confirmation names the servers it acts on: up to five names,
+// then a count of the rest.
+func TestBulkConfirmBodyNamesServers(t *testing.T) {
+	refs := func(names ...string) []ServerRef {
+		out := make([]ServerRef, len(names))
+		for i, n := range names {
+			out[i] = ServerRef{ID: "id-" + n, Name: n}
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		action string
+		refs   []ServerRef
+		want   string
+	}{
+		{"delete", refs("a", "b", "c"), "Delete 3 servers: a, b, c"},
+		{"soft reboot", refs("a", "b"), "Soft reboot 2 servers: a, b"},
+		{"pause", refs("a", "b", "c", "d", "e"), "Pause 5 servers: a, b, c, d, e"},
+		{"delete", refs("a", "b", "c", "d", "e", "f", "g"), "Delete 7 servers: a, b, c, d, e and 2 more"},
+		{"stop", []ServerRef{{ID: "id-x"}, {ID: "id-y", Name: "y"}}, "Stop 2 servers: id-x, y"},
+	} {
+		m := NewBulkConfirm(tc.action, tc.refs)
+		if m.Body != tc.want {
+			t.Errorf("Body = %q, want %q", m.Body, tc.want)
+		}
+		m.SetSize(200, 40)
+		if v := m.View(); !strings.Contains(v, tc.want) || strings.Contains(v, "servers\"") {
+			t.Errorf("view does not show %q:\n%s", tc.want, v)
+		}
 	}
 }
 

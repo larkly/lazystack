@@ -8,6 +8,7 @@ import (
 	"github.com/larkly/lazystack/internal/loadbalancer"
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/fippicker"
 	"github.com/larkly/lazystack/internal/ui/keypaircreate"
 	"github.com/larkly/lazystack/internal/ui/keypairdetail"
 	"github.com/larkly/lazystack/internal/ui/lbcreate"
@@ -253,30 +254,12 @@ func (m Model) openFIPReleaseConfirm() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) doAllocateFIP() (Model, tea.Cmd) {
-	m.statusBar.Hint = "Allocating floating IP..."
-	networkClient := m.client.Network
-	return m, func() tea.Msg {
-		ctx, cancel := actionCtx()
-		defer cancel()
-		shared.Debugf("[action] allocating floating IP")
-		nets, err := network.ListExternalNetworks(ctx, networkClient)
-		if err != nil {
-			shared.Debugf("[action] allocate floating IP failed: %s", err)
-			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
-		}
-		if len(nets) == 0 {
-			shared.Debugf("[action] allocate floating IP failed: no external networks available")
-			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: fmt.Errorf("no external networks available")}
-		}
-		fip, err := network.AllocateFloatingIP(ctx, networkClient, nets[0].ID)
-		if err != nil {
-			shared.Debugf("[action] allocate floating IP failed: %s", err)
-			return shared.ResourceActionErrMsg{Action: "Allocate", Name: "floating IP", Err: err}
-		}
-		shared.Debugf("[action] allocated floating IP %s", fip.FloatingIP)
-		return shared.ResourceActionMsg{Action: "Allocated", Name: fip.FloatingIP}
-	}
+// openFIPAllocate opens the allocate-only floating IP picker, which asks for
+// the external network when there is more than one.
+func (m Model) openFIPAllocate() (Model, tea.Cmd) {
+	m.fipPicker = fippicker.NewAllocate(m.client.Network)
+	m.fipPicker.SetSize(m.width, m.height)
+	return m, m.fipPicker.Init()
 }
 
 func (m Model) openFIPDisassociateConfirm() (Model, tea.Cmd) {
@@ -352,13 +335,21 @@ func (m Model) openSGRuleEdit() (Model, tea.Cmd) {
 }
 
 func (m Model) openSGRename() (Model, tea.Cmd) {
-	m.sgCreate = sgcreate.NewRename(m.client.Network, m.secGroupView.SelectedGroupID(), m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
+	sgID := m.secGroupView.SelectedGroupID()
+	if sgID == "" {
+		return m, nil
+	}
+	m.sgCreate = sgcreate.NewRename(m.client.Network, sgID, m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
 	m.sgCreate.SetSize(m.width, m.height)
 	return m, m.sgCreate.Init()
 }
 
 func (m Model) openSGClone() (Model, tea.Cmd) {
-	m.sgCreate = sgcreate.NewClone(m.client.Network, m.secGroupView.SelectedGroupID(), m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
+	sgID := m.secGroupView.SelectedGroupID()
+	if sgID == "" {
+		return m, nil
+	}
+	m.sgCreate = sgcreate.NewClone(m.client.Network, sgID, m.secGroupView.SelectedGroupName(), m.secGroupView.SGDescription())
 	m.sgCreate.SetSize(m.width, m.height)
 	return m, m.sgCreate.Init()
 }
@@ -445,15 +436,21 @@ func (m Model) openPortEdit() (Model, tea.Cmd) {
 	return m, m.portEdit.Init()
 }
 
+// portDisplayName names a port for confirmations, falling back to its
+// abbreviated ID when it has no name.
+func portDisplayName(p network.Port) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return shared.AbbrevID(p.ID)
+}
+
 func (m Model) openPortDeleteConfirm() (Model, tea.Cmd) {
 	p := m.networkView.SelectedPort()
 	if p == nil {
 		return m, nil
 	}
-	name := p.Name
-	if name == "" {
-		name = p.ID[:8] + "..."
-	}
+	name := portDisplayName(*p)
 	m.confirm = modal.NewConfirm("delete_port", p.ID, name)
 	m.confirm.Title = "Delete Port"
 	if p.DeviceOwner != "" {

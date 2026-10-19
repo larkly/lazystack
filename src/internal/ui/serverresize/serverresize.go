@@ -1,6 +1,7 @@
 package serverresize
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -41,7 +42,7 @@ type Model struct {
 	filtered      []compute.Flavor
 	loading       bool
 	submitting    bool
-	confirming    bool           // bulk resize awaiting explicit confirmation
+	confirming    bool           // resize awaiting explicit confirmation
 	confirmFlavor compute.Flavor // target flavor while confirming
 	spinner       spinner.Model
 	width         int
@@ -100,7 +101,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case fetchErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case resizeDoneMsg:
@@ -112,7 +113,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case resizeErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -166,14 +167,11 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, shared.Keys.Enter):
 		if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
-			if len(m.serverIDs) > 0 {
-				// Bulk resize affects many servers; confirm first.
-				m.confirming = true
-				m.confirmFlavor = m.filtered[m.cursor]
-				m.err = ""
-				return m, nil
-			}
-			return m.doResize(m.filtered[m.cursor])
+			// Resizing reboots the server; confirm first.
+			m.confirming = true
+			m.confirmFlavor = m.filtered[m.cursor]
+			m.err = ""
+			return m, nil
 		}
 	}
 	return m, nil
@@ -181,7 +179,9 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) updateConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, shared.Keys.Confirm), key.Matches(msg, shared.Keys.Enter):
+	case key.Matches(msg, shared.Keys.Confirm):
+		// Only y answers: Enter opened this step, so a double Enter or a
+		// repeating key must not resize (and reboot) the server.
 		m.confirming = false
 		return m.doResize(m.confirmFlavor)
 	case key.Matches(msg, shared.Keys.Deny), key.Matches(msg, shared.Keys.Back):
@@ -192,14 +192,14 @@ func (m Model) updateConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) updateFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.filtering = false
 		m.filter.SetValue("")
 		m.filter.Blur()
 		m.applyFilter()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		m.filtering = false
 		m.filter.Blur()
 		return m, nil
@@ -249,7 +249,7 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 		ids = m.serverIDs
 		cmd = func() tea.Msg {
 			shared.Debugf("[serverresize] resizing %d servers to flavor %s", len(ids), flavorID)
-			var errs []string
+			var errs, friendly []string
 			var recs []shared.AuditRecord
 			for _, id := range ids {
 				ctx, cancel := shared.RequestCtx()
@@ -258,12 +258,13 @@ func (m Model) doResize(flavor compute.Flavor) (Model, tea.Cmd) {
 				recs = append(recs, shared.AuditRecord{Action: audit.ActionResize, ResourceType: "server", ResourceID: id, Err: err})
 				if err != nil {
 					errs = append(errs, err.Error())
+					friendly = append(friendly, shared.ShortID(id)+": "+shared.ParseError(err).FriendlyMessage)
 				}
 			}
 			rec := shared.Audits(recs...).WithDetails(details)
 			if len(errs) > 0 {
 				shared.Debugf("[serverresize] error resizing servers: %s", strings.Join(errs, "; "))
-				return resizeErrMsg{Audit: rec, err: fmt.Errorf("%s", strings.Join(errs, "; "))}
+				return resizeErrMsg{Audit: rec, err: shared.ContextError(errors.New(strings.Join(errs, "; ")), strings.Join(friendly, "; "))}
 			}
 			shared.Debugf("[serverresize] resized %d servers to flavor %s", len(ids), flavorID)
 			return resizeDoneMsg{Audit: rec, name: name}
@@ -328,10 +329,10 @@ func (m Model) View() string {
 
 	if m.confirming {
 		f := m.confirmFlavor
-		b.WriteString(fmt.Sprintf("Resize %d servers to flavor %s (%d vCPU, %dMB RAM, %dGB disk)?\n",
-			len(m.serverIDs), f.Name, f.VCPUs, f.RAM, f.Disk))
+		b.WriteString(fmt.Sprintf("Resize %s to flavor %s (%d vCPU, %dMB RAM, %dGB disk)?\n",
+			m.serverName, f.Name, f.VCPUs, f.RAM, f.Disk))
 		b.WriteString("\n")
-		b.WriteString(shared.StyleHelp.Render("y/enter confirm • n/esc cancel"))
+		b.WriteString(shared.StyleHelp.Render("y confirm • n/esc cancel"))
 		return m.renderBox(b.String())
 	}
 
@@ -438,4 +439,15 @@ func (m Model) fetchFlavors() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	switch {
+	case m.confirming:
+		return "y confirm • n/esc cancel"
+	case m.filtering:
+		return "type to filter • enter apply • esc clear"
+	}
+	return shared.Glyph("↑↓", "up/down") + " navigate • enter resize • / filter • esc cancel"
 }

@@ -91,7 +91,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case fetchErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case interfaceAddedMsg:
@@ -103,7 +103,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case interfaceAddErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -120,6 +120,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Esc closes the modal while it loads; late results are dropped
+		// because inactive modals receive no messages.
+		if m.loading && !m.submitting && key.Matches(msg, shared.Keys.Back) {
+			m.Active = false
+			return m, nil
+		}
 		if m.loading || m.submitting {
 			return m, nil
 		}
@@ -202,7 +208,7 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField = confirmSubmit
 			m.ipInput.Blur()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submitInterface()
 		default:
 			var cmd tea.Cmd
@@ -240,7 +246,7 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.err = ""
 			return m, nil
 		}
-	case msg.String() == "ctrl+s":
+	case key.Matches(msg, shared.Keys.Submit):
 		return m.submitInterface()
 	}
 
@@ -332,7 +338,7 @@ func (m Model) addInterfaceCmd(client *gophercloud.ServiceClient, routerID, rout
 			cleanupCancel()
 			if delErr != nil {
 				shared.Debugf("[subnetpicker] cleanup of port %s failed: %v", port.ID, delErr)
-				err = fmt.Errorf("%w (cleanup failed, port %s may be left behind: %v)", err, port.ID, delErr)
+				err = shared.ContextErrorf("%v (cleanup failed, port %s may be left behind: %v)", err, port.ID, delErr)
 			}
 			return interfaceAddErrMsg{Audit: record(port.ID, err), err: err}
 		}
@@ -519,4 +525,15 @@ func firstUsableIP(cidr string) string {
 	copy(ip, ipNet.IP)
 	ip[len(ip)-1] = 1
 	return ip.String()
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.phase == phaseConfirm {
+		return "tab fields • ctrl+s submit • esc back"
+	}
+	if m.loading || m.submitting || m.err != "" || len(m.subnets) == 0 {
+		return "esc close"
+	}
+	return shared.Glyph("↑↓", "up/down") + " navigate • enter select • esc cancel"
 }

@@ -27,17 +27,21 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 ## Features
 
 - **Server management** — list, create, delete, rename, rebuild, reboot, stop/start, pause, suspend, shelve, lock/unlock, rescue/unrescue, resize, snapshot, with bulk operations
-- **Volume management** — list, detail, create, delete, attach (server picker), detach
-- **Floating IPs** — allocate, associate, disassociate, release
-- **Security groups** — create/delete groups, create/delete rules, expandable rule view
-- **Networks** — create/delete networks, create/delete subnets, read-only port listing
-- **Routers** — create/delete routers, add/remove interfaces (subnet picker), detail with routes
+- **Volume management** — list, detail, create, delete, attach (server picker), detach, with bulk delete and detach
+- **Floating IPs** — allocate (pick the external network when there are several; asks before allocating), associate, disassociate, release
+- **Security groups** — create, delete, rename and clone groups; create, edit and delete rules; attached servers and ports panes
+- **Networks** — create/delete networks; create, edit and delete subnets (gateway `none` for no gateway) and ports
+- **Routers** — create/delete routers, add/remove interfaces (subnet picker), interfaces and routes panes
 - **Key pairs** — create (RSA 2048/4096, ED25519), import with ~/.ssh/ file browser, detail view, save private key to file
-- **Images** — list, detail, delete, deactivate/reactivate with status-aware coloring
-- **Load balancers** (Octavia) — list, detail tree (listeners/pools/members), cascade delete
+- **Images** — list, detail, upload, download, edit, delete (bulk), deactivate/reactivate with status-aware coloring
+- **Load balancers** (Octavia) — list, detail panes (listeners/pools/members), create/edit/delete listeners, pools, members and health monitors, admin state toggle, member drain, bulk member actions, cascade delete
+- **DNS** (Designate) — zones with their records
+- **Admin views** — hypervisors, user management (enable/disable, delete), service catalog
+- **Audit trail** — actions lazystack performs are recorded locally (on by default) and can be filtered by action, resource or date
 - **Project switching** — switch between accessible Keystone projects without restarting
 - **Quota overlay** — compute, network, and storage quotas with color-coded progress bars
-- **Confirmation dialogs** — all server state-change actions require explicit confirmation
+- **Confirmation dialogs** — server state changes, deletes and admin actions ask first; bulk prompts list the affected servers
+- **Create feedback** — the server, volume and key pair create forms report `Created <name>` and highlight the new item in its list
 - **Dynamic tabs** — tabs appear based on available services (no Cinder? no Volumes tab)
 - **Auto-refresh** — all views refresh in the background at a configurable interval
 - **SSH integration** — launch SSH sessions directly from the TUI, or copy the SSH command to clipboard
@@ -45,9 +49,10 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 - **Server cloning** — clone servers with one keypress
 - **Cross-resource navigation** — jump from server detail to attached volumes, security groups, or networks
 - **Console log** and **action history** per server
-- **Column sorting** on all list views
-- **Client-side filtering** with `/`
-- **Bulk select** with `space` for multi-server operations
+- **Column sorting** with `s` / `S` on every resource list
+- **Client-side filtering** with `/` on every resource list
+- **Bulk select** with `space` for servers, volumes, images and load balancer members
+- **Rebindable keys** — every action in the keybinding config can be bound to other keys
 - **Self-update** — `--update` flag to update to the latest release; the download must match the release's `SHA256SUMS`, which must be signed for that release's tag with the project's release key from v0.20.0 on; older releases fall back to the checksum alone with a warning (see [SECURITY.md](SECURITY.md#release-signing-and-self-update-verification))
 - **Solarized Dark** color scheme with status-aware coloring
 
@@ -172,14 +177,42 @@ general:
   ignore_ssh_host_keys: false
 colors:
   primary: "#7D56F4"           # hex colors; unset entries use the default theme
-keybindings:
-  attach: "i"                  # action name: comma-separated keys
+keybindings:                   # action name: comma-separated keys
+  attach: "i"
+  submit: "ctrl+s"             # submit a create/edit form
+  health_monitor: "ctrl+h"     # LB pools pane: create/edit health monitor
+  drain_member: "w"            # LB members pane: set weight 0
+  select_all: "x"              # LB members pane: toggle all selections
+  download: "ctrl+g"           # image properties pane: download image
+  background: "b"              # image upload/download: hide progress
+  toggle_details: "d,D"        # error dialog: show/hide raw error
 audit:
   enabled: true                # record actions to ~/.local/share/lazystack/audit.log (view with T)
 ```
 
 Command-line flags override the file for the current run. Ctrl+A and Ctrl+B
 are reserved for GNU Screen and tmux and cannot be used as keybindings.
+
+Keybinding names follow the [keybinding tables](#keybindings); the `Ctrl+K`
+editor lists every name with its current keys. Besides the per-resource
+actions (`create`, `delete`, `attach`, `sort`, …) these name keys of forms
+and individual panes:
+
+| Name | Default | Used in |
+|------|---------|---------|
+| `submit` | `ctrl+s` | Create and edit forms, image upload/download |
+| `health_monitor` | `ctrl+h` | Load balancer pools pane |
+| `drain_member` | `w` | Load balancer members pane |
+| `select_all` | `x` | Load balancer members pane |
+| `download` | `ctrl+g` | Image properties pane |
+| `background` | `b` | Running image upload/download |
+| `toggle_details` | `d,D` | Error dialog |
+| `metadata_add` / `metadata_edit` / `metadata_delete` | `a` / `e` / `d` | Server metadata editor |
+| `save_key` | `s` | New key pair: save the private key |
+| `jump_start` / `jump_end` | `g` / `G` | Console log and the server detail console pane |
+| `audit_filter_action` / `audit_filter_resource` / `audit_filter_date` / `audit_filter_clear` | `a` / `r` / `d` / `c` | Audit trail |
+| `copy_value` | `c` | Console URL and admin password dialogs |
+| `reveal` | `r` | Admin password dialog |
 
 ### CLI flags
 
@@ -197,6 +230,10 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 
 ## Keybindings
 
+Press `?` for the keys of the current view, and `?` again for all of them.
+The keys below are the defaults; see [Application settings](#application-settings-optional)
+to rebind them.
+
 ### Global
 
 | Key | Action |
@@ -206,9 +243,11 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 | `C` | Switch cloud |
 | `P` | Switch project |
 | `Q` | Quota overlay |
-| `1-9` / `Left` / `Right` (`h` / `l`) | Switch tab (from list views) |
+| `1`-`9`, `0` | Switch to tab 1-9, `0` for the tenth tab (from list views) |
+| `Left` / `Right` (`h` / `l`) | Previous / next tab (from list views) |
 | `R` | Force refresh |
-| `s` / `S` | Sort column / reverse sort |
+| `/` | Filter the list (every resource list; `Enter` keeps it, `Esc` clears it) |
+| `Esc` | In a list: clear the filter, then the selection; otherwise go back |
 | `PgUp` / `PgDn` | Page up / down |
 | `Y` | Copy field (ID, IP, name, …) |
 | `H` | Hypervisors (admin) |
@@ -225,6 +264,9 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 | `Space` | Select for bulk action |
 | `/` | Filter |
 | `f` / `F` | Save current filter / load next saved filter |
+| `s` / `S` | Sort column / reverse sort |
+| `O` | Choose columns |
+| `Esc` | Clear filter, then selection |
 | `Ctrl+N` | Create server |
 | `Ctrl+D` | Delete |
 | `Ctrl+O` / `Ctrl+P` | Soft / hard reboot |
@@ -235,6 +277,7 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 | `Ctrl+L` | Lock / unlock |
 | `Ctrl+W` | Rescue / unrescue |
 | `Ctrl+F` | Resize |
+| `Ctrl+Y` / `Ctrl+X` | Confirm / revert resize |
 | `i` | Attach volume |
 | `Ctrl+U` | Assign floating IP |
 | `r` | Rename |
@@ -249,7 +292,7 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 | `T` | Audit trail |
 | `a` | Action history |
 | `W` | Retrieve admin password |
-| `A` | Admin actions |
+| `A` | Admin actions (cold/live migrate, evacuate, force delete, reset state) |
 | `M` | Server metadata |
 | `U` | User management |
 
@@ -257,7 +300,11 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Scroll |
+| `j` / `k` | Scroll, or move within the focused pane |
+| `Tab` / `Shift+Tab` | Cycle panes |
+| `Enter` | Open the selected volume (volumes pane) |
+| `Ctrl+T` | Detach the selected volume (volumes pane) |
+| `g` / `G` | Top / bottom of the console output (console pane) |
 | `Ctrl+D` | Delete |
 | `Ctrl+O` / `Ctrl+P` | Soft / hard reboot |
 | `o` | Stop / start |
@@ -279,7 +326,7 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 | `Y` | Copy field (ID, IP, name, …) |
 | `V` | Console URL (noVNC) |
 | `v` | Jump to volumes |
-| `g` | Jump to security groups |
+| `g` | Jump to security groups (outside the console pane) |
 | `N` | Jump to networks |
 | `L` | Console log |
 | `T` | Audit trail |
@@ -290,22 +337,42 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 | `U` | User management |
 | `Esc` | Back to list |
 
+Resize and every admin action ask for `y` / `n` confirmation before they
+run.
+
+### Server metadata
+
+| Key | Action |
+|-----|--------|
+| `a` | Add a key |
+| `e` | Edit the selected key |
+| `d` | Delete the selected key (asks `y` / `n`) |
+| `Tab` / `Shift+Tab` | Switch between key and value |
+| `Enter` | Save; the editor stays open for more changes |
+| `Esc` | Cancel the edit, or close the editor |
+
 ### Volumes
 
 | Key | Action |
 |-----|--------|
 | `Enter` | View detail |
+| `Space` | Select for bulk delete / detach |
+| `/` | Filter |
+| `s` / `S` | Sort column / reverse sort |
+| `Esc` | Clear filter, then selection |
 | `Ctrl+N` | Create volume |
-| `Ctrl+D` | Delete |
+| `Ctrl+D` | Delete (selected volumes, or the one under the cursor) |
 | `i` | Attach to server |
-| `Ctrl+T` | Detach |
+| `Ctrl+T` | Detach (selected volumes, or the one under the cursor) |
 | `Y` | Copy field (ID, name) |
 
 ### Floating IPs
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+N` | Allocate |
+| `/` | Filter |
+| `s` / `S` | Sort column / reverse sort |
+| `Ctrl+N` | Allocate: choose the external network when there are several, then confirm |
 | `Ctrl+T` | Disassociate |
 | `Ctrl+D` | Release |
 | `Y` | Copy field (ID, floating IP, fixed IP, port ID) |
@@ -314,29 +381,44 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Expand / collapse rules |
-| `Ctrl+N` | Create group (or add rule when in rules) |
-| `Ctrl+D` | Delete group (or rule when in rules) |
+| `Tab` / `Shift+Tab` | Cycle panes (groups, info, rules, servers, ports) |
+| `Enter` | Edit the selected rule (rules pane) / open the selected server (servers pane) |
+| `Ctrl+N` | Create group (add a rule in the rules pane) |
+| `Ctrl+D` | Delete group (groups pane) / delete rule (rules pane) |
+| `r` | Rename group (not `default`) |
+| `c` | Clone group |
+| `/` | Filter groups |
+| `s` / `S` | Sort groups / reverse sort |
 | `Y` | Copy field (ID, name, rule/server ID when focused) |
 
 ### Networks
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Expand / collapse subnets |
-| `Ctrl+N` | Create network (or subnet when expanded) |
-| `Ctrl+D` | Delete network (or subnet in subnets) |
+| `Tab` / `Shift+Tab` | Cycle panes (networks, info, subnets, ports) |
+| `Enter` | Edit the selected subnet (subnets pane) / port (ports pane) |
+| `Ctrl+N` | Create network / subnet / port, by focused pane |
+| `Ctrl+D` | Delete network / subnet / port, by focused pane |
+| `/` | Filter networks |
+| `s` / `S` | Sort networks / reverse sort |
 | `Y` | Copy field (network/subnet/port ID, CIDR, IP, MAC) |
+
+In the subnet create and edit forms, enter `none` as the gateway for a
+subnet without one; leave it blank on create to let Neutron pick.
 
 ### Routers
 
 | Key | Action |
 |-----|--------|
-| `Enter` | View detail (interfaces) |
-| `Ctrl+N` | Create router |
+| `Tab` / `Shift+Tab` | Cycle panes (routers, info, interfaces, routes) |
+| `Enter` | Focus the router's interfaces pane |
+| `Esc` | Clear filter, then return focus to the router list |
+| `Ctrl+N` | Create router (add an interface in the interfaces pane) |
 | `Ctrl+D` | Delete router |
-| `i` | Add interface (from detail) |
-| `Ctrl+T` | Remove interface (from detail) |
+| `i` | Add interface |
+| `Ctrl+T` | Remove the selected interface (interfaces pane) |
+| `/` | Filter routers |
+| `s` / `S` | Sort routers / reverse sort |
 | `Y` | Copy field (ID, name, gateway IP, interface subnet/port/IP) |
 
 ### Key pairs
@@ -344,16 +426,29 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 | Key | Action |
 |-----|--------|
 | `Enter` | View detail (public key) |
+| `/` | Filter |
+| `s` / `S` | Sort column / reverse sort |
 | `Ctrl+N` | Create / import |
 | `Ctrl+D` | Delete |
 | `Y` | Copy field (name, public key in detail) |
+| `Esc` | Clear filter (list) / back to list (detail) |
 
 ### Load balancers
 
 | Key | Action |
 |-----|--------|
-| `Enter` | View detail tree |
-| `Ctrl+D` | Delete (cascade) |
+| `Tab` / `Shift+Tab` | Cycle panes (load balancers, info, listeners, pools, members) |
+| `/` | Filter load balancers |
+| `s` / `S` | Sort column / reverse sort |
+| `Enter` | Edit the focused item (load balancer info, listener, pool, member) |
+| `Ctrl+N` | Create load balancer (list pane) / add listener, pool or member in its pane |
+| `Ctrl+D` | Delete the focused item; from the list, cascade-delete the load balancer; in the pools pane, a health monitor is deleted before its pool |
+| `Ctrl+H` | Create / edit the pool's health monitor (pools pane) |
+| `o` | Enable / disable (admin state) the load balancer (info pane), listener, pool or member |
+| `w` | Drain member (weight 0); all selected members when any are selected |
+| `Space` | Toggle member selection (members pane) |
+| `x` | Select / deselect all members (members pane) |
+| `Esc` | Clear filter, then member selection |
 | `Y` | Copy field (LB ID/name/VIP, listener/pool/member ID when focused) |
 
 ### Images
@@ -362,7 +457,9 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 |-----|--------|
 | `Tab` / `Shift+Tab` | Cycle panes |
 | `/` | Search / filter |
+| `s` / `S` | Sort column / reverse sort |
 | `Space` | Select for bulk delete |
+| `Esc` | Clear filter, then selection |
 | `Ctrl+N` | Upload image (list pane) |
 | `Ctrl+D` | Delete image(s) |
 | `d` | Deactivate / reactivate (list or info pane) |
@@ -370,14 +467,80 @@ are reserved for GNU Screen and tmux and cannot be used as keybindings.
 | `Enter` | Edit image (info pane) / open server (servers pane) |
 | `Y` | Copy field (ID, name, checksum, owner, attached server ID) |
 
+In the upload and download forms, `Enter` on the path field browses for a
+file or folder and `Ctrl+S` starts the transfer. While it runs, `b` moves it to the
+background and `Esc` then `y` cancels it.
+
+### DNS
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Select a zone; its records are listed below the zones |
+| `/` | Filter zones |
+| `s` / `S` | Sort zones / reverse sort |
+| `Esc` | Clear filter |
+| `R` | Refresh |
+
+### Hypervisors
+
+Admin only; open with `H`.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate |
+| `PgUp` / `PgDn` | Page up / down |
+| `R` | Refresh |
+| `Esc` | Back |
+
+### User management
+
+Open with `U` from the server list or detail. lazystack refuses to disable
+or delete the user it is authenticated as.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate |
+| `Enter` | Enable / disable the selected user (asks `y` / `n`) |
+| `Ctrl+D` | Delete the selected user (asks `y` / `n`) |
+| `R` | Refresh |
+| `Esc` | Cancel the prompt, or go back |
+
+### Audit trail
+
+Open with `T` from the server list or detail.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate |
+| `a` | Filter by action |
+| `r` | Filter by resource |
+| `d` | Filter by date |
+| `c` | Clear filter |
+| `Enter` | Apply the typed filter |
+| `Esc` | Cancel the filter, or go back |
+
 ### Create form
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `Shift+Tab` | Next / prev field |
-| `Enter` | Open picker |
+| `Tab` / `Shift+Tab` (`Down` / `Up`) | Next / prev field |
+| `Enter` | Open picker / activate button |
 | `Ctrl+S` | Submit |
 | `Esc` | Cancel |
+
+### Dialogs
+
+| Key | Action |
+|-----|--------|
+| `y` | Confirm |
+| `n` / `Esc` | Cancel |
+| `Tab` / arrows | Move between buttons |
+| `Enter` | Activate the focused button |
+| `Space` | Also delete attached volumes (server delete, when offered) |
+| `d` | Show / hide the raw error (error dialog) |
+| `c` | Copy the console URL or admin password |
+| `r` | Reveal / hide the admin password |
+| `s` | Save the private key of a newly created key pair |
 
 ## Architecture
 

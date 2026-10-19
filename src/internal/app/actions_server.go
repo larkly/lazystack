@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/larkly/lazystack/internal/audit"
+	"github.com/larkly/lazystack/internal/cloud"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/loadbalancer"
@@ -300,7 +302,7 @@ func (m Model) openToggleConfirm(action string) (Model, tea.Cmd) {
 		if len(counts) > 1 {
 			summary := formatActionCounts(counts)
 			m.confirm.Title = fmt.Sprintf("Confirm mixed %s", action)
-			m.confirm.Body = fmt.Sprintf("Apply %s to %d servers (%s)?", action, len(refs), summary)
+			m.confirm.Body = fmt.Sprintf("Apply %s to %d servers (%s): %s", action, len(refs), summary, modal.ServerNames(refs))
 		}
 		m.confirm.SetSize(m.width, m.height)
 		m.activeModal = modalConfirm
@@ -398,7 +400,7 @@ func (m Model) openAuditLogCmd() tea.Cmd {
 	return func() tea.Msg {
 		entries, err := audit.ReadEntries(audit.DefaultPath(), 500)
 		if err != nil {
-			return auditLogLoadedMsg{err: err.Error()}
+			return auditLogLoadedMsg{err: err}
 		}
 		return auditLogLoadedMsg{entries: entries}
 	}
@@ -406,7 +408,7 @@ func (m Model) openAuditLogCmd() tea.Cmd {
 
 type auditLogLoadedMsg struct {
 	entries []audit.Entry
-	err     string
+	err     error
 }
 
 func (m Model) openHypervisorList() (Model, tea.Cmd) {
@@ -544,189 +546,17 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 		return m, m.executeBulkAction(client, action)
 	}
 
+	if op, ok := serverOps[action.Action]; ok {
+		name := action.Name
+		if op.nameIsID {
+			name = action.ServerID
+		}
+		return m, m.serverOpCmd(op, action.ServerID, name)
+	}
+
 	switch action.Action {
 	case "delete":
 		return m, m.deleteServerCmd(action)
-	case "soft reboot":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] rebooting server %s", action.Name)
-			err := compute.RebootServer(ctx, client, action.ServerID, servers.SoftReboot)
-			if err != nil {
-				shared.Debugf("[action] reboot server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionReboot, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Reboot", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] rebooted server %s", action.Name)
-			m.logAudit(audit.ActionReboot, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Reboot", Name: action.Name}
-		}
-	case "hard reboot":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] hard rebooting server %s", action.Name)
-			err := compute.RebootServer(ctx, client, action.ServerID, servers.HardReboot)
-			if err != nil {
-				shared.Debugf("[action] hard reboot server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionReboot, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Hard reboot", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] hard rebooted server %s", action.Name)
-			m.logAudit(audit.ActionReboot, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Hard reboot", Name: action.Name}
-		}
-	case "pause":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] pausing server %s", action.Name)
-			err := compute.PauseServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] pause server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionPause, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Pause", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] paused server %s", action.Name)
-			m.logAudit(audit.ActionPause, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Pause", Name: action.Name}
-		}
-	case "unpause":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] unpausing server %s", action.Name)
-			err := compute.UnpauseServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] unpause server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionUnpause, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Unpause", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] unpaused server %s", action.Name)
-			m.logAudit(audit.ActionUnpause, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Unpause", Name: action.Name}
-		}
-	case "suspend":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] suspending server %s", action.Name)
-			err := compute.SuspendServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] suspend server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionSuspend, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Suspend", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] suspended server %s", action.Name)
-			m.logAudit(audit.ActionSuspend, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Suspend", Name: action.Name}
-		}
-	case "resume":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] resuming server %s", action.Name)
-			err := compute.ResumeServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] resume server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionResume, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Resume", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] resumed server %s", action.Name)
-			m.logAudit(audit.ActionResume, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Resume", Name: action.Name}
-		}
-	case "shelve":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] shelving server %s", action.Name)
-			err := compute.ShelveServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] shelve server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionShelve, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Shelve", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] shelved server %s", action.Name)
-			m.logAudit(audit.ActionShelve, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Shelve", Name: action.Name}
-		}
-	case "unshelve":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] unshelving server %s", action.Name)
-			err := compute.UnshelveServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] unshelve server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionUnshelve, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Unshelve", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] unshelved server %s", action.Name)
-			m.logAudit(audit.ActionUnshelve, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Unshelve", Name: action.Name}
-		}
-	case "stop":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] stopping server %s", action.Name)
-			err := compute.StopServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] stop server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionStop, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Stop", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] stopped server %s", action.Name)
-			m.logAudit(audit.ActionStop, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Stop", Name: action.Name}
-		}
-	case "start":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] starting server %s", action.Name)
-			err := compute.StartServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] start server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionStart, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Start", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] started server %s", action.Name)
-			m.logAudit(audit.ActionStart, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Start", Name: action.Name}
-		}
-	case "lock":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] locking server %s", action.Name)
-			err := compute.LockServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] lock server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionLock, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Lock", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] locked server %s", action.Name)
-			m.logAudit(audit.ActionLock, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Lock", Name: action.Name}
-		}
-	case "unlock":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] unlocking server %s", action.Name)
-			err := compute.UnlockServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] unlock server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionUnlock, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Unlock", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] unlocked server %s", action.Name)
-			m.logAudit(audit.ActionUnlock, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Unlock", Name: action.Name}
-		}
 	case "rescue":
 		return m, func() tea.Msg {
 			ctx, cancel := actionCtx()
@@ -750,39 +580,6 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 				note:   "Temporary rescue-mode password; it is not stored anywhere.",
 				creds:  []vmpassword.Credential{{Server: action.Name, Secret: adminPass}},
 			}
-		}
-	case "unrescue":
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] unrescuing server %s", action.Name)
-			err := compute.UnrescueServer(ctx, client, action.ServerID)
-			if err != nil {
-				shared.Debugf("[action] unrescue server %s failed: %s", action.Name, err)
-				m.logAudit(audit.ActionUnrescue, "server", action.ServerID, action.Name, "error", err.Error())
-				return shared.ServerActionErrMsg{Action: "Unrescue", Name: action.Name, Err: err}
-			}
-			shared.Debugf("[action] unrescued server %s", action.Name)
-			m.logAudit(audit.ActionUnrescue, "server", action.ServerID, action.Name, "success", "")
-			return shared.ServerActionMsg{Action: "Unrescue", Name: action.Name}
-		}
-	case "delete_volume":
-		bsClient := m.client.BlockStorage
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting volume %s", name)
-			err := volume.DeleteVolume(ctx, bsClient, id)
-			if err != nil {
-				shared.Debugf("[action] delete volume %s failed: %s", name, err)
-				m.logAudit(audit.ActionDelete, "volume", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete volume", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted volume %s", name)
-			m.logAudit(audit.ActionDelete, "volume", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted volume", Name: name}
 		}
 	case "detach_volume":
 		computeC := m.client.Compute
@@ -819,227 +616,12 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			m.logAudit(audit.ActionDetachVolume, "volume", volID, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Detached volume", Name: name}
 		}
-	case "release_fip":
-		netClient := m.client.Network
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] releasing floating IP %s", name)
-			err := network.ReleaseFloatingIP(ctx, netClient, id)
-			if err != nil {
-				shared.Debugf("[action] release floating IP %s failed: %s", name, err)
-				m.logAudit(audit.ActionReleaseFIP, "floating_ip", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Release FIP", Name: name, Err: err}
-			}
-			shared.Debugf("[action] released floating IP %s", name)
-			m.logAudit(audit.ActionReleaseFIP, "floating_ip", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Released", Name: name}
-		}
-	case "disassociate_fip":
-		netClient := m.client.Network
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] disassociating floating IP %s", name)
-			err := network.DisassociateFloatingIP(ctx, netClient, id)
-			if err != nil {
-				shared.Debugf("[action] disassociate floating IP %s failed: %s", name, err)
-				m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Disassociate FIP", Name: name, Err: err}
-			}
-			shared.Debugf("[action] disassociated floating IP %s", name)
-			m.logAudit(audit.ActionDetachFIP, "floating_ip", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Disassociated", Name: name}
-		}
-	case "delete_router":
-		netClient := m.client.Network
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting router %s", name)
-			err := network.DeleteRouter(ctx, netClient, id)
-			if err != nil {
-				// Not wrapped with %w: the generic 409 text ("resource is busy")
-				// would otherwise replace this actionable message in the modal.
-				if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
-					err = fmt.Errorf("router still in use; remove its interfaces first (Interfaces pane, %s): %v", shared.Keys.Detach.Help().Key, err)
-				}
-				shared.Debugf("[action] delete router %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeleteRouter, "router", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete router", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted router %s", name)
-			m.logAudit(audit.ActionDeleteRouter, "router", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted router", Name: name}
-		}
 	case "remove_router_interface":
 		target, ok := decodeRouterInterfaceTarget(action.ServerID)
 		if !ok {
 			return m, nil
 		}
 		return m, m.removeRouterInterfaceCmd(target, action.Name)
-	case "delete_port":
-		netClient := m.client.Network
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting port %s", name)
-			err := network.DeletePort(ctx, netClient, id)
-			if err != nil {
-				shared.Debugf("[action] delete port %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeletePort, "port", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete port", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted port %s", name)
-			m.logAudit(audit.ActionDeletePort, "port", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted port", Name: name}
-		}
-	case "delete_network":
-		netClient := m.client.Network
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting network %s", name)
-			err := network.DeleteNetwork(ctx, netClient, id)
-			if err != nil {
-				shared.Debugf("[action] delete network %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeleteNet, "network", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete network", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted network %s", name)
-			m.logAudit(audit.ActionDeleteNet, "network", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted network", Name: name}
-		}
-	case "delete_subnet":
-		netClient := m.client.Network
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting subnet %s", name)
-			err := network.DeleteSubnet(ctx, netClient, id)
-			if err != nil {
-				shared.Debugf("[action] delete subnet %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeleteSubnet, "subnet", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete subnet", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted subnet %s", name)
-			m.logAudit(audit.ActionDeleteSubnet, "subnet", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted subnet", Name: name}
-		}
-	case "delete_sg":
-		netClient := m.client.Network
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting security group %s", name)
-			err := network.DeleteSecurityGroup(ctx, netClient, id)
-			if err != nil {
-				shared.Debugf("[action] delete security group %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeleteNet, "security_group", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete security group", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted security group %s", name)
-			m.logAudit(audit.ActionDeleteNet, "security_group", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted security group", Name: name}
-		}
-	case "delete_sg_rule":
-		netClient := m.client.Network
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting security group rule from %s", name)
-			err := network.DeleteSecurityGroupRule(ctx, netClient, id)
-			if err != nil {
-				shared.Debugf("[action] delete security group rule from %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeleteNet, "security_group_rule", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete rule", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted security group rule from %s", name)
-			m.logAudit(audit.ActionDeleteNet, "security_group_rule", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted rule from", Name: name}
-		}
-	case "delete_lb":
-		lbClient := m.client.LoadBalancer
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting load balancer %s", name)
-			err := loadbalancer.DeleteLoadBalancer(ctx, lbClient, id)
-			if err != nil {
-				shared.Debugf("[action] delete load balancer %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeleteLB, "load_balancer", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete LB", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted load balancer %s", name)
-			m.logAudit(audit.ActionDeleteLB, "load_balancer", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted LB", Name: name}
-		}
-	case "delete_lb_listener":
-		lbClient := m.client.LoadBalancer
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			err := loadbalancer.DeleteListener(ctx, lbClient, id)
-			if err != nil {
-				m.logAudit(audit.ActionDeleteLB, "lb_listener", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete listener", Name: name, Err: err}
-			}
-			m.logAudit(audit.ActionDeleteLB, "lb_listener", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted listener", Name: name}
-		}
-	case "delete_lb_pool":
-		lbClient := m.client.LoadBalancer
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			err := loadbalancer.DeletePool(ctx, lbClient, id)
-			if err != nil {
-				m.logAudit(audit.ActionDeleteLB, "lb_pool", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete pool", Name: name, Err: err}
-			}
-			m.logAudit(audit.ActionDeleteLB, "lb_pool", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted pool", Name: name}
-		}
-	case "delete_lb_monitor":
-		lbClient := m.client.LoadBalancer
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting health monitor from %s", name)
-			err := loadbalancer.DeleteHealthMonitor(ctx, lbClient, id)
-			if err != nil {
-				shared.Debugf("[action] delete health monitor from %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeleteLB, "lb_monitor", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete monitor", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted health monitor from %s", name)
-			m.logAudit(audit.ActionDeleteLB, "lb_monitor", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Removed monitor from", Name: name}
-		}
 	case "delete_lb_member":
 		lbClient := m.client.LoadBalancer
 		name := action.Name
@@ -1060,47 +642,115 @@ func (m Model) executeAction(action modal.ConfirmAction) (Model, tea.Cmd) {
 			m.logAudit(audit.ActionDeleteLB, "lb_member", memberID, name, "success", "")
 			return shared.ResourceActionMsg{Action: "Deleted member", Name: name}
 		}
-	case "delete_keypair":
-		computeC := m.client.Compute
-		name := action.ServerID // keypair name is stored in ServerID
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting keypair %s", name)
-			err := compute.DeleteKeyPair(ctx, computeC, name)
-			if err != nil {
-				shared.Debugf("[action] delete keypair %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeleteKey, "keypair", name, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete keypair", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted keypair %s", name)
-			m.logAudit(audit.ActionDeleteKey, "keypair", name, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted keypair", Name: name}
-		}
-	case "delete_image":
-		imgClient := m.client.Image
-		id := action.ServerID
-		name := action.Name
-		return m, func() tea.Msg {
-			ctx, cancel := actionCtx()
-			defer cancel()
-			shared.Debugf("[action] deleting image %s", name)
-			err := image.DeleteImage(ctx, imgClient, id)
-			if err != nil {
-				shared.Debugf("[action] delete image %s failed: %s", name, err)
-				m.logAudit(audit.ActionDeleteImage, "image", id, name, "error", err.Error())
-				return shared.ResourceActionErrMsg{Action: "Delete image", Name: name, Err: err}
-			}
-			shared.Debugf("[action] deleted image %s", name)
-			m.logAudit(audit.ActionDeleteImage, "image", id, name, "success", "")
-			return shared.ResourceActionMsg{Action: "Deleted image", Name: name}
-		}
 	case "deactivate_image":
 		return m, m.doDeactivateImage(action.ServerID, action.Name)
 	case "reactivate_image":
 		return m, m.doReactivateImage(action.ServerID, action.Name)
 	}
 	return m, nil
+}
+
+// serverOp is a single-resource confirm action that makes one service call,
+// writes one audit record and reports the outcome. Actions with extra
+// results (rescue's password, detach's per-attachment errors, LB members'
+// composite IDs) keep dedicated code in executeAction.
+type serverOp struct {
+	// svc picks the service client run is called with.
+	svc func(*cloud.Client) *gophercloud.ServiceClient
+	run func(ctx context.Context, sc *gophercloud.ServiceClient, id string) error
+	// audit and resource are the audit record's action and resource type.
+	audit    audit.ActionType
+	resource string
+	// label names the action in result messages. Server lifecycle ops use
+	// it for ServerActionMsg and ServerActionErrMsg alike.
+	label string
+	// done, when set, makes this a resource op: failures report a
+	// ResourceActionErrMsg with label, success a ResourceActionMsg with done.
+	done string
+	// nameIsID marks resources identified by name (keypairs): the confirm
+	// action carries the name in ServerID.
+	nameIsID bool
+}
+
+func computeSvc(c *cloud.Client) *gophercloud.ServiceClient { return c.Compute }
+func networkSvc(c *cloud.Client) *gophercloud.ServiceClient { return c.Network }
+func volumeSvc(c *cloud.Client) *gophercloud.ServiceClient  { return c.BlockStorage }
+func lbSvc(c *cloud.Client) *gophercloud.ServiceClient      { return c.LoadBalancer }
+func imageSvc(c *cloud.Client) *gophercloud.ServiceClient   { return c.Image }
+
+func rebootServer(how servers.RebootMethod) func(context.Context, *gophercloud.ServiceClient, string) error {
+	return func(ctx context.Context, sc *gophercloud.ServiceClient, id string) error {
+		return compute.RebootServer(ctx, sc, id, how)
+	}
+}
+
+// deleteRouter explains the 409 Neutron returns while a router still has
+// interfaces. Not wrapped with %w: the generic 409 text ("resource is busy")
+// would otherwise replace this actionable message in the modal.
+func deleteRouter(ctx context.Context, sc *gophercloud.ServiceClient, id string) error {
+	err := network.DeleteRouter(ctx, sc, id)
+	if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
+		err = fmt.Errorf("router still in use; remove its interfaces first (Interfaces pane, %s): %v", shared.Keys.Detach.Help().Key, err)
+	}
+	return err
+}
+
+// serverOps maps confirm action names to their single-call operation.
+var serverOps = map[string]serverOp{
+	"soft reboot": {svc: computeSvc, run: rebootServer(servers.SoftReboot), audit: audit.ActionReboot, resource: "server", label: "Reboot"},
+	"hard reboot": {svc: computeSvc, run: rebootServer(servers.HardReboot), audit: audit.ActionReboot, resource: "server", label: "Hard reboot"},
+	"pause":       {svc: computeSvc, run: compute.PauseServer, audit: audit.ActionPause, resource: "server", label: "Pause"},
+	"unpause":     {svc: computeSvc, run: compute.UnpauseServer, audit: audit.ActionUnpause, resource: "server", label: "Unpause"},
+	"suspend":     {svc: computeSvc, run: compute.SuspendServer, audit: audit.ActionSuspend, resource: "server", label: "Suspend"},
+	"resume":      {svc: computeSvc, run: compute.ResumeServer, audit: audit.ActionResume, resource: "server", label: "Resume"},
+	"shelve":      {svc: computeSvc, run: compute.ShelveServer, audit: audit.ActionShelve, resource: "server", label: "Shelve"},
+	"unshelve":    {svc: computeSvc, run: compute.UnshelveServer, audit: audit.ActionUnshelve, resource: "server", label: "Unshelve"},
+	"stop":        {svc: computeSvc, run: compute.StopServer, audit: audit.ActionStop, resource: "server", label: "Stop"},
+	"start":       {svc: computeSvc, run: compute.StartServer, audit: audit.ActionStart, resource: "server", label: "Start"},
+	"lock":        {svc: computeSvc, run: compute.LockServer, audit: audit.ActionLock, resource: "server", label: "Lock"},
+	"unlock":      {svc: computeSvc, run: compute.UnlockServer, audit: audit.ActionUnlock, resource: "server", label: "Unlock"},
+	"unrescue":    {svc: computeSvc, run: compute.UnrescueServer, audit: audit.ActionUnrescue, resource: "server", label: "Unrescue"},
+
+	"delete_volume":      {svc: volumeSvc, run: volume.DeleteVolume, audit: audit.ActionDelete, resource: "volume", label: "Delete volume", done: "Deleted volume"},
+	"release_fip":        {svc: networkSvc, run: network.ReleaseFloatingIP, audit: audit.ActionReleaseFIP, resource: "floating_ip", label: "Release FIP", done: "Released"},
+	"disassociate_fip":   {svc: networkSvc, run: network.DisassociateFloatingIP, audit: audit.ActionDetachFIP, resource: "floating_ip", label: "Disassociate FIP", done: "Disassociated"},
+	"delete_router":      {svc: networkSvc, run: deleteRouter, audit: audit.ActionDeleteRouter, resource: "router", label: "Delete router", done: "Deleted router"},
+	"delete_port":        {svc: networkSvc, run: network.DeletePort, audit: audit.ActionDeletePort, resource: "port", label: "Delete port", done: "Deleted port"},
+	"delete_network":     {svc: networkSvc, run: network.DeleteNetwork, audit: audit.ActionDeleteNet, resource: "network", label: "Delete network", done: "Deleted network"},
+	"delete_subnet":      {svc: networkSvc, run: network.DeleteSubnet, audit: audit.ActionDeleteSubnet, resource: "subnet", label: "Delete subnet", done: "Deleted subnet"},
+	"delete_sg":          {svc: networkSvc, run: network.DeleteSecurityGroup, audit: audit.ActionDeleteNet, resource: "security_group", label: "Delete security group", done: "Deleted security group"},
+	"delete_sg_rule":     {svc: networkSvc, run: network.DeleteSecurityGroupRule, audit: audit.ActionDeleteNet, resource: "security_group_rule", label: "Delete rule", done: "Deleted rule from"},
+	"delete_lb":          {svc: lbSvc, run: loadbalancer.DeleteLoadBalancer, audit: audit.ActionDeleteLB, resource: "load_balancer", label: "Delete LB", done: "Deleted LB"},
+	"delete_lb_listener": {svc: lbSvc, run: loadbalancer.DeleteListener, audit: audit.ActionDeleteLB, resource: "lb_listener", label: "Delete listener", done: "Deleted listener"},
+	"delete_lb_pool":     {svc: lbSvc, run: loadbalancer.DeletePool, audit: audit.ActionDeleteLB, resource: "lb_pool", label: "Delete pool", done: "Deleted pool"},
+	"delete_lb_monitor":  {svc: lbSvc, run: loadbalancer.DeleteHealthMonitor, audit: audit.ActionDeleteLB, resource: "lb_monitor", label: "Delete monitor", done: "Removed monitor from"},
+	"delete_keypair":     {svc: computeSvc, run: compute.DeleteKeyPair, audit: audit.ActionDeleteKey, resource: "keypair", label: "Delete keypair", done: "Deleted keypair", nameIsID: true},
+	"delete_image":       {svc: imageSvc, run: image.DeleteImage, audit: audit.ActionDeleteImage, resource: "image", label: "Delete image", done: "Deleted image"},
+}
+
+// serverOpCmd runs op against the resource id, audits the outcome under
+// name and reports it.
+func (m Model) serverOpCmd(op serverOp, id, name string) tea.Cmd {
+	sc := op.svc(m.client)
+	return func() tea.Msg {
+		ctx, cancel := actionCtx()
+		defer cancel()
+		shared.Debugf("[action] %s %s %s: start", op.label, op.resource, name)
+		if err := op.run(ctx, sc, id); err != nil {
+			shared.Debugf("[action] %s %s %s failed: %s", op.label, op.resource, name, err)
+			m.logAudit(op.audit, op.resource, id, name, "error", err.Error())
+			if op.done == "" {
+				return shared.ServerActionErrMsg{Action: op.label, Name: name, Err: err}
+			}
+			return shared.ResourceActionErrMsg{Action: op.label, Name: name, Err: err}
+		}
+		shared.Debugf("[action] %s %s %s: done", op.label, op.resource, name)
+		m.logAudit(op.audit, op.resource, id, name, "success", "")
+		if op.done == "" {
+			return shared.ServerActionMsg{Action: op.label, Name: name}
+		}
+		return shared.ResourceActionMsg{Action: op.done, Name: name}
+	}
 }
 
 func (m Model) getServerSSHInfo() (name, keyName string, floatingIPs, ipv6, ipv4 []string) {

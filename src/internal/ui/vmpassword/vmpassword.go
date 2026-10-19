@@ -110,7 +110,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.credCursor++
 			}
 			return m, nil
-		case msg.String() == "r":
+		case key.Matches(msg, shared.Keys.Reveal):
 			m.revealed = !m.revealed
 			return m, nil
 		}
@@ -119,7 +119,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, shared.Keys.Back):
 		m.Active = false
 		return m, nil
-	case msg.String() == "c":
+	case key.Matches(msg, shared.Keys.CopyValue):
 		return m.copyToClipboard()
 	default:
 		return m, nil
@@ -184,7 +184,7 @@ func (m Model) View() string {
 		body.WriteString("  " + value.Render(m.plain) + "\n\n")
 	case m.encrypted != "":
 		body.WriteString("  " + label.Render("Encrypted (base64)") + "\n")
-		body.WriteString("  " + muted.Render(truncate(m.encrypted, 60)) + "\n\n")
+		body.WriteString("  " + muted.Render(shared.TruncateCells(m.encrypted, 60)) + "\n\n")
 	default:
 		body.WriteString("  " + muted.Render("No password set — this is likely not a Windows instance,") + "\n")
 		body.WriteString("  " + muted.Render("or the password has not been generated yet.") + "\n\n")
@@ -243,13 +243,6 @@ func (m Model) credentialsView() string {
 	return m.renderModal(title + "\n\n" + body.String())
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-3] + "..."
-}
-
 func (m Model) renderModal(content string) string {
 	modalWidth := 64
 	if m.width > 0 && m.width < 72 {
@@ -263,4 +256,22 @@ func (m Model) renderModal(content string) string {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.creds != nil {
+		reveal := "r reveal"
+		if m.revealed {
+			reveal = "r hide"
+		}
+		if len(m.creds) > 1 {
+			return shared.Glyph("↑↓", "up/down") + " select • " + reveal + " • c copy • esc close"
+		}
+		return reveal + " • c copy • esc close"
+	}
+	if m.plain != "" || m.encrypted != "" {
+		return "c copy • esc close"
+	}
+	return "esc close"
 }

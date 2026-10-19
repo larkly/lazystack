@@ -143,7 +143,7 @@ func (m Model) View() string {
 		content = title + "\n" + warning + "\n\n" + b.String() + pageHint + "\n" + hint
 	}
 
-	box := shared.StyleModal.Width(40).Render(content)
+	box := shared.StyleModal.Width(shared.ModalWidth(40, m.width)).Render(content)
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
@@ -152,4 +152,9 @@ func (m Model) View() string {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return shared.Glyph("↑↓", "up/down") + " navigate • enter select • esc cancel"
 }

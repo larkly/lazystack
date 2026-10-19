@@ -2,6 +2,7 @@ package dnslist
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -12,13 +13,16 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/dns/v2/recordsets"
 	"github.com/gophercloud/gophercloud/v2/openstack/dns/v2/zones"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/filterbar"
 )
 
 type zonesLoadedMsg struct {
+	seq   uint64
 	zones []zones.Zone
 }
 
 type zonesErrMsg struct {
+	seq uint64
 	err error
 }
 
@@ -32,10 +36,18 @@ type recordsetsErrMsg struct {
 	err    error
 }
 
+type sortClearMsg struct{}
+
+// zoneSortColumns are the zone list's sort keys, cycled with s.
+var zoneSortColumns = []string{"name", "type"}
+
 // Model is the DNS zone/record list viewer.
 type Model struct {
 	client       *gophercloud.ServiceClient
-	zones        []zones.Zone
+	allZones     []zones.Zone // every zone, as last fetched
+	zones        []zones.Zone // the listed zones: filtered and sorted
+	filter       filterbar.Model
+	order        shared.SortState
 	recordsets   []recordsets.RecordSet
 	selectedZone *zones.Zone
 	cursor       int
@@ -44,7 +56,9 @@ type Model struct {
 	height       int
 	loading      bool
 	spinner      spinner.Model
-	err          string
+	err          error
+	refresh      shared.RefreshGate // zone list fetches
+	needRecords  bool               // Escape changed the selected zone; load its records
 }
 
 // New creates a DNS list model.
@@ -55,32 +69,66 @@ func New(client *gophercloud.ServiceClient) Model {
 		client:  client,
 		loading: true,
 		spinner: s,
+		filter:  filterbar.New(),
+		order:   shared.NewSortState(),
 	}
+}
+
+// IsFiltering reports whether the "/" zone filter input has focus.
+func (m Model) IsFiltering() bool { return m.filter.Active() }
+
+// FilterValue is the current zone filter text.
+func (m Model) FilterValue() string { return m.filter.Value() }
+
+// Escape clears the committed filter and reports whether there was one;
+// when there was not, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if !m.filter.Clear() {
+		return false
+	}
+	if m.applyFilter() {
+		m.needRecords = true
+	}
+	return true
+}
+
+// syncRecords loads the selected zone's records when Escape changed the
+// selection.
+func (m *Model) syncRecords() tea.Cmd {
+	changed := m.needRecords
+	m.needRecords = false
+	return m.recordsFor(changed)
 }
 
 // Init fetches zones.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchZones())
+	return tea.Batch(m.spinner.Tick, m.fetchZones(m.refresh.Seq()))
 }
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case zonesLoadedMsg:
-		m.loading = false
-		m.zones = msg.zones
-		m.err = ""
-		m.cursor = 0
-		m.scroll = 0
-		if len(m.zones) > 0 {
-			m.selectedZone = &m.zones[0]
-			return m, m.fetchRecordsets(m.zones[0].ID)
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
 		}
-		return m, nil
+		m.loading = false
+		m.allZones = msg.zones
+		m.err = nil
+		m.applyFilter()
+		if m.selectedZone == nil {
+			return m, nil
+		}
+		// Refresh the selected zone's records along with the zone list.
+		return m, m.fetchRecordsets(m.selectedZone.ID)
 
 	case zonesErrMsg:
+		if !m.refresh.Accept(msg.seq) {
+			return m, nil
+		}
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
+		m.scrollTo(m.cursor) // the error line takes a zone row
 		return m, nil
 
 	case recordsetsLoadedMsg:
@@ -90,7 +138,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.recordsets = msg.recordsets
-		m.err = ""
+		m.err = nil
 		return m, nil
 
 	case recordsetsErrMsg:
@@ -98,8 +146,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
+		m.scrollTo(m.cursor) // the error line takes a zone row
 		return m, nil
+
+	case shared.TickMsg:
+		if m.loading || m.refresh.Busy() {
+			return m, nil
+		}
+		seq := m.refresh.Start()
+		return m, m.fetchZones(seq)
 
 	case spinner.TickMsg:
 		if m.loading {
@@ -110,16 +166,38 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
+	case sortClearMsg:
+		m.order.Highlight = false
+		return m, nil
+
+	case shared.SelectionChangedMsg:
+		cmd := m.syncRecords()
+		return m, cmd
+
 	case tea.KeyMsg:
+		if m.filter.Active() {
+			var cmd tea.Cmd
+			m.filter, cmd = m.filter.Update(msg)
+			changed := m.applyFilter()
+			records := m.recordsFor(changed)
+			return m, tea.Batch(cmd, records)
+		}
 		switch {
+		case key.Matches(msg, shared.Keys.Filter):
+			return m, m.filter.Start()
+		case key.Matches(msg, shared.Keys.Sort):
+			m.order = shared.NextSort(m.order, len(zoneSortColumns))
+			return m.resort()
+		case key.Matches(msg, shared.Keys.ReverseSort):
+			m.order = shared.ReverseSort(m.order)
+			return m.resort()
 		case key.Matches(msg, shared.Keys.Back):
-			return m, func() tea.Msg {
-				return shared.ViewChangeMsg{View: "serverlist"}
-			}
+			m.Escape()
+			cmd := m.syncRecords()
+			return m, cmd
 		case key.Matches(msg, shared.Keys.Up):
 			return m.moveCursor(m.cursor - 1)
 		case key.Matches(msg, shared.Keys.Down):
@@ -133,6 +211,104 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// rowIDs lists the IDs of the listed zones in display order.
+func (m Model) rowIDs() []string {
+	ids := make([]string, len(m.zones))
+	for i, z := range m.zones {
+		ids[i] = z.ID
+	}
+	return ids
+}
+
+// applyFilter rebuilds the listed zones from every zone under the current
+// filter and sort and keeps the selection on the same zone while it is
+// still listed; otherwise the cursor stays at the same position, clamped.
+// It reports whether the selected zone changed, so the caller fetches the
+// new zone's records.
+func (m *Model) applyFilter() (changed bool) {
+	prevID := ""
+	if m.selectedZone != nil {
+		prevID = m.selectedZone.ID
+	}
+	m.zones = m.zones[:0:0]
+	for _, z := range m.allZones {
+		if m.filter.Match(z.Name, z.Type, z.ID, z.Email, z.Description) {
+			m.zones = append(m.zones, z)
+		}
+	}
+	m.sortZones()
+	if len(m.zones) == 0 {
+		m.cursor, m.scroll = 0, 0
+		m.selectedZone = nil
+		m.recordsets = nil
+		return prevID != ""
+	}
+	if i := shared.RestoreCursor(m.rowIDs(), prevID); i >= 0 {
+		m.cursor = i
+	}
+	m.cursor = shared.ClampCursor(m.cursor, len(m.zones))
+	m.scroll = min(m.scroll, max(0, len(m.zones)-m.visibleRows()))
+	m.scrollTo(m.cursor)
+	m.selectedZone = &m.zones[m.cursor]
+	if m.selectedZone.ID != prevID {
+		m.recordsets = nil
+		return true
+	}
+	return false
+}
+
+// recordsFor starts loading the selected zone's records when the selection
+// changed.
+func (m *Model) recordsFor(changed bool) tea.Cmd {
+	if !changed || m.selectedZone == nil {
+		return nil
+	}
+	m.loading = true
+	return tea.Batch(m.spinner.Tick, m.fetchRecordsets(m.selectedZone.ID))
+}
+
+func (m *Model) sortZones() {
+	col := zoneSortColumns[m.order.Col]
+	asc := m.order.Asc
+	sort.SliceStable(m.zones, func(i, j int) bool {
+		a, b := m.zones[i], m.zones[j]
+		// Descending swaps the operands so equal keys keep their order.
+		if !asc {
+			a, b = b, a
+		}
+		if col == "type" {
+			return zoneType(a) < zoneType(b)
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	})
+}
+
+// resort re-sorts the zones after a sort change, keeping the same zone
+// selected, and highlights the sort column for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	if m.selectedZone != nil {
+		// selectedZone points into m.zones, so read its ID before sorting.
+		id := m.selectedZone.ID
+		m.sortZones()
+		if i := shared.RestoreCursor(m.rowIDs(), id); i >= 0 {
+			m.cursor = i
+			m.selectedZone = &m.zones[i]
+		}
+		m.scrollTo(m.cursor)
+	} else {
+		m.sortZones()
+	}
+	return m, shared.SortHighlightCmd(sortClearMsg{})
+}
+
+// zoneType is the zone's type, PRIMARY when the API leaves it empty.
+func zoneType(z zones.Zone) string {
+	if z.Type != "" {
+		return z.Type
+	}
+	return "PRIMARY"
+}
+
 // moveCursor clamps target to the zone list, keeps it visible and fetches
 // the selected zone's records when the selection changes. Empty lists (not
 // yet loaded, empty, or failed) are a no-op.
@@ -143,14 +319,7 @@ func (m Model) moveCursor(target int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	target = max(0, min(target, len(m.zones)-1))
-	visible := m.visibleRows()
-	if target < m.scroll {
-		m.scroll = target
-	}
-	if target >= m.scroll+visible {
-		m.scroll = target - visible + 1
-	}
-	m.scroll = max(0, m.scroll)
+	m.scrollTo(target)
 	if target == m.cursor && m.selectedZone != nil {
 		return m, nil
 	}
@@ -160,8 +329,26 @@ func (m Model) moveCursor(target int) (Model, tea.Cmd) {
 	return m, tea.Batch(m.spinner.Tick, m.fetchRecordsets(m.zones[m.cursor].ID))
 }
 
+// scrollTo adjusts the scroll offset so that zone row i is visible.
+func (m *Model) scrollTo(i int) {
+	visible := m.visibleRows()
+	if i < m.scroll {
+		m.scroll = i
+	}
+	if i >= m.scroll+visible {
+		m.scroll = i - visible + 1
+	}
+	m.scroll = max(0, m.scroll)
+}
+
 func (m Model) visibleRows() int {
 	h := m.height - 6 // title + status bar + header + zone header + padding
+	if m.err != nil {
+		h-- // error line under the title
+	}
+	if m.filter.Visible() {
+		h-- // filter line
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -177,22 +364,34 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	b.WriteString(title + "\n")
+	if m.err != nil {
+		b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
+	}
+	if bar := m.filter.View(); bar != "" {
+		b.WriteString(bar + "\n")
+	}
 
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
+	if len(m.zones) == 0 && (!m.loading || m.filter.Value() != "") {
+		msg := "  No DNS zones found."
+		if m.filter.Value() != "" {
+			msg = "  No DNS zones match the filter."
+		}
+		b.WriteString(shared.StyleHelp.Render(msg) + "\n")
 		return b.String()
 	}
 
-	if len(m.zones) == 0 && !m.loading {
-		b.WriteString(shared.StyleHelp.Render("  No DNS zones found.") + "\n")
-		return b.String()
-	}
-
-	// Zone list header
+	// Zone list header, with the sort column's direction
 	header := lipgloss.NewStyle().Bold(true).Foreground(shared.ColorMuted)
-	headerRow := fmt.Sprintf("  %-40s %-10s %-12s",
-		"Zone Name", "Type", "Records")
-	b.WriteString(header.Render(headerRow) + "\n")
+	sortHL := lipgloss.NewStyle().Bold(true).Foreground(shared.ColorHighlight)
+	headerCell := func(col int, title string, w int) string {
+		cell := fmt.Sprintf("%-*s", w, title+m.order.Indicator(col))
+		if col == m.order.Col && m.order.Highlight {
+			return sortHL.Render(cell)
+		}
+		return header.Render(cell)
+	}
+	b.WriteString(header.Render("  ") + headerCell(0, "Zone Name", 40) + header.Render(" ") +
+		headerCell(1, "Type", 10) + header.Render(fmt.Sprintf(" %-12s", "Records")) + "\n")
 
 	// Show zone list with record count summary
 	visible := m.visibleRows()
@@ -210,15 +409,10 @@ func (m Model) View() string {
 			rowStyle = rowStyle.Background(shared.ColorHighlight).Foreground(shared.ColorFg)
 		}
 
-		zoneType := "PRIMARY"
-		if z.Type != "" {
-			zoneType = z.Type
-		}
-
 		row := fmt.Sprintf("%s%-40s %-10s %s%s",
 			prefix,
-			truncate(z.Name, 39),
-			zoneType,
+			shared.TruncateCells(z.Name, 39),
+			zoneType(z),
 			"↓",
 			"",
 		)
@@ -253,7 +447,7 @@ func (m Model) View() string {
 					name = "(zone apex)"
 				}
 				row := fmt.Sprintf("  %-35s %-10s %s",
-					truncate(name, 34),
+					shared.TruncateCells(name, 34),
 					rs.Type,
 					formatRecordData(rs.Records),
 				)
@@ -268,7 +462,10 @@ func (m Model) View() string {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
-	return "↑↓ navigate zones • esc back • R refresh • ? help"
+	if m.filter.Active() {
+		return "enter confirm • esc clear"
+	}
+	return "↑↓ navigate zones • / filter • s/S sort • R refresh • ? help"
 }
 
 // isSelectedZone reports whether zoneID is the zone currently selected.
@@ -279,29 +476,31 @@ func (m Model) isSelectedZone(zoneID string) bool {
 // ForceRefresh triggers a reload.
 func (m *Model) ForceRefresh() tea.Cmd {
 	m.loading = true
-	return tea.Batch(m.spinner.Tick, m.fetchZones())
+	seq := m.refresh.Start()
+	return tea.Batch(m.spinner.Tick, m.fetchZones(seq))
 }
 
 // SetSize updates dimensions.
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.filter.SetWidth(w)
 }
 
-func (m Model) fetchZones() tea.Cmd {
+func (m Model) fetchZones(seq uint64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := shared.RequestCtx()
 		defer cancel()
 		allPages, err := zones.List(client, nil).AllPages(ctx)
 		if err != nil {
-			return zonesErrMsg{err: err}
+			return zonesErrMsg{seq: seq, err: err}
 		}
 		z, err := zones.ExtractZones(allPages)
 		if err != nil {
-			return zonesErrMsg{err: err}
+			return zonesErrMsg{seq: seq, err: err}
 		}
-		return zonesLoadedMsg{zones: z}
+		return zonesLoadedMsg{seq: seq, zones: z}
 	}
 }
 
@@ -320,13 +519,6 @@ func (m Model) fetchRecordsets(zoneID string) tea.Cmd {
 		}
 		return recordsetsLoadedMsg{zoneID: zoneID, recordsets: rs}
 	}
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }
 
 func formatRecordData(records []string) string {

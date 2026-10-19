@@ -18,6 +18,7 @@ import (
 	img "github.com/larkly/lazystack/internal/image"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
+	"github.com/larkly/lazystack/internal/ui/filterbar"
 )
 
 type serversLoadedMsg struct {
@@ -47,33 +48,24 @@ type Model struct {
 	loading         bool
 	refresh         shared.RefreshGate
 	spinner         spinner.Model
-	filter          textinput.Model
-	filtering       bool
-	err             string
+	filter          filterbar.Model
+	err             error
 	scrollOff       int
 	refreshInterval time.Duration
 	imageNames      map[string]string // cache of image ID → name
 	selected        map[string]bool   // selected server IDs for bulk actions
-	sortCol         int
-	sortAsc         bool
-	sortHighlight   bool
-	sortClearAt     time.Time
+	order           shared.SortState
 	config          *config.Config // live reference to global config for saving filters
 	filterNameInput textinput.Model
-	namingFilter    bool // true when user is typing name for save
-	cycleFilterIdx  int  // next saved-filter index to load (per model, reset on filter changes)
+	namingFilter    bool   // true when user is typing name for save
+	cycleFilterIdx  int    // next saved-filter index to load (per model, reset on filter changes)
+	highlight       string // server ID to put the cursor on once listed
 }
 
 // New creates a new server list model.
 func New(client, imageClient *gophercloud.ServiceClient, refreshInterval time.Duration) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-
-	fi := textinput.New()
-	fi.Prompt = ""
-	fi.Placeholder = "filter..."
-	fi.CharLimit = 64
-	fi.SetVirtualCursor(false)
 
 	return Model{
 		client:          client,
@@ -83,9 +75,9 @@ func New(client, imageClient *gophercloud.ServiceClient, refreshInterval time.Du
 		spinner:         s,
 		imageNames:      make(map[string]string),
 		selected:        make(map[string]bool),
-		filter:          fi,
+		filter:          filterbar.New(),
 		refreshInterval: refreshInterval,
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 	}
 }
 
@@ -113,8 +105,11 @@ func (m Model) SelectedServer() *compute.Server {
 // IsFiltering reports whether the list is currently in filter input mode,
 // including naming a filter to save.
 func (m Model) IsFiltering() bool {
-	return m.filtering || m.namingFilter
+	return m.filter.Active() || m.namingFilter
 }
+
+// FilterValue is the current filter text, typed or committed.
+func (m Model) FilterValue() string { return m.filter.Value() }
 
 // CopyEntries returns the title and copyable fields for the selected server.
 func (m Model) CopyEntries() (string, []copypicker.Entry) {
@@ -150,9 +145,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		}
-		m.err = ""
+		m.err = nil
 		m.pruneSelection()
 		m.applyFilter()
+		m.applyHighlight()
 		// Fetch any unknown image names
 		cmd := m.fetchMissingImageNames()
 		return m, cmd
@@ -177,7 +173,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[serverlist] serversErrMsg: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
+		m.ensureVisible() // the error line takes a table row
 		return m, nil
 
 	case shared.TickMsg:
@@ -203,20 +200,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.recomputeColumns()
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case tea.KeyMsg:
 		if m.namingFilter {
 			return m.updateNamingFilter(msg)
 		}
-		if m.filtering {
+		if m.filter.Active() {
 			return m.updateFilter(msg)
 		}
 		return m.updateNormal(msg)
@@ -228,50 +223,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, shared.Keys.Sort):
-		visibleCount := m.visibleColCount()
-		if visibleCount > 0 {
-			var cursorID string
-			if m.cursor >= 0 && m.cursor < len(m.filtered) {
-				cursorID = m.filtered[m.cursor].ID
-			}
-			m.sortCol = (m.sortCol + 1) % visibleCount
-			m.sortAsc = true
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortServers()
-			if cursorID != "" {
-				for i, s := range m.filtered {
-					if s.ID == cursorID {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+		if n := m.visibleColCount(); n > 0 {
+			m.order = shared.NextSort(m.order, n)
+			return m.resort()
 		}
 	case key.Matches(msg, shared.Keys.ReverseSort):
 		if m.visibleColCount() > 0 {
-			var cursorID string
-			if m.cursor >= 0 && m.cursor < len(m.filtered) {
-				cursorID = m.filtered[m.cursor].ID
-			}
-			m.sortAsc = !m.sortAsc
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortServers()
-			if cursorID != "" {
-				for i, s := range m.filtered {
-					if s.ID == cursorID {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+			m.order = shared.ReverseSort(m.order)
+			return m.resort()
 		}
 	case key.Matches(msg, shared.Keys.Up):
 		if m.cursor > 0 {
@@ -299,13 +258,9 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		m.ensureVisible()
 	case key.Matches(msg, shared.Keys.Back):
-		if len(m.selected) > 0 {
-			m.ClearSelection()
-		}
+		m.Escape()
 	case key.Matches(msg, shared.Keys.Filter):
-		m.filtering = true
-		m.filter.Focus()
-		return m, nil
+		return m, m.filter.Start()
 	case key.Matches(msg, shared.Keys.SaveFilter):
 		if m.filter.Value() != "" {
 			m.namingFilter = true
@@ -349,60 +304,64 @@ func (m Model) updateNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) updateFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.filtering = false
-		m.filter.SetValue("")
-		m.filter.Blur()
-		m.applyFilter()
-		return m, nil
-	case "enter":
-		m.filtering = false
-		m.filter.Blur()
-		return m, nil
-	}
-
 	var cmd tea.Cmd
 	m.filter, cmd = m.filter.Update(msg)
 	m.applyFilter()
 	return m, cmd
 }
 
-func (m *Model) applyFilter() {
-	var cursorID string
-	if m.cursor >= 0 && m.cursor < len(m.filtered) {
-		cursorID = m.filtered[m.cursor].ID
+// cursorID is the ID of the server under the cursor, or "".
+func (m Model) cursorID() string {
+	if s := m.SelectedServer(); s != nil {
+		return s.ID
 	}
-	query := strings.ToLower(m.filter.Value())
-	if query == "" {
+	return ""
+}
+
+// rowIDs lists the IDs of the listed servers in display order.
+func (m Model) rowIDs() []string {
+	ids := make([]string, len(m.filtered))
+	for i, s := range m.filtered {
+		ids[i] = s.ID
+	}
+	return ids
+}
+
+// resort re-sorts the list after a sort change, keeping the cursor on the
+// same server, and highlights the sort column for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	id := m.cursorID()
+	m.sortServers()
+	if i := shared.RestoreCursor(m.rowIDs(), id); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
+}
+
+func (m *Model) applyFilter() {
+	cursorID := m.cursorID()
+	if m.filter.Value() == "" {
 		m.filtered = m.servers
 	} else {
 		m.filtered = nil
 		for _, s := range m.servers {
-			allIPs := strings.ToLower(strings.Join(s.IPv4, " ") + " " + strings.Join(s.IPv6, " ") + " " + strings.Join(s.FloatingIP, " "))
-			if strings.Contains(strings.ToLower(s.Name), query) ||
-				strings.Contains(strings.ToLower(s.ID), query) ||
-				strings.Contains(strings.ToLower(s.Status), query) ||
-				strings.Contains(allIPs, query) ||
-				strings.Contains(strings.ToLower(s.FlavorName), query) ||
-				strings.Contains(strings.ToLower(s.ImageName), query) {
+			if m.filter.Match(s.Name, s.ID, s.Status,
+				strings.Join(s.IPv4, " "), strings.Join(s.IPv6, " "), strings.Join(s.FloatingIP, " "),
+				s.FlavorName, s.ImageName) {
 				m.filtered = append(m.filtered, s)
 			}
 		}
 	}
 	m.sortServers()
-	if cursorID != "" {
-		for i, s := range m.filtered {
-			if s.ID == cursorID {
-				m.cursor = i
-				break
-			}
-		}
+	if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
+		m.cursor = i
 	}
-	if m.cursor >= len(m.filtered) {
-		m.cursor = max(0, len(m.filtered)-1)
-	}
-	m.scrollOff = 0
+	m.cursor = shared.ClampCursor(m.cursor, len(m.filtered))
+	// Keep the viewport where it was (a refresh must not snap to the top),
+	// clamped to the new list length, then bring the cursor into view.
+	m.scrollOff = min(m.scrollOff, max(0, len(m.filtered)-m.tableHeight()))
+	m.ensureVisible()
 	m.recomputeColumns()
 }
 
@@ -472,11 +431,11 @@ func (m *Model) sortServers() {
 	if len(m.filtered) == 0 {
 		return
 	}
-	colKey := m.visibleColKey(m.sortCol)
+	colKey := m.visibleColKey(m.order.Col)
 	if colKey == "" {
 		return
 	}
-	asc := m.sortAsc
+	asc := m.order.Asc
 	sort.SliceStable(m.filtered, func(i, j int) bool {
 		a, b := m.filtered[i], m.filtered[j]
 		if !asc {
@@ -542,13 +501,16 @@ func (m *Model) ensureVisible() {
 	}
 }
 
+// tableHeight is the number of server rows that fit: the app gives the view
+// the full terminal height and adds a tab bar above it and a status bar below
+// it, and the view itself uses title, filter line, header and separator,
+// plus the error line while the last refresh failed.
 func (m Model) tableHeight() int {
-	// title + filter + header + separator + status bar
-	h := m.height - 5
-	if h < 1 {
-		h = 1
+	h := m.height - 6
+	if m.err != nil {
+		h--
 	}
-	return h
+	return max(1, h)
 }
 
 // View renders the server list.
@@ -562,25 +524,22 @@ func (m Model) View() string {
 	}
 	count := fmt.Sprintf(" (%d)", len(m.filtered))
 	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	if m.err != nil {
+		b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
+	}
 
 	// Filter bar
 	if m.namingFilter {
 		b.WriteString("  save: /" + m.filter.Value() + " as " + m.filterNameInput.View() + "\n")
-	} else if m.filtering {
-		b.WriteString("  / " + m.filter.View() + "\n")
-	} else if m.filter.Value() != "" {
-		b.WriteString(shared.StyleHelp.Render(fmt.Sprintf("  filter: %s (/ to edit, esc to clear)", m.filter.Value())) + "\n")
+	} else if bar := m.filter.View(); bar != "" {
+		b.WriteString(bar + "\n")
 	} else {
 		b.WriteString("\n")
 	}
 
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
-
 	if len(m.filtered) == 0 && !m.loading {
-		b.WriteString(shared.StyleHelp.Render("  No servers found. Press [c] to create one.") + "\n")
+		hint := "  No servers found. Press [" + shared.Keys.Create.Help().Key + "] to create one."
+		b.WriteString(shared.StyleHelp.Render(hint) + "\n")
 		return b.String()
 	}
 
@@ -590,15 +549,8 @@ func (m Model) View() string {
 		title := col.Title
 		idx := visIdx
 		visIdx++
-		indicator := ""
-		if idx == m.sortCol {
-			if m.sortAsc {
-				indicator = " ▲"
-			} else {
-				indicator = " ▼"
-			}
-		}
-		if idx == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(idx)
+		if idx == m.order.Col && m.order.Highlight {
 			return lipgloss.NewStyle().
 				Width(col.Width()).
 				Foreground(shared.ColorHighlight).
@@ -878,13 +830,13 @@ func (m *Model) SetConfig(cfg *config.Config) {
 }
 
 func (m Model) updateNamingFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case key.Matches(msg, shared.Keys.Back):
 		m.namingFilter = false
 		m.filterNameInput.Blur()
 		m.filterNameInput.SetValue("")
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		name := strings.TrimSpace(m.filterNameInput.Value())
 		if name != "" && m.config != nil {
 			m.config.SavedFilters = append(m.config.SavedFilters, config.SavedFilter{
@@ -923,11 +875,11 @@ func (m Model) Hints() string {
 	if m.namingFilter {
 		return "enter confirm • esc cancel • name your saved filter"
 	}
-	if m.filtering {
+	if m.filter.Active() {
 		return "enter confirm • esc clear"
 	}
-	if len(m.selected) > 0 {
-		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^o reboot • esc clear • ? help", len(m.selected))
+	if n := m.SelectionCount(); n > 0 {
+		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^o reboot • esc clear • ? help", n)
 	}
 	h := "↑↓ navigate • space select • enter detail • ^n create • ^d delete • ^o reboot • / filter • f save filter • F load filter"
 	if m.filter.Value() != "" {
@@ -937,16 +889,11 @@ func (m Model) Hints() string {
 	return h
 }
 
-// SelectedServers returns all selected servers, or the cursor server if none selected.
+// SelectedServers returns the selected servers in the current (filtered)
+// list, or the cursor server if none of them is listed.
 func (m Model) SelectedServers() []compute.Server {
-	if len(m.selected) > 0 {
-		var result []compute.Server
-		for _, s := range m.filtered {
-			if m.selected[s.ID] {
-				result = append(result, s)
-			}
-		}
-		return result
+	if sel := m.listedSelection(); len(sel) > 0 {
+		return sel
 	}
 	if s := m.SelectedServer(); s != nil {
 		return []compute.Server{*s}
@@ -957,6 +904,40 @@ func (m Model) SelectedServers() []compute.Server {
 // ClearSelection clears all selected servers.
 func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
+}
+
+// SelectedIDs returns every selected server ID, including selections that
+// are currently hidden by the filter or not yet loaded, in sorted order.
+func (m Model) SelectedIDs() []string {
+	ids := make([]string, 0, len(m.selected))
+	for id, on := range m.selected {
+		if on {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// SetHighlight puts the cursor on the server with the given ID as soon as
+// it is listed; a server just created may only appear after a refresh.
+func (m *Model) SetHighlight(id string) {
+	m.highlight = id
+	m.applyHighlight()
+}
+
+func (m *Model) applyHighlight() {
+	if m.highlight == "" {
+		return
+	}
+	for i, s := range m.filtered {
+		if s.ID == m.highlight {
+			m.cursor = i
+			m.ensureVisible()
+			m.highlight = ""
+			return
+		}
+	}
 }
 
 // SelectIDs adds the given IDs to the bulk selection (e.g. to keep failed
@@ -970,9 +951,38 @@ func (m *Model) SelectIDs(ids []string) {
 	}
 }
 
-// SelectionCount returns the number of selected servers.
+// Escape clears one layer of list state per esc press: the committed
+// filter, then the selection. It reports whether anything was cleared;
+// when nothing was, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if m.filter.Clear() {
+		m.applyFilter()
+		return true
+	}
+	if len(m.selected) > 0 {
+		m.ClearSelection()
+		return true
+	}
+	return false
+}
+
+// SelectionCount returns the number of selected servers bulk actions would
+// target: those visible under the current filter.
 func (m Model) SelectionCount() int {
-	return len(m.selected)
+	return len(m.listedSelection())
+}
+
+func (m Model) listedSelection() []compute.Server {
+	if len(m.selected) == 0 {
+		return nil
+	}
+	var result []compute.Server
+	for _, s := range m.filtered {
+		if m.selected[s.ID] {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // ServerNames returns a set of all server names in the current list.
@@ -1001,5 +1011,6 @@ func (m *Model) SetClient(client *gophercloud.ServiceClient) {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.filter.SetWidth(w)
 	m.recomputeColumns()
 }

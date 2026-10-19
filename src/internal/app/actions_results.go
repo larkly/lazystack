@@ -50,7 +50,7 @@ func (m Model) handleCredentials(msg credentialsMsg) (Model, tea.Cmd) {
 // the server data. Deletions arrive as serverDeletedMsg instead, so no
 // decision here depends on the (decorated) action label.
 func (m Model) handleServerActionMsg(msg shared.ServerActionMsg) (Model, tea.Cmd) {
-	m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
+	m.statusBar.StickyHint = fmt.Sprintf("%s %s %s", shared.Glyph("✓", "OK"), msg.Action, msg.Name)
 	m.statusBar.Error = ""
 	// Ensure the resize modal is dismissed once its resize is done; an
 	// unrelated action finishing must not close a modal still in use.
@@ -91,7 +91,7 @@ func (m Model) handleServerActionMsg(msg shared.ServerActionMsg) (Model, tea.Cmd
 // detail views whose resource may no longer exist and immediately refreshes
 // the affected view instead of waiting for the next periodic tick.
 func (m Model) handleResourceActionMsg(msg shared.ResourceActionMsg) (Model, tea.Cmd) {
-	m.statusBar.StickyHint = fmt.Sprintf("✓ %s %s", msg.Action, msg.Name)
+	m.statusBar.StickyHint = fmt.Sprintf("%s %s %s", shared.Glyph("✓", "OK"), msg.Action, msg.Name)
 	m.statusBar.Error = ""
 	// Navigate back to list view if we were on a detail view
 	returnTo := m.returnToView

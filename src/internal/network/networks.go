@@ -61,6 +61,9 @@ type SubnetPool struct {
 
 // ListNetworks fetches all available networks.
 func ListNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Network, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing networks")
 	opts := networks.ListOpts{}
 
@@ -91,6 +94,9 @@ func ListNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Net
 
 // ListSubnets fetches all subnets.
 func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subnet, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing subnets")
 	var result []Subnet
 	err := subnets.List(client, subnets.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -136,6 +142,9 @@ func ListSubnets(ctx context.Context, client *gophercloud.ServiceClient) ([]Subn
 
 // ListSubnetPools fetches all subnet pools.
 func ListSubnetPools(ctx context.Context, client *gophercloud.ServiceClient) ([]SubnetPool, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing subnet pools")
 	var result []SubnetPool
 	err := subnetpools.List(client, subnetpools.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -195,13 +204,25 @@ func DeleteNetwork(ctx context.Context, client *gophercloud.ServiceClient, id st
 	return nil
 }
 
-// SubnetCreateOpts holds options for creating a subnet.
+// NoGatewayKeyword is what subnet forms accept in the gateway field for a
+// subnet without a gateway; IsNoGateway matches it.
+const NoGatewayKeyword = "none"
+
+// IsNoGateway reports whether a gateway field value is NoGatewayKeyword,
+// ignoring case and surrounding space.
+func IsNoGateway(s string) bool {
+	return strings.EqualFold(strings.TrimSpace(s), NoGatewayKeyword)
+}
+
+// SubnetCreateOpts holds options for creating a subnet. A nil GatewayIP lets
+// Neutron assign the subnet's first address; a pointer to "" creates the
+// subnet without a gateway.
 type SubnetCreateOpts struct {
 	NetworkID       string
 	Name            string
 	CIDR            string
 	IPVersion       int
-	GatewayIP       string
+	GatewayIP       *string
 	EnableDHCP      bool
 	SubnetPoolID    string
 	PrefixLen       int
@@ -218,9 +239,8 @@ func CreateSubnet(ctx context.Context, client *gophercloud.ServiceClient, opts S
 		CIDR:       opts.CIDR,
 		IPVersion:  gophercloud.IPVersion(opts.IPVersion),
 		EnableDHCP: &opts.EnableDHCP,
-	}
-	if opts.GatewayIP != "" {
-		createOpts.GatewayIP = &opts.GatewayIP
+		// gophercloud sends a pointer to "" as gateway_ip null.
+		GatewayIP: opts.GatewayIP,
 	}
 	if opts.SubnetPoolID != "" {
 		createOpts.SubnetPoolID = opts.SubnetPoolID
@@ -374,6 +394,9 @@ func (o externalListOpts) ToNetworkListQuery() (string, error) {
 // ListExternalNetworks fetches networks where router:external is true,
 // following pagination so large deployments are not silently truncated.
 func ListExternalNetworks(ctx context.Context, client *gophercloud.ServiceClient) ([]Network, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing external networks")
 	var result []Network
 	err := networks.List(client, externalListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {

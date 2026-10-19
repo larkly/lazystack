@@ -18,6 +18,9 @@ import (
 const (
 	barWidth      = 18
 	cacheDuration = 30 * time.Second
+	// modalWidth is the overlay width; its border and padding take 6 cells.
+	modalWidth   = 56
+	contentWidth = modalWidth - 6
 )
 
 type quotaLoadedMsg struct {
@@ -41,7 +44,7 @@ type Model struct {
 	volume        []quota.QuotaUsage
 	loading       bool
 	spinner       spinner.Model
-	err           string
+	err           error
 	scroll        int
 	lastFetch     time.Time
 	lines         []string
@@ -81,7 +84,6 @@ func (m *Model) Open() tea.Cmd {
 	m.scroll = 0
 	if time.Since(m.lastFetch) > cacheDuration {
 		m.loading = true
-		m.err = ""
 		return tea.Batch(m.spinner.Tick, m.fetchQuotas())
 	}
 	return nil
@@ -192,10 +194,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case quotaLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
-			m.err = msg.err.Error()
+			m.err = msg.err
 			shared.Debugf("[quotaview] error: %v", msg.err)
 		} else {
-			m.err = ""
+			m.err = nil
 			m.compute = msg.compute
 			m.network = msg.network
 			m.volume = msg.volume
@@ -221,12 +223,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m *Model) buildLines() {
 	m.lines = nil
-
-	if m.err != "" {
-		m.lines = append(m.lines,
-			lipgloss.NewStyle().Foreground(shared.ColorError).Render("Error: "+m.err))
-		return
-	}
 
 	if len(m.compute) > 0 {
 		m.lines = append(m.lines, sectionHeader("Compute"))
@@ -328,7 +324,7 @@ func (m Model) Render() string {
 		content := title + "\n\n" + m.spinner.View() + " Loading quotas..."
 		hint := shared.StyleHelp.Render(closeHint())
 		content += "\n\n" + hint
-		box := shared.StyleModal.Width(56).Render(content)
+		box := shared.StyleModal.Width(modalWidth).Render(content)
 		return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, box)
 	}
 
@@ -351,8 +347,10 @@ func (m Model) Render() string {
 
 	hint := scrollHint + shared.StyleHelp.Render(closeHint())
 
-	content := title + "\n\n" + visible + "\n\n" + hint
-	box := shared.StyleModal.Width(56).Render(content)
+	// A failed refetch keeps the last quotas and shows the error in the blank
+	// line under the title.
+	content := title + "\n" + shared.LoadErrorLine(m.err, contentWidth) + "\n" + visible + "\n\n" + hint
+	box := shared.StyleModal.Width(modalWidth).Render(content)
 
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, box)
 }

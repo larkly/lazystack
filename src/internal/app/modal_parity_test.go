@@ -4,10 +4,12 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/cloneprogress"
 	"github.com/larkly/lazystack/internal/ui/servermetadata"
 )
 
@@ -92,8 +94,8 @@ func TestEveryOverlayRendersAndCapturesKeys(t *testing.T) {
 			m := initTestModel()
 			m.view = viewServerList
 			activate(&m)
-			if _, ok := m.activeModalView(); !ok {
-				t.Error("activeModalView does not render the active overlay")
+			if o, ok := m.topOverlay(); !ok || o.View() == "" {
+				t.Error("the active overlay is not rendered")
 			}
 			if ok, _ := m.updateAnyModal(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"})); !ok {
 				t.Error("updateAnyModal does not route keys to the active overlay")
@@ -126,7 +128,7 @@ func TestResizeReachesEveryOverlay(t *testing.T) {
 
 // Async results of an overlay must reach it while it is open; the metadata
 // editor used to stay stuck because its completion message was never routed
-// back to it.
+// back to it. It stays open after a save.
 func TestServerMetadataReceivesBackgroundResults(t *testing.T) {
 	m, _ := actionFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete || r.URL.Path != "/servers/srv/metadata/k" {
@@ -136,7 +138,9 @@ func TestServerMetadataReceivesBackgroundResults(t *testing.T) {
 	})
 	m.view = viewServerDetail
 	m.serverMetadata = servermetadata.New(m.client.Compute, "srv", "web", map[string]string{"k": "v"})
-	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
+	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
+	m = next.(Model)
+	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Text: "y"}))
 	m = next.(Model)
 	var sawAction bool
 	for _, msg := range commandMessages(cmd) {
@@ -148,7 +152,118 @@ func TestServerMetadataReceivesBackgroundResults(t *testing.T) {
 			}
 		}
 	}
-	if m.serverMetadata.Active || !sawAction {
-		t.Fatalf("metadata result not delivered: active=%v action=%v", m.serverMetadata.Active, sawAction)
+	if !m.serverMetadata.Active || !sawAction || strings.Contains(m.serverMetadata.View(), "Saving") {
+		t.Fatalf("metadata result not delivered: active=%v action=%v\n%s", m.serverMetadata.Active, sawAction, m.serverMetadata.View())
 	}
+}
+
+// overlayPrecedence is the order in which overlays win when several are
+// active at once. It must match what the screen shows, keys reach and
+// background messages reach.
+var overlayPrecedence = []string{
+	"confirm", "errModal", "cloneProgress",
+	"serverRename", "serverRebuild", "serverSnapshot", "serverResize",
+	"serverAdminAct", "serverMetadata", "sshPrompt", "copyPicker",
+	"consoleURL", "vmPassword", "fipPicker", "serverPicker", "volumePicker",
+	"routerCreate", "subnetPicker", "networkCreate", "subnetCreate",
+	"subnetEdit", "portCreate", "portEdit", "sgCreate", "sgRuleCreate",
+	"imageEdit", "imageCreate", "imageDownload", "lbCreate",
+	"lbListenerCreate", "lbPoolCreate", "lbMemberCreate", "lbMonitorCreate",
+	"projectPicker", "columnPicker",
+}
+
+// Confirm and error modals take keys through updateModal and do no async
+// work; image upload and download take background messages through their
+// own always-on routes so backgrounded transfers keep flowing.
+var (
+	overlaysWithOwnKeyRoute        = map[string]bool{"confirm": true, "errModal": true}
+	overlaysWithOwnBackgroundRoute = map[string]bool{
+		"confirm": true, "errModal": true, "imageCreate": true, "imageDownload": true,
+	}
+)
+
+func TestOverlayListMatchesPrecedence(t *testing.T) {
+	m := initTestModel()
+	var got []string
+	for _, o := range m.overlays() {
+		got = append(got, o.name)
+		if o.update == nil || o.setSize == nil || o.overlay == nil {
+			t.Errorf("%s: overlay entry is incomplete", o.name)
+		}
+	}
+	if !reflect.DeepEqual(got, overlayPrecedence) {
+		t.Fatalf("overlay order\n got %v\nwant %v", got, overlayPrecedence)
+	}
+	acts := overlayActivators()
+	for name := range acts {
+		if !contains(got, name) {
+			t.Errorf("overlay %q is missing from the overlay list", name)
+		}
+	}
+	if len(got) != len(acts)+len(overlaysWithOwnKeyRoute) {
+		t.Errorf("overlay list has %d entries, want %d", len(got), len(acts)+len(overlaysWithOwnKeyRoute))
+	}
+}
+
+// Every overlay must be reachable by every path: the screen, the status-bar
+// hints, key presses and background messages. The background path used to
+// skip sshPrompt, serverAdminAct and columnPicker.
+func TestEveryOverlayIsReachedByEveryPath(t *testing.T) {
+	for name, activate := range overlayActivators() {
+		t.Run(name, func(t *testing.T) {
+			m := initTestModel()
+			activate(&m)
+			if o, ok := m.topOverlay(); !ok || o.name != name {
+				t.Errorf("render path picks %q (ok=%v)", o.name, ok)
+			} else if o.Hints() == "" {
+				t.Error("overlay offers no status-bar hints")
+			}
+			if o, ok := m.keyOverlay(); overlaysWithOwnKeyRoute[name] == ok || (ok && o.name != name) {
+				t.Errorf("key path picks %q (ok=%v)", o.name, ok)
+			}
+			o, ok := m.backgroundOverlay()
+			if overlaysWithOwnBackgroundRoute[name] {
+				if ok {
+					t.Errorf("background path picks %q; it has its own route", o.name)
+				}
+			} else if !ok || o.name != name {
+				t.Errorf("background path picks %q (ok=%v)", o.name, ok)
+			}
+		})
+	}
+	for _, kind := range []modalType{modalConfirm, modalError} {
+		m := initTestModel()
+		m.activeModal = kind
+		o, ok := m.topOverlay()
+		if !ok || !overlaysWithOwnKeyRoute[o.name] {
+			t.Errorf("modal %d: render path picks %q (ok=%v)", kind, o.name, ok)
+		}
+	}
+}
+
+// A dismissed clone that is still running keeps its spinner ticking when no
+// overlay is open, but must not steal messages from an open overlay.
+func TestRunningCloneTakesBackgroundOnlyWhenNothingElseIsOpen(t *testing.T) {
+	m := initTestModel()
+	m.cloneProgress = cloneprogress.New(nil, nil, "srv", "web", nil)
+	m.cloneProgress.Active = false // dismissed, still running
+	if !m.cloneTakesBackground() {
+		t.Fatal("a dismissed running clone gets no background messages")
+	}
+	m.serverRename.Active = true
+	if m.cloneTakesBackground() {
+		t.Fatal("a dismissed clone takes background messages from an open overlay")
+	}
+	if o, ok := m.backgroundOverlay(); !ok || o.name != "serverRename" {
+		t.Fatalf("background path picks %q (ok=%v)", o.name, ok)
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

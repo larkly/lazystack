@@ -16,9 +16,11 @@ import (
 )
 
 type metaOpDoneMsg struct {
-	action  string
-	name    string
-	deleted string // key removed from the server, if any
+	action   string
+	name     string
+	setKey   string // key written on the server, if any
+	setValue string
+	deleted  string // key removed from the server, if any
 }
 
 type metaOpErrMsg struct {
@@ -42,12 +44,13 @@ type Model struct {
 	height     int
 	metadata   map[string]string
 	cursor     int
-	mode       string // "" = viewing, "add" = adding, "edit" = editing
-	editKey    string
+	mode       string // "" = viewing, "add" = adding, "edit" = editing, "delete" = confirming a delete
+	editKey    string // key being edited, or awaiting delete confirmation
 	keyInput   textinput.Model
 	valueInput textinput.Model
 	loading    bool
 	submitting bool
+	saved      bool // the last change was stored; cleared by the next key
 	err        string
 	spinner    spinner.Model
 }
@@ -113,19 +116,34 @@ func (m *Model) clampCursor() {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case metaOpDoneMsg:
+		// Stay open for further changes: mirror the change locally and
+		// return to the list with the saved key selected.
 		m.submitting = false
-		m.Active = false
+		m.saved = true
+		m.err = ""
+		m.mode = ""
+		m.keyInput.Blur()
+		m.valueInput.Blur()
 		if msg.deleted != "" {
 			delete(m.metadata, msg.deleted)
-			m.clampCursor()
 		}
+		if msg.setKey != "" {
+			m.metadata[msg.setKey] = msg.setValue
+			for i, k := range m.sortedKeys() {
+				if k == msg.setKey {
+					m.cursor = i
+				}
+			}
+		}
+		m.clampCursor()
 		return m, func() tea.Msg {
 			return shared.ServerActionMsg{Action: msg.action, Name: msg.name}
 		}
 
 	case metaOpErrMsg:
 		m.submitting = false
-		m.err = fmt.Sprintf("%s %s: %v", msg.action, msg.name, msg.err)
+		m.saved = false
+		m.err = fmt.Sprintf("%s %s: %s", msg.action, msg.name, shared.ParseError(msg.err).FriendlyMessage)
 		if msg.setKey != "" {
 			m.metadata[msg.setKey] = msg.setValue
 			m.mode = ""
@@ -158,6 +176,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.submitting {
 		return m, nil
 	}
+	m.saved = false
 
 	if key.Matches(msg, shared.Keys.Back) {
 		if m.mode != "" {
@@ -183,7 +202,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			if m.cursor < len(keys)-1 {
 				m.cursor++
 			}
-		case msg.String() == "a":
+		case key.Matches(msg, shared.Keys.MetadataAdd):
 			// Add new metadata
 			m.mode = "add"
 			m.keyInput.SetValue("")
@@ -191,7 +210,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.keyInput.Focus()
 			m.err = ""
 			return m, textinput.Blink
-		case msg.String() == "e":
+		case key.Matches(msg, shared.Keys.MetadataEdit):
 			// Edit selected
 			if m.cursor < len(keys) {
 				m.mode = "edit"
@@ -202,11 +221,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.err = ""
 				return m, textinput.Blink
 			}
-		case msg.String() == "d":
-			// Delete selected
+		case key.Matches(msg, shared.Keys.MetadataDelete):
+			// Delete selected, after confirmation
 			if m.cursor < len(keys) {
-				return m, m.deleteMetadatum(keys[m.cursor])
+				m.mode = "delete"
+				m.editKey = keys[m.cursor]
+				m.err = ""
+				return m, nil
 			}
+		}
+
+	case "delete":
+		switch {
+		case key.Matches(msg, shared.Keys.Confirm):
+			m.mode = ""
+			return m, m.deleteMetadatum(m.editKey)
+		case key.Matches(msg, shared.Keys.Deny):
+			m.mode = ""
+			return m, nil
 		}
 
 	case "add":
@@ -247,14 +279,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 // isFieldSwitch reports whether msg moves between the key and value inputs.
-// Only tab/shift+tab and the arrows qualify: j/k must reach the inputs as
-// text so keys like "project_id" can be typed.
+// Only tab/shift+tab and the non-text Up/Down keys qualify: j/k must reach
+// the inputs as text so keys like "project_id" can be typed.
 func isFieldSwitch(msg tea.KeyMsg) bool {
-	switch msg.String() {
-	case "up", "down":
-		return true
-	}
-	return key.Matches(msg, shared.Keys.Tab) || key.Matches(msg, shared.Keys.ShiftTab)
+	return shared.MatchesNonText(msg, shared.Keys.Up) ||
+		shared.MatchesNonText(msg, shared.Keys.Down) ||
+		key.Matches(msg, shared.Keys.Tab) || key.Matches(msg, shared.Keys.ShiftTab)
 }
 
 // toggleField moves focus between the key and value inputs.
@@ -292,7 +322,7 @@ func (m *Model) addMetadatum() tea.Cmd {
 			return metaOpErrMsg{action: "Update metadata", name: name, err: r.Err}
 		}
 		shared.Debugf("[servermetadata] created metadata for %s", name)
-		return metaOpDoneMsg{action: "Updated metadata", name: name}
+		return metaOpDoneMsg{action: "Updated metadata", name: name, setKey: key, setValue: value}
 	}
 }
 
@@ -330,14 +360,18 @@ func (m *Model) updateMetadatum() tea.Cmd {
 				return metaOpErrMsg{
 					action:   "Rename metadata",
 					name:     name,
-					err:      fmt.Errorf("saved %q but failed to remove old key %q: %w", newKey, oldKey, dr.Err),
+					err:      shared.ContextErrorf("saved %q but failed to remove old key %q: %v", newKey, oldKey, dr.Err),
 					setKey:   newKey,
 					setValue: value,
 				}
 			}
 		}
 		shared.Debugf("[servermetadata] updated metadata for %s", name)
-		return metaOpDoneMsg{action: "Updated metadata", name: name}
+		done := metaOpDoneMsg{action: "Updated metadata", name: name, setKey: newKey, setValue: value}
+		if oldKey != newKey {
+			done.deleted = oldKey
+		}
+		return done
 	}
 }
 
@@ -382,6 +416,10 @@ func (m Model) View() string {
 		body = m.renderAddForm("Add")
 	case "edit":
 		body = m.renderAddForm("Edit")
+	case "delete":
+		body = m.renderMetadataList() + "\n\n" + lipgloss.NewStyle().
+			Foreground(shared.ColorWarning).Bold(true).
+			Render(fmt.Sprintf("  Delete metadata key %q from %s? [y/n]", m.editKey, m.serverName))
 	}
 
 	if m.err != "" {
@@ -392,6 +430,10 @@ func (m Model) View() string {
 
 	if m.submitting {
 		body += "\n\n  " + m.spinner.View() + " Saving..."
+	} else if m.saved {
+		body += "\n\n" + lipgloss.NewStyle().
+			Foreground(shared.ColorSuccess).
+			Render("  "+shared.Glyph("✓", "OK")+" saved")
 	}
 
 	width := 60
@@ -399,9 +441,13 @@ func (m Model) View() string {
 		width = m.width - 4
 	}
 
+	footerText := "a add • e edit • d delete • ↑↓ navigate • esc back"
+	if m.mode == "delete" {
+		footerText = m.Hints()
+	}
 	footer := lipgloss.NewStyle().
 		Foreground(shared.ColorMuted).
-		Render("  a add • e edit • d delete • ↑↓ navigate • esc back")
+		Render("  " + footerText)
 
 	return lipgloss.NewStyle().
 		Width(width).
@@ -486,4 +532,15 @@ func (m Model) renderAddForm(mode string) string {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	switch m.mode {
+	case "add", "edit":
+		return "enter save • tab switch • esc cancel"
+	case "delete":
+		return "y delete • n/esc cancel"
+	}
+	return "a add • e edit • d delete • " + shared.Glyph("↑↓", "up/down") + " navigate • esc back"
 }

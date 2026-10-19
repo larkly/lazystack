@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -178,6 +179,26 @@ func DefaultKeybindings() map[string]string {
 		"hypervisors":     "H",
 		"user_management": "U",
 		"column_pick":     "O",
+		// Form and pane-specific actions.
+		"submit":                "ctrl+s", // submit a create/edit form
+		"health_monitor":        "ctrl+h", // LB pools pane: create/edit health monitor
+		"drain_member":          "w",      // LB members pane: set weight 0
+		"select_all":            "x",      // LB members pane: toggle all selections
+		"download":              "ctrl+g", // image properties pane: download image
+		"background":            "b",      // image upload/download: hide progress
+		"toggle_details":        "d,D",    // error modal: show/hide raw error
+		"metadata_add":          "a",      // server metadata: add key
+		"metadata_edit":         "e",      // server metadata: edit key
+		"metadata_delete":       "d",      // server metadata: delete key
+		"save_key":              "s",      // keypair created: save private key
+		"jump_start":            "g",      // console log: scroll to top
+		"jump_end":              "G",      // console log: scroll to bottom
+		"audit_filter_action":   "a",      // audit trail: filter by action
+		"audit_filter_resource": "r",      // audit trail: filter by resource
+		"audit_filter_date":     "d",      // audit trail: filter by date
+		"audit_filter_clear":    "c",      // audit trail: clear filter
+		"copy_value":            "c",      // console URL / admin password: copy
+		"reveal":                "r",      // admin password: reveal/hide
 	}
 }
 
@@ -273,7 +294,54 @@ func LoadFrom(path string) (Config, error) {
 
 	dropLegacyDefaultKeybindings(file.Keybindings)
 	file.Warnings = dropReservedKeybindings(file.Keybindings, defaults.Keybindings)
+	file.Warnings = append(file.Warnings, checkUpdateCheckInterval(&file.General, defaults.General)...)
+	file.Warnings = append(file.Warnings, dropInvalidColors(&file.Colors, defaults.Colors)...)
 	return mergeWithDefaults(file, defaults), nil
+}
+
+// checkUpdateCheckInterval replaces a zero or negative update check interval
+// with the default and returns a warning for it.
+func checkUpdateCheckInterval(g *GeneralConfig, defaults GeneralConfig) []string {
+	if g.UpdateCheckInterval > 0 {
+		return nil
+	}
+	warning := fmt.Sprintf("update_check_interval=%d must be a positive number of hours; using default %d",
+		g.UpdateCheckInterval, defaults.UpdateCheckInterval)
+	g.UpdateCheckInterval = defaults.UpdateCheckInterval
+	return []string{warning}
+}
+
+// hexColorPattern matches the #RGB and #RRGGBB forms lipgloss accepts.
+var hexColorPattern = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+
+// dropInvalidColors clears colors that are not #RGB/#RRGGBB hex so the
+// default is used instead, and returns one warning per dropped color.
+func dropInvalidColors(c *ColorConfig, defaults ColorConfig) []string {
+	var warnings []string
+	for _, f := range []struct {
+		name  string
+		value *string
+		def   string
+	}{
+		{"primary", &c.Primary, defaults.Primary},
+		{"secondary", &c.Secondary, defaults.Secondary},
+		{"success", &c.Success, defaults.Success},
+		{"warning", &c.Warning, defaults.Warning},
+		{"error", &c.Error, defaults.Error},
+		{"muted", &c.Muted, defaults.Muted},
+		{"bg", &c.Bg, defaults.Bg},
+		{"fg", &c.Fg, defaults.Fg},
+		{"highlight", &c.Highlight, defaults.Highlight},
+		{"cyan", &c.Cyan, defaults.Cyan},
+	} {
+		if *f.value == "" || hexColorPattern.MatchString(*f.value) {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf(
+			"colors.%s=%q is not a #RGB or #RRGGBB hex color; using default %q", f.name, *f.value, f.def))
+		*f.value = ""
+	}
+	return warnings
 }
 
 // legacyDefaultKeybindings lists former defaults of actions whose default has
@@ -333,7 +401,7 @@ func mergeWithDefaults(file, defaults Config) Config {
 	if file.General.IdleTimeout < 0 {
 		file.General.IdleTimeout = 0
 	}
-	if file.General.UpdateCheckInterval == 0 {
+	if file.General.UpdateCheckInterval <= 0 {
 		file.General.UpdateCheckInterval = defaults.General.UpdateCheckInterval
 	}
 

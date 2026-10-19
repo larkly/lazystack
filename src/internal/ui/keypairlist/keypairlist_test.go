@@ -99,8 +99,8 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	m, _ = m.Update(keypairsLoadedMsg{seq: newSeq, keypairs: []compute.KeyPair{{Name: "new"}}})
 	m, _ = m.Update(keypairsLoadedMsg{seq: staleSeq, keypairs: []compute.KeyPair{{Name: "old"}}})
 	m, _ = m.Update(keypairsErrMsg{seq: staleSeq, err: errors.New("stale failure")})
-	if len(m.pairs) != 1 || m.pairs[0].Name != "new" || m.err != "" {
-		t.Fatalf("stale response applied: %v err=%q", m.pairs, m.err)
+	if len(m.pairs) != 1 || m.pairs[0].Name != "new" || m.err != nil {
+		t.Fatalf("stale response applied: %v err=%v", m.pairs, m.err)
 	}
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")

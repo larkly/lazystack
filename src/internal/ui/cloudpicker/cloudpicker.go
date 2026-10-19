@@ -80,13 +80,13 @@ func (m Model) View() string {
 		cursor := "  "
 		style := lipgloss.NewStyle().Foreground(shared.ColorFg)
 		if i == m.cursor {
-			cursor = "▸ "
+			cursor = shared.Glyph("▸", ">") + " "
 			style = lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true)
 		}
 		items += fmt.Sprintf("%s%s\n", cursor, style.Render(name))
 	}
 
-	hint := shared.StyleHelp.Render("↑/↓ navigate • enter select • q quit")
+	hint := shared.StyleHelp.Render(shared.Glyph("↑/↓", "up/down") + " navigate • enter select • q quit")
 
 	content := title + "\n\n" + items + "\n" + hint
 	box := shared.StyleModal.Width(40).Render(content)
@@ -102,5 +102,5 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
-	return "↑/↓ navigate • enter select • esc/q back"
+	return shared.Glyph("↑/↓", "up/down") + " navigate • enter select • esc/q back"
 }

@@ -3,7 +3,6 @@ package sgrulecreate
 import (
 	"fmt"
 	"net/http"
-	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -302,7 +301,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loadingRule = false
-		m.blocked = "could not load the rule details (" + msg.err.Error() + "); nothing was changed"
+		m.blocked = "could not load the rule details (" + shared.ParseError(msg.err).FriendlyMessage + "); nothing was changed"
 		return m, nil
 	case ruleCreatedMsg:
 		m.submitting = false
@@ -316,18 +315,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case ruleCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 	case ruleReplaceErrMsg:
 		m.submitting = false
 		if msg.rollbackErr == nil {
-			m.err = fmt.Sprintf("Could not delete the original rule %s (%v). The replacement rule %s was removed again, so the rule is unchanged.",
-				msg.oldID, msg.deleteErr, msg.newID)
+			m.err = fmt.Sprintf("Could not delete the original rule %s (%s). The replacement rule %s was removed again, so the rule is unchanged.",
+				msg.oldID, shared.ParseError(msg.deleteErr).FriendlyMessage, msg.newID)
 			return m, nil
 		}
 		// Both rules now exist; close so the list refreshes and say so.
 		m.Active = false
-		err := fmt.Errorf("created replacement rule %s but could not delete the original rule %s (%v) or roll back the replacement (%v); both rules are active, delete one manually",
+		err := shared.ContextErrorf("created replacement rule %s but could not delete the original rule %s (%v) or roll back the replacement (%v); both rules are active, delete one manually",
 			msg.newID, msg.oldID, msg.deleteErr, msg.rollbackErr)
 		return m, func() tea.Msg {
 			return shared.ResourceActionErrMsg{Action: "Update rule in", Name: m.sgName, Err: err}
@@ -375,7 +374,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField++
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			switch m.focusField {
@@ -466,7 +465,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -580,13 +579,9 @@ func (m Model) buildSpec() (network.SecurityRuleSpec, error) {
 		if spec.RemoteGroupID != "" || spec.RemoteAddressGroupID != "" {
 			return spec, fmt.Errorf("this rule is restricted to a remote %s; a remote IP cannot be combined with it (delete the rule and add a new one to change the remote)", m.remoteKind())
 		}
-		addr, err := netip.ParsePrefix(remoteIP)
-		if err != nil {
-			a, aerr := netip.ParseAddr(remoteIP)
-			if aerr != nil {
-				return spec, fmt.Errorf("invalid remote IP %q", remoteIP)
-			}
-			addr = netip.PrefixFrom(a, a.BitLen())
+		addr, ok := shared.ParseIPOrCIDR(remoteIP)
+		if !ok {
+			return spec, fmt.Errorf("invalid remote IP %q", remoteIP)
 		}
 		if addr.Addr().Is4() != (spec.EtherType == "IPv4") {
 			return spec, fmt.Errorf("remote IP %s does not match ether type %s", remoteIP, spec.EtherType)
@@ -803,4 +798,9 @@ func (m Model) renderModal(content string) string {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return "tab/" + shared.Glyph("↑↓", "up/down") + " fields • " + shared.Glyph("←→", "left/right") + " cycle • ctrl+s submit • esc cancel"
 }

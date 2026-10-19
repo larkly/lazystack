@@ -14,6 +14,7 @@ import (
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
+	"github.com/larkly/lazystack/internal/ui/filterbar"
 )
 
 type keypairsLoadedMsg struct {
@@ -31,7 +32,9 @@ var kpSortColumns = []string{"name", "type"}
 // Model is the keypair list view.
 type Model struct {
 	client          *gophercloud.ServiceClient
-	pairs           []compute.KeyPair
+	allPairs        []compute.KeyPair // every key pair, as last fetched
+	pairs           []compute.KeyPair // the listed ones: filtered and sorted
+	filter          filterbar.Model
 	cursor          int
 	scrollOff       int
 	width           int
@@ -39,12 +42,10 @@ type Model struct {
 	loading         bool
 	refresh         shared.RefreshGate
 	spinner         spinner.Model
-	err             string
-	sortCol         int
-	sortAsc         bool
-	sortHighlight   bool
-	sortClearAt     time.Time
+	err             error
+	order           shared.SortState
 	refreshInterval time.Duration
+	highlight       string // key pair name to put the cursor on once listed
 }
 
 // New creates a keypair list model.
@@ -55,9 +56,26 @@ func New(client *gophercloud.ServiceClient, refreshInterval time.Duration) Model
 		client:          client,
 		loading:         true,
 		spinner:         s,
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 		refreshInterval: refreshInterval,
+		filter:          filterbar.New(),
 	}
+}
+
+// IsFiltering reports whether the "/" filter input has focus.
+func (m Model) IsFiltering() bool { return m.filter.Active() }
+
+// FilterValue is the current filter text.
+func (m Model) FilterValue() string { return m.filter.Value() }
+
+// Escape clears the committed filter and reports whether there was one;
+// when there was not, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if !m.filter.Clear() {
+		return false
+	}
+	m.applyFilter()
+	return true
 }
 
 // Init starts the initial fetch.
@@ -74,23 +92,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[keypairlist] loaded %d keypairs", len(msg.keypairs))
-		var cursorName string
-		if m.cursor >= 0 && m.cursor < len(m.pairs) {
-			cursorName = m.pairs[m.cursor].Name
-		}
 		m.loading = false
-		m.pairs = msg.keypairs
-		m.err = ""
-		m.sortPairs()
-		if cursorName != "" {
-			for i, kp := range m.pairs {
-				if kp.Name == cursorName {
-					m.cursor = i
-					break
-				}
-			}
-		}
-		m.ensureVisible()
+		m.allPairs = msg.keypairs
+		m.err = nil
+		m.applyFilter()
+		m.applyHighlight()
 		return m, nil
 
 	case keypairsErrMsg:
@@ -99,7 +105,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[keypairlist] error: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case shared.TickMsg:
@@ -124,54 +130,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.filter.Active() {
+			var cmd tea.Cmd
+			m.filter, cmd = m.filter.Update(msg)
+			m.applyFilter()
+			return m, cmd
+		}
 		switch {
+		case key.Matches(msg, shared.Keys.Filter):
+			return m, m.filter.Start()
+		case key.Matches(msg, shared.Keys.Back):
+			m.Escape()
 		case key.Matches(msg, shared.Keys.Sort):
-			var cursorName string
-			if m.cursor >= 0 && m.cursor < len(m.pairs) {
-				cursorName = m.pairs[m.cursor].Name
-			}
-			m.sortCol = (m.sortCol + 1) % len(kpSortColumns)
-			m.sortAsc = true
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortPairs()
-			if cursorName != "" {
-				for i, kp := range m.pairs {
-					if kp.Name == cursorName {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			m.ensureVisible()
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+			m.order = shared.NextSort(m.order, len(kpSortColumns))
+			return m.resort()
 		case key.Matches(msg, shared.Keys.ReverseSort):
-			var cursorName string
-			if m.cursor >= 0 && m.cursor < len(m.pairs) {
-				cursorName = m.pairs[m.cursor].Name
-			}
-			m.sortAsc = !m.sortAsc
-			m.sortHighlight = true
-			m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-			m.sortPairs()
-			if cursorName != "" {
-				for i, kp := range m.pairs {
-					if kp.Name == cursorName {
-						m.cursor = i
-						break
-					}
-				}
-			}
-			m.ensureVisible()
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return sortClearMsg{}
-			})
+			m.order = shared.ReverseSort(m.order)
+			return m.resort()
 		case key.Matches(msg, shared.Keys.Up):
 			m.cursor--
 			m.ensureVisible()
@@ -198,15 +177,18 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.pairs))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
+	if bar := m.filter.View(); bar != "" {
+		b.WriteString(bar + "\n")
 	}
 
 	if len(m.pairs) == 0 && !m.loading {
-		b.WriteString(shared.StyleHelp.Render("  No key pairs found.") + "\n")
+		msg := "  No key pairs found."
+		if m.filter.Value() != "" {
+			msg = "  No key pairs match the filter."
+		}
+		b.WriteString(shared.StyleHelp.Render(msg) + "\n")
 		return b.String()
 	}
 
@@ -220,15 +202,8 @@ func (m Model) View() string {
 	var headerParts []string
 	for i, h := range headerTitles {
 		title := h.title
-		indicator := ""
-		if i == m.sortCol {
-			if m.sortAsc {
-				indicator = " ▲"
-			} else {
-				indicator = " ▼"
-			}
-		}
-		if i == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(i)
+		if i == m.order.Col && m.order.Highlight {
 			headerParts = append(headerParts, lipgloss.NewStyle().
 				Foreground(shared.ColorHighlight).
 				Bold(true).
@@ -257,6 +232,85 @@ func (m Model) View() string {
 	return b.String()
 }
 
+// cursorName is the name (a key pair's ID) of the key pair under the
+// cursor, or "".
+func (m Model) cursorName() string {
+	if kp := m.SelectedKeyPair(); kp != nil {
+		return kp.Name
+	}
+	return ""
+}
+
+// rowNames lists the names of the listed key pairs in display order.
+func (m Model) rowNames() []string {
+	names := make([]string, len(m.pairs))
+	for i, kp := range m.pairs {
+		names[i] = kp.Name
+	}
+	return names
+}
+
+// applyFilter rebuilds the listed key pairs from every key pair under the
+// current filter and sort, keeping the cursor on the same key pair while it
+// is still listed.
+func (m *Model) applyFilter() {
+	name := m.cursorName()
+	m.pairs = m.pairs[:0:0]
+	for _, kp := range m.allPairs {
+		if m.filter.Match(kp.Name, kp.Type) {
+			m.pairs = append(m.pairs, kp)
+		}
+	}
+	m.sortPairs()
+	if i := shared.RestoreCursor(m.rowNames(), name); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureVisible()
+}
+
+// resort re-sorts the list after a sort change, keeping the cursor on the
+// same key pair, and highlights the sort column for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	name := m.cursorName()
+	m.sortPairs()
+	if i := shared.RestoreCursor(m.rowNames(), name); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
+}
+
+// SetHighlight puts the cursor on the key pair with the given name as soon
+// as it is listed; a key pair just created may only appear after a refresh.
+func (m *Model) SetHighlight(name string) {
+	m.highlight = name
+	m.applyHighlight()
+}
+
+func (m *Model) applyHighlight() {
+	if m.highlight == "" {
+		return
+	}
+	// A committed filter that hides the key pair being highlighted gives way.
+	if m.filter.Value() != "" && shared.RestoreCursor(m.rowNames(), m.highlight) < 0 {
+		for _, kp := range m.allPairs {
+			if kp.Name == m.highlight {
+				m.filter.Clear()
+				m.applyFilter()
+				break
+			}
+		}
+	}
+	for i, kp := range m.pairs {
+		if kp.Name == m.highlight {
+			m.cursor = i
+			m.ensureVisible()
+			m.highlight = ""
+			return
+		}
+	}
+}
+
 // ensureVisible clamps the cursor to the list and scrolls so the cursor row
 // is visible without leaving blank rows below the last keypair.
 func (m *Model) ensureVisible() {
@@ -273,17 +327,22 @@ func (m *Model) ensureVisible() {
 
 // tableHeight is the number of keypair rows that fit: the app gives the view
 // the terminal height minus the tab bar and status bar, and the view itself
-// uses title, blank line, header and separator.
+// uses title, error/blank line, header and separator, plus the filter line
+// while a filter is shown.
 func (m Model) tableHeight() int {
-	return max(1, m.height-6)
+	h := m.height - 6
+	if m.filter.Visible() {
+		h--
+	}
+	return max(1, h)
 }
 
 func (m *Model) sortPairs() {
 	if len(m.pairs) == 0 {
 		return
 	}
-	colKey := kpSortColumns[m.sortCol]
-	asc := m.sortAsc
+	colKey := kpSortColumns[m.order.Col]
+	asc := m.order.Asc
 	sort.SliceStable(m.pairs, func(i, j int) bool {
 		a, b := m.pairs[i], m.pairs[j]
 		if !asc {
@@ -350,10 +409,14 @@ func (m *Model) ForceRefresh() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.filter.SetWidth(w)
 	m.ensureVisible()
 }
 
 // Hints returns key hints.
 func (m Model) Hints() string {
-	return "↑↓ navigate • enter detail • ^n create • ^d delete • R refresh • 1-9/←→ switch tab • ? help"
+	if m.filter.Active() {
+		return "enter confirm • esc clear"
+	}
+	return "↑↓ navigate • enter detail • / filter • s/S sort • ^n create • ^d delete • R refresh • 1-9, 0/←→ switch tab • ? help"
 }

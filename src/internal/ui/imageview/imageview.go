@@ -157,10 +157,7 @@ type Model struct {
 	columns        []Column
 	cursor         int
 	selectorScroll int
-	sortCol        int
-	sortAsc        bool
-	sortHighlight  bool
-	sortClearAt    time.Time
+	order          shared.SortState
 
 	// Search/filter
 	searchActive bool
@@ -184,7 +181,7 @@ type Model struct {
 	refresh         shared.RefreshGate // image list fetches
 	serversRefresh  shared.RefreshGate // server list (usage) fetches
 	spinner         spinner.Model
-	err             string
+	err             error
 	refreshInterval time.Duration
 	selected        map[string]bool // selected image IDs for bulk actions
 }
@@ -207,7 +204,7 @@ func New(imageClient, computeClient *gophercloud.ServiceClient, refreshInterval 
 		searchInput:     ti,
 		refreshInterval: refreshInterval,
 		selected:        make(map[string]bool),
-		sortAsc:         true,
+		order:           shared.NewSortState(),
 	}
 }
 
@@ -254,6 +251,30 @@ func (m Model) SelectedImages() []img.Image {
 
 // IsSearching reports whether the search input has focus.
 func (m Model) IsSearching() bool { return m.searchActive }
+
+// Escape clears one layer of list state per esc press: the committed
+// filter, then the selection. It reports whether anything was cleared;
+// when nothing was, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if m.searchFilter != "" {
+		m.searchInput.SetValue("")
+		m.setSearchFilter("")
+		return true
+	}
+	if len(m.selected) > 0 {
+		m.ClearSelection()
+		return true
+	}
+	return false
+}
+
+// FilterValue is the current search filter text, typed or committed.
+func (m Model) FilterValue() string {
+	if m.searchActive {
+		return m.searchInput.Value()
+	}
+	return m.searchFilter
+}
 
 // SelectionCount returns the number of selected images that bulk actions
 // would target (selected and visible).
@@ -388,7 +409,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.loading = false
 		m.images = msg.images
-		m.err = ""
+		m.err = nil
 		m.pruneSelection()
 		m.sortImages()
 		if cursorID != "" {
@@ -411,7 +432,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[imageview] error: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case serversLoadedMsg:
@@ -441,7 +462,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case spinner.TickMsg:
@@ -471,27 +492,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
-		if m.searchFilter != "" {
-			m.searchFilter = ""
-			m.searchInput.SetValue("")
-			m.cursor = 0
-			m.selectorScroll = 0
-			return m, nil
-		}
-		if len(m.selected) > 0 {
-			m.ClearSelection()
-			return m, nil
-		}
+		m.Escape()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Tab):
 		m.focus = (m.focus + 1) % focusPaneCount
-		m.ClearSelection()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.ShiftTab):
 		m.focus = (m.focus + focusPaneCount - 1) % focusPaneCount
-		m.ClearSelection()
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Up):
@@ -516,7 +525,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m.reverseSort()
 		}
 
-	case msg.String() == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		if m.focus == FocusSelector {
 			m.searchActive = true
 			m.searchInput.SetValue(m.searchFilter)
@@ -548,31 +557,21 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, shared.Keys.Back):
 		m.searchActive = false
-		m.searchFilter = ""
 		m.searchInput.SetValue("")
 		m.searchInput.Blur()
-		m.cursor = 0
-		m.selectorScroll = 0
+		m.setSearchFilter("")
 		return m, nil
 
 	case key.Matches(msg, shared.Keys.Enter):
 		m.searchActive = false
-		m.searchFilter = m.searchInput.Value()
 		m.searchInput.Blur()
-		m.cursor = 0
-		m.selectorScroll = 0
-		visible := m.visibleImages()
-		if m.cursor >= len(visible) {
-			m.cursor = max(0, len(visible)-1)
-		}
+		m.setSearchFilter(m.searchInput.Value())
 		return m, nil
 
 	default:
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
-		m.searchFilter = m.searchInput.Value()
-		m.cursor = 0
-		m.selectorScroll = 0
+		m.setSearchFilter(m.searchInput.Value())
 		return m, cmd
 	}
 }
@@ -627,6 +626,21 @@ func (m Model) scrollDown(n int) (Model, tea.Cmd) {
 
 // --- Filter/search ---
 
+// setSearchFilter applies a new search filter and keeps the cursor on the
+// selected image while that image still matches, as the server list does;
+// when it is filtered out the cursor returns to the top.
+func (m *Model) setSearchFilter(filter string) {
+	var cursorID string
+	if im := m.SelectedImage(); im != nil {
+		cursorID = im.ID
+	}
+	m.searchFilter = filter
+	m.cursor = 0
+	m.restoreCursor(cursorID)
+	m.selectorScroll = min(m.selectorScroll, max(0, len(m.visibleImages())-m.selectorVisibleLines()))
+	m.ensureSelectorCursorVisible()
+}
+
 func (m Model) visibleImages() []img.Image {
 	if m.searchFilter == "" {
 		return m.images
@@ -652,15 +666,10 @@ func (m Model) cycleSort() (Model, tea.Cmd) {
 	if i := m.SelectedImage(); i != nil {
 		cursorID = i.ID
 	}
-	m.sortCol = (m.sortCol + 1) % visCount
-	m.sortAsc = true
-	m.sortHighlight = true
-	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.order = shared.NextSort(m.order, visCount)
 	m.sortImages()
 	m.restoreCursor(cursorID)
-	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return sortClearMsg{}
-	})
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
 func (m Model) reverseSort() (Model, tea.Cmd) {
@@ -671,25 +680,22 @@ func (m Model) reverseSort() (Model, tea.Cmd) {
 	if i := m.SelectedImage(); i != nil {
 		cursorID = i.ID
 	}
-	m.sortAsc = !m.sortAsc
-	m.sortHighlight = true
-	m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
+	m.order = shared.ReverseSort(m.order)
 	m.sortImages()
 	m.restoreCursor(cursorID)
-	return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return sortClearMsg{}
-	})
+	return m, shared.SortHighlightCmd(sortClearMsg{})
 }
 
+// restoreCursor puts the cursor back on the image with cursorID when it is
+// still listed.
 func (m *Model) restoreCursor(cursorID string) {
-	if cursorID == "" {
-		return
+	vis := m.visibleImages()
+	ids := make([]string, len(vis))
+	for i, im := range vis {
+		ids[i] = im.ID
 	}
-	for i, im := range m.visibleImages() {
-		if im.ID == cursorID {
-			m.cursor = i
-			return
-		}
+	if i := shared.RestoreCursor(ids, cursorID); i >= 0 {
+		m.cursor = i
 	}
 }
 
@@ -721,11 +727,11 @@ func (m *Model) sortImages() {
 	if len(m.images) == 0 {
 		return
 	}
-	colKey := m.visibleColKey(m.sortCol)
+	colKey := m.visibleColKey(m.order.Col)
 	if colKey == "" {
 		return
 	}
-	asc := m.sortAsc
+	asc := m.order.Asc
 	sort.SliceStable(m.images, func(i, j int) bool {
 		a, b := m.images[i], m.images[j]
 		// Descending swaps the operands so equal keys still compare false
@@ -887,12 +893,8 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.images))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
 	if len(m.images) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No images found.") + "\n")
@@ -913,7 +915,7 @@ func (m Model) View() string {
 func (m Model) renderWide() string {
 	selH := m.selectorHeight()
 
-	selContent := padContent(m.selectorTitle(), m.renderSelectorContent(m.width-4, selH-4))
+	selContent := shared.PadContent(m.selectorTitle(), m.renderSelectorContent(m.width-4, selH-4))
 	selPanel := m.panelBorder(FocusSelector).
 		Width(m.width).
 		Height(selH).
@@ -929,13 +931,13 @@ func (m Model) renderWide() string {
 	leftW := m.width * 35 / 100
 	rightW := m.width - leftW - 1
 
-	infoContent := padContent(m.panelTitle(FocusInfo), m.renderInfoContent(leftW-4))
+	infoContent := shared.PadContent(m.panelTitle(FocusInfo), m.renderInfoContent(leftW-4))
 	infoPanel := m.panelBorder(FocusInfo).Width(leftW).Height(midH).Render(infoContent)
 
-	propsContent := padContent(m.panelTitle(FocusProperties), m.renderPropertiesContent(rightW-4))
+	propsContent := shared.PadContent(m.panelTitle(FocusProperties), m.renderPropertiesContent(rightW-4))
 	propsPanel := m.panelBorder(FocusProperties).Width(rightW).Height(midH).Render(propsContent)
 
-	serversContent := padContent(m.panelTitle(FocusServers), m.renderServersContent(m.width-4, bottomH-4))
+	serversContent := shared.PadContent(m.panelTitle(FocusServers), m.renderServersContent(m.width-4, bottomH-4))
 	serversPanel := m.panelBorder(FocusServers).Width(m.width).Height(bottomH).Render(serversContent)
 
 	midRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", propsPanel)
@@ -951,7 +953,7 @@ func (m Model) renderNarrow() string {
 	remaining := totalH - selH
 
 	selContent := m.renderSelectorContent(w-4, selH-4)
-	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(padContent(m.selectorTitle(), selContent))
+	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(shared.PadContent(m.selectorTitle(), selContent))
 
 	if m.SelectedImage() == nil {
 		return selPanel
@@ -967,26 +969,14 @@ func (m Model) renderNarrow() string {
 		}
 	}
 
-	infoPanel := m.panelBorder(FocusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(FocusInfo), m.renderInfoContent(w-4)))
-	propsPanel := m.panelBorder(FocusProperties).Width(w).Height(propsH).Render(padContent(m.panelTitle(FocusProperties), m.renderPropertiesContent(w-4)))
-	serversPanel := m.panelBorder(FocusServers).Width(w).Height(serversH).Render(padContent(m.panelTitle(FocusServers), m.renderServersContent(w-4, serversH-4)))
+	infoPanel := m.panelBorder(FocusInfo).Width(w).Height(infoH).Render(shared.PadContent(m.panelTitle(FocusInfo), m.renderInfoContent(w-4)))
+	propsPanel := m.panelBorder(FocusProperties).Width(w).Height(propsH).Render(shared.PadContent(m.panelTitle(FocusProperties), m.renderPropertiesContent(w-4)))
+	serversPanel := m.panelBorder(FocusServers).Width(w).Height(serversH).Render(shared.PadContent(m.panelTitle(FocusServers), m.renderServersContent(w-4, serversH-4)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, propsPanel, serversPanel)
 }
 
 // --- Panel helpers ---
-
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "")
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) selectorTitle() string {
 	borderColor := shared.ColorMuted
@@ -1069,15 +1059,8 @@ func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 		title := col.Title
 		idx := visIdx
 		visIdx++
-		indicator := ""
-		if idx == m.sortCol {
-			if m.sortAsc {
-				indicator = " \u25b2"
-			} else {
-				indicator = " \u25bc"
-			}
-		}
-		if idx == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(idx)
+		if idx == m.order.Col && m.order.Highlight {
 			headerParts = append(headerParts, lipgloss.NewStyle().
 				Width(col.width).
 				Foreground(shared.ColorHighlight).
@@ -1501,7 +1484,10 @@ func (m Model) renderActionBar() string {
 			buttons = append(buttons, btn{"enter", "Server Detail"})
 		}
 	}
-	buttons = append(buttons, btn{"tab", "Switch Pane"}, btn{"esc", "Back"})
+	buttons = append(buttons, btn{"tab", "Switch Pane"})
+	if m.searchFilter != "" || len(m.selected) > 0 {
+		buttons = append(buttons, btn{"esc", "Clear"})
+	}
 
 	var parts []string
 	totalLen := 0
@@ -1610,12 +1596,19 @@ func (m *Model) SetSize(w, h int) {
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
+	if m.searchActive {
+		return "enter confirm \u2022 esc clear"
+	}
 	switch m.focus {
 	case FocusSelector:
 		if n := m.SelectionCount(); n > 0 {
 			return fmt.Sprintf("(%d selected) space toggle • ^d delete • esc clear • ? help", n)
 		}
-		return "\u2191\u2193 navigate \u2022 / search \u2022 S sort \u2022 ^n upload \u2022 d deactivate \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 ? help"
+		esc := ""
+		if m.searchFilter != "" {
+			esc = "esc clear filter \u2022 "
+		}
+		return "\u2191\u2193 navigate \u2022 / search \u2022 s/S sort \u2022 ^n upload \u2022 d deactivate \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 " + esc + "? help"
 	case FocusInfo:
 		return "enter edit \u2022 ^d delete \u2022 tab switch pane \u2022 R refresh \u2022 ? help"
 	case FocusProperties:

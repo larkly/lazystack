@@ -89,7 +89,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case fetchErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case rebuildDoneMsg:
@@ -102,7 +102,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case rebuildErrMsg:
 		m.submitting = false
 		m.confirming = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -179,14 +179,14 @@ func (m Model) updateConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) updateFilter(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.filtering = false
 		m.filter.SetValue("")
 		m.filter.Blur()
 		m.applyFilter()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		m.filtering = false
 		m.filter.Blur()
 		return m, nil
@@ -379,4 +379,15 @@ func (m Model) fetchImages() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	switch {
+	case m.confirming:
+		return "y confirm • n/esc cancel"
+	case m.filtering:
+		return "type to filter • enter apply • esc clear"
+	}
+	return shared.Glyph("↑↓", "up/down") + " navigate • enter select • / filter • esc cancel"
 }

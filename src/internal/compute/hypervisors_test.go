@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/gophercloud/gophercloud/v2"
 )
 
 // hypervisorsFixture is a minimal nova API paginated hypervisor list response.
@@ -171,5 +173,37 @@ func TestListHypervisors(t *testing.T) {
 	}
 	if h3.RunningVMs != 0 {
 		t.Errorf("expected 0 RunningVMs for down hypervisor, got %d", h3.RunningVMs)
+	}
+}
+
+// A failure on a later page must not leak the pages read so far as if
+// they were the full list, and the error must say what was being listed.
+func TestListHypervisorsErrorDropsPartialResult(t *testing.T) {
+	var base string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("marker") != "" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"hypervisors": [{"id": 1, "hypervisor_hostname": "compute01", "hypervisor_version": 6004000,
+			"cpu_info": {}, "service": {"host": "compute01", "id": "s1"}}],
+			"hypervisors_links": [{"rel": "next", "href": "` + base + `os-hypervisors/detail?marker=1"}]}`))
+	})
+	client := fakeNovaClient(t, handler)
+	base = client.Endpoint
+
+	got, err := ListHypervisors(context.Background(), client)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got != nil {
+		t.Errorf("partial result returned with error: %v", got)
+	}
+	if !strings.HasPrefix(err.Error(), "listing hypervisors: ") {
+		t.Errorf("err=%q, want it wrapped with \"listing hypervisors: \"", err)
+	}
+	if !gophercloud.ResponseCodeIs(err, http.StatusForbidden) {
+		t.Errorf("HTTP 403 cause not inspectable through %T", err)
 	}
 }

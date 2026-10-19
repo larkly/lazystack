@@ -58,7 +58,9 @@ type retryTransport struct {
 // Non-idempotent methods (POST, PATCH) are only retried on 429: a throttled
 // request is known not to have executed, while a 5xx on a mutating call may
 // have been processed before the gateway timed out, and a retry could create
-// a duplicate resource.
+// a duplicate resource. A DELETE that is replayed after a 5xx and then gets
+// 404 is reported as 204 No Content, since the first attempt most likely
+// deleted the resource.
 func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.Base
 	if base == nil {
@@ -66,6 +68,9 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	replayable := replayableBody(req)
+	// mayHaveExecuted records that an earlier attempt got a 5xx, so the
+	// backend may have processed it before the gateway gave up.
+	mayHaveExecuted := false
 
 	for attempt := 0; ; attempt++ {
 		resp, err := base.RoundTrip(req)
@@ -75,7 +80,14 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		if !isRetryableStatus(resp.StatusCode, req.Method) || !replayable || attempt >= retryMaxRetries {
 			restoreBody(req)
+			if mayHaveExecuted && req.Method == http.MethodDelete && resp.StatusCode == http.StatusNotFound {
+				shared.Debugf("[cloud] retryTransport: DELETE %s -> 404 on retry, the earlier attempt deleted it; reporting 204", req.URL)
+				return deletedResponse(resp), nil
+			}
 			return resp, nil
+		}
+		if resp.StatusCode != http.StatusTooManyRequests {
+			mayHaveExecuted = true
 		}
 
 		// Drain and close so the connection can be reused.
@@ -92,6 +104,19 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return resp, nil
 		}
 	}
+}
+
+// deletedResponse turns the 404 from a replayed DELETE into an empty 204
+// No Content: the resource is gone because the earlier attempt removed it.
+func deletedResponse(resp *http.Response) *http.Response {
+	drainAndClose(resp.Body)
+	resp.StatusCode = http.StatusNoContent
+	resp.Status = "204 No Content"
+	resp.Header.Del("Content-Type")
+	resp.Header.Del("Content-Length")
+	resp.ContentLength = 0
+	resp.Body = http.NoBody
+	return resp
 }
 
 // isRetryableStatus reports whether the status code should trigger a retry

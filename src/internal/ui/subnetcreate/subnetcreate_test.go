@@ -1,9 +1,15 @@
 package subnetcreate
 
 import (
+	"encoding/json"
+	"net/http"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/larkly/lazystack/internal/testutil"
 )
 
 func TestIPv6ModeValue(t *testing.T) {
@@ -87,5 +93,88 @@ func TestIPv6NavigationVisitsAllFieldsInOrder(t *testing.T) {
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.ipVersion != 0 || m.focusField != fieldSubmit {
 		t.Fatalf("after switching to IPv4: version=%d focus=%d", m.ipVersion, m.focusField)
+	}
+}
+
+func TestGatewayOpt(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want *string // nil: omit so Neutron assigns one
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"none", ptr("")},
+		{"NONE", ptr("")},
+		{" None ", ptr("")},
+		{"10.0.0.254", ptr("10.0.0.254")},
+		{" 2001:db8::1 ", ptr("2001:db8::1")},
+	} {
+		got := gatewayOpt(tc.in)
+		switch {
+		case tc.want == nil && got != nil:
+			t.Errorf("gatewayOpt(%q) = %q, want nil", tc.in, *got)
+		case tc.want != nil && (got == nil || *got != *tc.want):
+			t.Errorf("gatewayOpt(%q) = %v, want %q", tc.in, got, *tc.want)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+// Typing "none" must create the subnet with gateway_ip null.
+func TestSubmitNoneCreatesSubnetWithoutGateway(t *testing.T) {
+	gateway := make(chan string, 1)
+	client, closeFn := testutil.FakeServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Subnet map[string]json.RawMessage `json:"subnet"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		raw, ok := body.Subnet["gateway_ip"]
+		if !ok {
+			raw = []byte("<absent>")
+		}
+		gateway <- string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"subnet":{"id":"sub","network_id":"net","cidr":"10.0.0.0/24","ip_version":4}}`))
+	}))
+	defer closeFn()
+
+	m := New(client, "net", "net")
+	m.cidrInput.SetValue("10.0.0.0/24")
+	m.gatewayInput.SetValue("None")
+	m, cmd := m.submit()
+	if m.err != "" || cmd == nil {
+		t.Fatalf("submit: err=%q cmd=%v", m.err, cmd)
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("submit did not return a batch")
+	}
+	for _, c := range batch {
+		if msg := c(); msg != nil {
+			if _, ok := msg.(subnetCreatedMsg); ok {
+				break
+			}
+		}
+	}
+	select {
+	case got := <-gateway:
+		if got != "null" {
+			t.Errorf("gateway_ip = %s, want null", got)
+		}
+	default:
+		t.Fatal("no create request was sent")
+	}
+}
+
+func TestGatewayPlaceholderExplainsKeywords(t *testing.T) {
+	m := New(nil, "net", "net")
+	want := `IP, blank = auto, "none" = no gateway`
+	if m.gatewayInput.Placeholder != want {
+		t.Errorf("placeholder = %q, want %q", m.gatewayInput.Placeholder, want)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), want) {
+		t.Errorf("view does not show the full placeholder %q", want)
 	}
 }

@@ -61,7 +61,8 @@ type fetchErrMsg struct{ err error }
 
 type serverCreatedMsg struct {
 	shared.Audit
-	server *compute.Server
+	server *compute.Server // the first server created
+	label  string          // what the status bar reports as created
 }
 type serverCreateErrMsg struct {
 	shared.Audit
@@ -249,7 +250,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case fetchErrMsg:
 		m.loading--
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case serverCreatedMsg:
@@ -261,12 +262,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return ServerCloneCreatedMsg{Server: srv, VolumeIDs: volIDs}
 			}
 		}
-		return m, func() tea.Msg {
-			return shared.ViewChangeMsg{View: "serverlist"}
-		}
+		return m, shared.CreatedCmd("serverlist", msg.server.ID, msg.label)
 	case serverCreateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -324,7 +323,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Enter):
 			m.advanceFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			switch m.focusField {
@@ -411,7 +410,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 
 	// Handle backspace on user data to clear selection
-	if m.focusField == fieldUserData && (msg.String() == "backspace" || msg.String() == "delete") {
+	if m.focusField == fieldUserData && key.Matches(msg, shared.TextKeys.DeleteChar) {
 		m.userData = nil
 		m.userDataFile = ""
 		return m, nil
@@ -424,7 +423,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 
 	// Handle ctrl+s to submit
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -447,12 +446,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	items := m.pickerItems()
 	isMultiSelect := m.pickerField == fieldSecGroup
 
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.pickerOpen = false
 		m.pickerFilter.Blur()
 		return m, nil
-	case "space":
+	case shared.MatchesNonText(msg, shared.Keys.Select):
 		if isMultiSelect {
 			filtered := m.filteredPickerItems(items)
 			if len(filtered) > 0 && m.pickerCursor < len(filtered) {
@@ -465,7 +464,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-	case "enter":
+	case key.Matches(msg, shared.Keys.Enter):
 		if !isMultiSelect {
 			filtered := m.filteredPickerItems(items)
 			if len(filtered) > 0 && m.pickerCursor < len(filtered) {
@@ -477,13 +476,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Advance to next field
 		m.advanceFocus()
 		return m, nil
-	// Only arrows navigate: j/k must reach the filter as text.
-	case "up":
+	// Only non-text keys navigate: j/k must reach the filter as text.
+	case shared.MatchesNonText(msg, shared.Keys.Up):
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
 		}
 		return m, nil
-	case "down":
+	case shared.MatchesNonText(msg, shared.Keys.Down):
 		filtered := m.filteredPickerItems(items)
 		if m.pickerCursor < len(filtered)-1 {
 			m.pickerCursor++
@@ -944,7 +943,11 @@ func (m Model) submit() (Model, tea.Cmd) {
 			return serverCreateErrMsg{Audit: rec, err: err}
 		}
 		shared.Debugf("[servercreate] created server %q (id=%s)", name, srv.ID)
-		return serverCreatedMsg{Audit: rec, server: srv}
+		label := name
+		if count > 1 {
+			label = fmt.Sprintf("%s (%d servers)", name, count)
+		}
+		return serverCreatedMsg{Audit: rec, server: srv, label: label}
 	})
 }
 
@@ -970,7 +973,7 @@ func createNamed(client *gophercloud.ServiceClient, names []string, build func(s
 			if len(created) == 0 {
 				return serverCreateErrMsg{Audit: shared.Audits(recs...), err: err}
 			}
-			return serverCreateErrMsg{Audit: shared.Audits(recs...), err: fmt.Errorf("created %d of %d servers (%s); %s failed: %w",
+			return serverCreateErrMsg{Audit: shared.Audits(recs...), err: shared.ContextErrorf("created %d of %d servers (%s); %s failed: %v",
 				len(created), len(names), strings.Join(created, ", "), n, err)}
 		}
 		shared.Debugf("[servercreate] created server %q (id=%s)", n, srv.ID)
@@ -979,7 +982,7 @@ func createNamed(client *gophercloud.ServiceClient, names []string, build func(s
 		}
 		created = append(created, fmt.Sprintf("%s (%s)", n, srv.ID))
 	}
-	return serverCreatedMsg{Audit: shared.Audits(recs...), server: first}
+	return serverCreatedMsg{Audit: shared.Audits(recs...), server: first, label: strings.Join(names, ", ")}
 }
 
 // View renders the create form.

@@ -550,6 +550,12 @@ func keybindingOrder() []string {
 		"ssh", "copy_ssh", "copy", "console_url",
 		"jump_volumes", "jump_sec_groups", "jump_networks",
 		"hypervisors", "user_management", "column_pick",
+		"submit", "background", "download", "toggle_details",
+		"health_monitor", "drain_member", "select_all",
+		"metadata_add", "metadata_edit", "metadata_delete", "save_key",
+		"jump_start", "jump_end",
+		"audit_filter_action", "audit_filter_resource", "audit_filter_date", "audit_filter_clear",
+		"copy_value", "reveal",
 	}
 }
 

@@ -20,14 +20,22 @@ type Action struct {
 	Message   string
 }
 
-// ListActions fetches instance actions for a server.
+// ListActions fetches instance actions for a server, following Nova's
+// pagination links.
 func ListActions(ctx context.Context, client *gophercloud.ServiceClient, serverID string) ([]Action, error) {
+	if err := shared.RequireClient(client, shared.ServiceCompute); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[compute] listing actions for server %s", serverID)
 	var result []Action
-	err := instanceactions.List(client, serverID, nil).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
+	wrap := func(r pagination.PageResult) pagination.Page {
+		return instanceactions.InstanceActionPage{SinglePageBase: pagination.SinglePageBase(r)}
+	}
+	url := client.ServiceURL("servers", serverID, "os-instance-actions")
+	err := eachNovaPage(ctx, client, url, "links", wrap, func(page pagination.Page) error {
 		extracted, err := instanceactions.ExtractInstanceActions(page)
 		if err != nil {
-			return false, err
+			return err
 		}
 		for _, a := range extracted {
 			result = append(result, Action{
@@ -38,7 +46,7 @@ func ListActions(ctx context.Context, client *gophercloud.ServiceClient, serverI
 				Message:   a.Message,
 			})
 		}
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		shared.Debugf("[compute] list actions for server %s: %v", serverID, err)

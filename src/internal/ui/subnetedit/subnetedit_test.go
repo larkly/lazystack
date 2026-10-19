@@ -179,3 +179,49 @@ func TestLongNameAndGatewayNotTruncatedOnPrefill(t *testing.T) {
 		t.Errorf("gateway = %q, want %q", got, gw)
 	}
 }
+
+// "none" in any case removes the gateway, sent as gateway_ip null; so does
+// clearing the field, since Neutron cannot pick a gateway on update.
+func TestGatewayNoneRemovesGateway(t *testing.T) {
+	for _, value := range []string{"none", "NONE", " None ", ""} {
+		var bodies []map[string]any
+		m := editModel(t, &bodies)
+		m.gatewayInput.SetValue(value)
+		_, cmd := m.submit()
+		if _, ok := runSubmit(cmd).(subnetUpdatedMsg); !ok {
+			t.Fatalf("%q: update failed", value)
+		}
+		v, present := bodies[0]["gateway_ip"]
+		if !present || v != nil {
+			t.Errorf("%q: gateway_ip = %#v (present=%v), want null", value, v, present)
+		}
+	}
+}
+
+// A subnet without a gateway shows "none", and leaving it sends no change.
+func TestGatewaylessSubnetPrefillsNone(t *testing.T) {
+	var bodies []map[string]any
+	client, cleanup := testutil.FakeServiceClient(subnetPutRecorder(t, &bodies))
+	defer cleanup()
+	m := New(client, network.Subnet{ID: "sub-1", Name: "isolated", CIDR: "10.0.0.0/24"})
+	if got := m.gatewayInput.Value(); got != "none" {
+		t.Errorf("gateway prefill = %q, want none", got)
+	}
+	m.nameInput.SetValue("isolated-2")
+	_, cmd := m.submit()
+	runSubmit(cmd)
+	if len(bodies) != 1 {
+		t.Fatalf("PUTs = %v", bodies)
+	}
+	if v, present := bodies[0]["gateway_ip"]; present {
+		t.Errorf("unchanged gateway sent: %#v", v)
+	}
+}
+
+func TestGatewayPlaceholderExplainsNone(t *testing.T) {
+	m := New(nil, network.Subnet{ID: "sub-1", GatewayIP: "10.0.0.1"})
+	want := `IP, "none" = no gateway`
+	if m.gatewayInput.Placeholder != want {
+		t.Errorf("placeholder = %q, want %q", m.gatewayInput.Placeholder, want)
+	}
+}

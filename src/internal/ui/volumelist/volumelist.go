@@ -15,6 +15,7 @@ import (
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
+	"github.com/larkly/lazystack/internal/ui/filterbar"
 	"github.com/larkly/lazystack/internal/volume"
 )
 
@@ -131,7 +132,9 @@ func fitsWidth(columns []Column, totalWidth int) bool {
 type Model struct {
 	client          *gophercloud.ServiceClient
 	computeClient   *gophercloud.ServiceClient
-	volumes         []volume.Volume
+	allVolumes      []volume.Volume // every volume, as last fetched
+	volumes         []volume.Volume // the listed volumes: filtered and sorted
+	filter          filterbar.Model
 	columns         []Column
 	cursor          int
 	width           int
@@ -139,14 +142,11 @@ type Model struct {
 	loading         bool
 	refresh         shared.RefreshGate
 	spinner         spinner.Model
-	err             string
+	err             error
 	scrollOff       int
 	refreshInterval time.Duration
 	serverNames     map[string]string
-	sortCol         int
-	sortAsc         bool
-	sortHighlight   bool
-	sortClearAt     time.Time
+	order           shared.SortState
 	highlight       map[string]bool // volume IDs to highlight (from cross-resource navigation)
 	selected        map[string]bool // selected volume IDs for bulk actions
 }
@@ -164,9 +164,16 @@ func New(client, computeClient *gophercloud.ServiceClient, refreshInterval time.
 		refreshInterval: refreshInterval,
 		serverNames:     make(map[string]string),
 		selected:        make(map[string]bool),
-		sortAsc:         true,
+		order:           shared.NewSortState(),
+		filter:          filterbar.New(),
 	}
 }
+
+// IsFiltering reports whether the "/" filter input has focus.
+func (m Model) IsFiltering() bool { return m.filter.Active() }
+
+// FilterValue is the current filter text.
+func (m Model) FilterValue() string { return m.filter.Value() }
 
 // Init starts the initial fetch.
 func (m Model) Init() tea.Cmd {
@@ -215,6 +222,21 @@ func (m Model) listedSelection() []volume.Volume {
 	return result
 }
 
+// Escape clears one layer of list state per esc press: the committed
+// filter, then the selection. It reports whether anything was cleared;
+// when nothing was, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if m.filter.Clear() {
+		m.applyFilter()
+		return true
+	}
+	if len(m.selected) > 0 {
+		m.ClearSelection()
+		return true
+	}
+	return false
+}
+
 // ClearSelection clears all selected volumes.
 func (m *Model) ClearSelection() {
 	m.selected = make(map[string]bool)
@@ -249,8 +271,8 @@ func (m *Model) pruneSelection() {
 	if len(m.selected) == 0 {
 		return
 	}
-	present := make(map[string]bool, len(m.volumes))
-	for _, v := range m.volumes {
+	present := make(map[string]bool, len(m.allVolumes))
+	for _, v := range m.allVolumes {
 		present[v.ID] = true
 	}
 	for id := range m.selected {
@@ -283,26 +305,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[volumelist] loaded %d volumes", len(msg.volumes))
-		var cursorID string
-		if m.cursor >= 0 && m.cursor < len(m.volumes) {
-			cursorID = m.volumes[m.cursor].ID
-		}
 		m.loading = false
-		m.volumes = msg.volumes
-		m.err = ""
+		m.allVolumes = msg.volumes
+		m.err = nil
 		m.pruneSelection()
-		m.sortVolumes()
-		if cursorID != "" {
-			for i, v := range m.volumes {
-				if v.ID == cursorID {
-					m.cursor = i
-					break
-				}
-			}
-		}
-		if m.cursor >= len(m.volumes) {
-			m.cursor = max(0, len(m.volumes)-1)
-		}
+		m.applyFilter()
 		m.applyHighlight()
 		return m, m.fetchMissingServerNames()
 
@@ -312,13 +319,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[volumelist] error: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case serverNamesMsg:
 		for id, name := range msg {
 			m.serverNames[id] = name
 		}
+		m.applyFilter() // the filter matches attached server names
 		return m, nil
 
 	case shared.TickMsg:
@@ -339,62 +347,34 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.columns = computeWidths(m.columns, m.width)
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case sortClearMsg:
-		m.sortHighlight = false
+		m.order.Highlight = false
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.filter.Active() {
+			var cmd tea.Cmd
+			m.filter, cmd = m.filter.Update(msg)
+			m.applyFilter()
+			return m, cmd
+		}
 		switch {
+		case key.Matches(msg, shared.Keys.Filter):
+			return m, m.filter.Start()
+		case key.Matches(msg, shared.Keys.Back):
+			m.Escape()
 		case key.Matches(msg, shared.Keys.Sort):
-			visibleCount := m.visibleColCount()
-			if visibleCount > 0 {
-				var cursorID string
-				if m.cursor >= 0 && m.cursor < len(m.volumes) {
-					cursorID = m.volumes[m.cursor].ID
-				}
-				m.sortCol = (m.sortCol + 1) % visibleCount
-				m.sortAsc = true
-				m.sortHighlight = true
-				m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-				m.sortVolumes()
-				if cursorID != "" {
-					for i, v := range m.volumes {
-						if v.ID == cursorID {
-							m.cursor = i
-							break
-						}
-					}
-				}
-				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-					return sortClearMsg{}
-				})
+			if n := m.visibleColCount(); n > 0 {
+				m.order = shared.NextSort(m.order, n)
+				return m.resort()
 			}
 		case key.Matches(msg, shared.Keys.ReverseSort):
 			if m.visibleColCount() > 0 {
-				var cursorID string
-				if m.cursor >= 0 && m.cursor < len(m.volumes) {
-					cursorID = m.volumes[m.cursor].ID
-				}
-				m.sortAsc = !m.sortAsc
-				m.sortHighlight = true
-				m.sortClearAt = time.Now().Add(1500 * time.Millisecond)
-				m.sortVolumes()
-				if cursorID != "" {
-					for i, v := range m.volumes {
-						if v.ID == cursorID {
-							m.cursor = i
-							break
-						}
-					}
-				}
-				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-					return sortClearMsg{}
-				})
+				m.order = shared.ReverseSort(m.order)
+				return m.resort()
 			}
 		case key.Matches(msg, shared.Keys.Up):
 			if m.cursor > 0 {
@@ -438,6 +418,63 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// cursorID is the ID of the volume under the cursor, or "".
+func (m Model) cursorID() string {
+	if v := m.SelectedVolume(); v != nil {
+		return v.ID
+	}
+	return ""
+}
+
+// rowIDs lists the IDs of the listed volumes in display order.
+func (m Model) rowIDs() []string {
+	ids := make([]string, len(m.volumes))
+	for i, v := range m.volumes {
+		ids[i] = v.ID
+	}
+	return ids
+}
+
+// applyFilter rebuilds the listed volumes from every volume under the
+// current filter and sort, keeping the cursor on the same volume while it
+// is still listed and the viewport where it was.
+func (m *Model) applyFilter() {
+	cursorID := m.cursorID()
+	m.volumes = m.volumes[:0:0]
+	for _, v := range m.allVolumes {
+		if m.filter.Match(v.Name, v.ID, v.Status, v.VolumeType, m.attachedName(v)) {
+			m.volumes = append(m.volumes, v)
+		}
+	}
+	m.sortVolumes()
+	if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
+		m.cursor = i
+	}
+	m.cursor = shared.ClampCursor(m.cursor, len(m.volumes))
+	m.scrollOff = min(m.scrollOff, max(0, len(m.volumes)-m.tableHeight()))
+	m.ensureVisible()
+}
+
+// attachedName is the name of the server v is attached to, or "".
+func (m Model) attachedName(v volume.Volume) string {
+	if v.AttachedServerID == "" {
+		return ""
+	}
+	return m.serverNames[v.AttachedServerID]
+}
+
+// resort re-sorts the list after a sort change, keeping the cursor on the
+// same volume, and highlights the sort column for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	id := m.cursorID()
+	m.sortVolumes()
+	if i := shared.RestoreCursor(m.rowIDs(), id); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
+}
+
 func (m *Model) ensureVisible() {
 	th := m.tableHeight()
 	if m.cursor < m.scrollOff {
@@ -448,12 +485,16 @@ func (m *Model) ensureVisible() {
 	}
 }
 
+// tableHeight is the number of volume rows that fit: the app gives the view
+// the full terminal height and adds a tab bar above it and a status bar below
+// it, and the view itself uses title, error/blank line, header and
+// separator, plus the filter line while a filter is shown.
 func (m Model) tableHeight() int {
-	h := m.height - 5
-	if h < 1 {
-		h = 1
+	h := m.height - 6
+	if m.filter.Visible() {
+		h--
 	}
-	return h
+	return max(1, h)
 }
 
 func (m Model) visibleColCount() int {
@@ -484,11 +525,11 @@ func (m *Model) sortVolumes() {
 	if len(m.volumes) == 0 {
 		return
 	}
-	colKey := m.visibleColKey(m.sortCol)
+	colKey := m.visibleColKey(m.order.Col)
 	if colKey == "" {
 		return
 	}
-	asc := m.sortAsc
+	asc := m.order.Asc
 	sort.SliceStable(m.volumes, func(i, j int) bool {
 		a, b := m.volumes[i], m.volumes[j]
 		// Descending swaps the operands so equal keys still compare false
@@ -539,15 +580,18 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.volumes))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
-
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
+	if bar := m.filter.View(); bar != "" {
+		b.WriteString(bar + "\n")
 	}
 
 	if len(m.volumes) == 0 && !m.loading {
-		b.WriteString(shared.StyleHelp.Render("  No volumes found.") + "\n")
+		msg := "  No volumes found."
+		if m.filter.Value() != "" {
+			msg = "  No volumes match the filter."
+		}
+		b.WriteString(shared.StyleHelp.Render(msg) + "\n")
 		return b.String()
 	}
 
@@ -557,15 +601,8 @@ func (m Model) View() string {
 		title := col.Title
 		idx := visIdx
 		visIdx++
-		indicator := ""
-		if idx == m.sortCol {
-			if m.sortAsc {
-				indicator = " ▲"
-			} else {
-				indicator = " ▼"
-			}
-		}
-		if idx == m.sortCol && m.sortHighlight {
+		indicator := m.order.Indicator(idx)
+		if idx == m.order.Col && m.order.Highlight {
 			return lipgloss.NewStyle().
 				Width(col.width).
 				Foreground(shared.ColorHighlight).
@@ -738,7 +775,7 @@ func (m Model) fetchMissingServerNames() tea.Cmd {
 		return nil
 	}
 	missing := make(map[string]bool)
-	for _, v := range m.volumes {
+	for _, v := range m.allVolumes {
 		if v.AttachedServerID != "" {
 			if _, ok := m.serverNames[v.AttachedServerID]; !ok {
 				missing[v.AttachedServerID] = true
@@ -775,6 +812,7 @@ func (m *Model) ForceRefresh() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.filter.SetWidth(w)
 	m.columns = computeWidths(m.columns, w)
 }
 
@@ -791,6 +829,11 @@ func (m *Model) applyHighlight() {
 	if len(m.highlight) == 0 {
 		return
 	}
+	// A committed filter that hides every volume being jumped to gives way.
+	if m.filter.Value() != "" && !m.lists(m.volumes) && m.lists(m.allVolumes) {
+		m.filter.Clear()
+		m.applyFilter()
+	}
 	for i, v := range m.volumes {
 		if m.highlight[v.ID] {
 			m.cursor = i
@@ -801,10 +844,23 @@ func (m *Model) applyHighlight() {
 	}
 }
 
+// lists reports whether vols contains a highlighted volume.
+func (m Model) lists(vols []volume.Volume) bool {
+	for _, v := range vols {
+		if m.highlight[v.ID] {
+			return true
+		}
+	}
+	return false
+}
+
 // Hints returns key hints.
 func (m Model) Hints() string {
+	if m.filter.Active() {
+		return "enter confirm • esc clear"
+	}
 	if n := m.SelectionCount(); n > 0 {
 		return fmt.Sprintf("(%d selected) space toggle • ^d delete • ^t detach • esc clear • ? help", n)
 	}
-	return "↑↓ navigate • space select • enter detail • ^n create • ^d delete • " + shared.Keys.Attach.Help().Key + " attach • ^t detach • R refresh • 1-9/←→ switch tab • ? help"
+	return "↑↓ navigate • space select • enter detail • / filter • s/S sort • ^n create • ^d delete • " + shared.Keys.Attach.Help().Key + " attach • ^t detach • R refresh • 1-9, 0/←→ switch tab • ? help"
 }

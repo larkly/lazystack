@@ -62,8 +62,8 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	m, _ = m.Update(sgErrMsg{seq: staleList, err: errors.New("stale")})
 	m, _ = m.Update(detailLoadedMsg{seq: staleDetail, sgID: "sg", ports: []network.Port{{ID: "p-old"}}})
 	m, _ = m.Update(detailErrMsg{seq: staleDetail, sgID: "sg", err: errors.New("stale")})
-	if m.groups[0].Name != "new" || m.err != "" {
-		t.Fatalf("stale group list applied: %v err=%q", m.groups, m.err)
+	if m.groups[0].Name != "new" || m.err != nil {
+		t.Fatalf("stale group list applied: %v err=%v", m.groups, m.err)
 	}
 	if len(m.ports) != 1 || m.ports[0].ID != "p-new" || m.detailErr != "" {
 		t.Fatalf("stale detail applied: %v err=%q", m.ports, m.detailErr)

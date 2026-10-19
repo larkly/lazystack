@@ -7,6 +7,9 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/larkly/lazystack/internal/quota"
 	"github.com/larkly/lazystack/internal/shared"
 )
 
@@ -66,5 +69,35 @@ func TestQuotaOverlayDefaultBindingEscAndScroll(t *testing.T) {
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.scroll != 0 {
 		t.Fatalf("up: scroll=%d", m.scroll)
+	}
+}
+
+// A failed refetch (the overlay reopened after the cache expired) must keep
+// the cached quotas on screen and show the error as one friendly line; the
+// next good load clears it.
+func TestFailedRefetchKeepsCachedQuotas(t *testing.T) {
+	m := New()
+	m.Width, m.Height = 100, 40
+	m.Visible = true
+	m, _ = m.Update(quotaLoadedMsg{compute: []quota.QuotaUsage{{Resource: "Instances", Used: 3, Limit: 10}}})
+
+	apiErr := gophercloud.ErrUnexpectedResponseCode{Actual: 503}
+	m, _ = m.Update(quotaLoadedMsg{err: apiErr})
+	out := ansi.Strip(m.Render())
+	// The overlay is narrow, so the line is the friendly message cut to fit.
+	friendly := strings.TrimSpace(ansi.Strip(shared.LoadErrorLine(apiErr, contentWidth)))
+	if !strings.Contains(friendly, "The cloud API is unavailable (HTTP 503)") {
+		t.Fatalf("error line %q is not the friendly message", friendly)
+	}
+	if !strings.Contains(out, "Compute") || !strings.Contains(out, "Instances") {
+		t.Fatalf("failed refetch wiped the cached quotas:\n%s", out)
+	}
+	if !strings.Contains(out, friendly) {
+		t.Fatalf("overlay lacks the friendly error %q:\n%s", friendly, out)
+	}
+
+	m, _ = m.Update(quotaLoadedMsg{compute: []quota.QuotaUsage{{Resource: "Instances", Used: 4, Limit: 10}}})
+	if out := ansi.Strip(m.Render()); strings.Contains(out, friendly) {
+		t.Fatalf("successful load did not clear the error:\n%s", out)
 	}
 }

@@ -19,7 +19,7 @@ func TestAdminActionsAreAuditedAndReportedByRoot(t *testing.T) {
 		want              audit.ActionType
 	}{
 		{"Migrate", "", `{"migrate":null}`, audit.ActionMigrate},
-		{"Live Migrate", "host-2", `{"os-migrateLive":{"block_migration":false,"host":"host-2"}}`, audit.ActionLiveMigrate},
+		{"Live Migrate", "host-2", `{"os-migrateLive":{"block_migration":false,"disk_over_commit":false,"host":"host-2"}}`, audit.ActionLiveMigrate},
 		{"Evacuate", "host-3", `{"evacuate":{"host":"host-3","onSharedStorage":false}}`, audit.ActionEvacuate},
 		{"Force Delete", "", `{"forceDelete":""}`, audit.ActionForceDelete},
 		{"Reset State", "error", `{"os-resetState":{"state":"error"}}`, audit.ActionResetState},

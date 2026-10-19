@@ -271,7 +271,17 @@ func (m Model) handleResourceNavigation(msg shared.NavigateToResourceMsg) (Model
 }
 
 func (m Model) handleViewChange(msg shared.ViewChangeMsg) (Model, tea.Cmd) {
-	shared.Debugf("[app] handleViewChange: target=%s", msg.View)
+	shared.Debugf("[app] handleViewChange: target=%s highlight=%s", msg.View, msg.Highlight)
+	if msg.Highlight != "" {
+		switch msg.View {
+		case "serverlist":
+			m.serverList.SetHighlight(msg.Highlight)
+		case "volumelist":
+			m.volumeList.SetHighlight([]string{msg.Highlight})
+		case "keypairlist":
+			m.keypairList.SetHighlight(msg.Highlight)
+		}
+	}
 	switch msg.View {
 	case "serverlist":
 		// Overlay views (hypervisors, catalog, users, audit log) pushed

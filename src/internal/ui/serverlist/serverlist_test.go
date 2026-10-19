@@ -2,11 +2,13 @@ package serverlist
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/larkly/lazystack/internal/compute"
 	"github.com/larkly/lazystack/internal/shared"
 )
@@ -19,16 +21,16 @@ func TestDescendingSortKeepsTiesStable(t *testing.T) {
 		{ID: "s-3", Name: "c", Status: "SHUTOFF"},
 		{ID: "s-4", Name: "d", Status: "SHUTOFF"},
 	}
-	m.sortCol = -1
+	m.order.Col = -1
 	for i := 0; m.visibleColKey(i) != ""; i++ {
 		if m.visibleColKey(i) == "status" {
-			m.sortCol = i
+			m.order.Col = i
 		}
 	}
-	if m.sortCol < 0 {
+	if m.order.Col < 0 {
 		t.Fatal("status column not visible by default")
 	}
-	m.sortAsc = false
+	m.order.Asc = false
 	m.sortServers()
 
 	want := []string{"s-1", "s-3", "s-4", "s-2"}
@@ -53,7 +55,7 @@ func TestEscClearsFilterAndExitsFiltering(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: '/'}))
 	m = updated
-	if !m.filtering {
+	if !m.filter.Active() {
 		t.Fatalf("expected filtering mode to be enabled")
 	}
 
@@ -66,7 +68,7 @@ func TestEscClearsFilterAndExitsFiltering(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
 	m = updated
 
-	if m.filtering {
+	if m.filter.Active() {
 		t.Fatalf("expected filtering mode to be disabled after esc")
 	}
 	if got := m.filter.Value(); got != "" {
@@ -162,10 +164,210 @@ func TestTickRefreshesDoNotOverlapOrRegress(t *testing.T) {
 	m, _ = m.Update(serversLoadedMsg{seq: newSeq, servers: []compute.Server{{ID: "new", Name: "new"}}})
 	m, _ = m.Update(serversLoadedMsg{seq: staleSeq, servers: []compute.Server{{ID: "old", Name: "old"}}})
 	m, _ = m.Update(serversErrMsg{seq: staleSeq, err: errors.New("stale failure")})
-	if len(m.servers) != 1 || m.servers[0].ID != "new" || m.err != "" {
-		t.Fatalf("stale response applied: servers=%v err=%q", m.servers, m.err)
+	if len(m.servers) != 1 || m.servers[0].ID != "new" || m.err != nil {
+		t.Fatalf("stale response applied: servers=%v err=%v", m.servers, m.err)
 	}
 	if _, next := m.Update(shared.TickMsg{}); next == nil {
 		t.Fatal("tick blocked after the newest fetch completed")
+	}
+}
+
+func fiftyServers() []compute.Server {
+	servers := make([]compute.Server, 50)
+	for i := range servers {
+		id := fmt.Sprintf("s-%02d", i)
+		servers[i] = compute.Server{ID: id, Name: "srv-" + id}
+	}
+	return servers
+}
+
+// An auto-refresh (and the image-name lookup that follows it) must keep the
+// cursor row on screen instead of snapping the viewport back to the top.
+func TestRefreshKeepsCursorRowVisible(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.width = 120
+	for m.height = 1; m.tableHeight() < 10; m.height++ {
+	}
+	m.loading = false
+	m.servers = fiftyServers()
+	m.applyFilter()
+	for m.cursor < 30 {
+		m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	}
+	assertVisible := func(stage string) {
+		t.Helper()
+		if m.cursor != 30 {
+			t.Fatalf("%s: cursor = %d, want 30", stage, m.cursor)
+		}
+		if h := m.tableHeight(); m.cursor < m.scrollOff || m.cursor >= m.scrollOff+h {
+			t.Fatalf("%s: cursor %d outside viewport [%d, %d)", stage, m.cursor, m.scrollOff, m.scrollOff+h)
+		}
+	}
+	assertVisible("setup")
+
+	m, _ = m.Update(serversLoadedMsg{seq: m.refresh.Seq(), servers: fiftyServers()})
+	assertVisible("after servers loaded")
+
+	m, _ = m.Update(imageNamesMsg{"img": "ubuntu"})
+	assertVisible("after image names")
+}
+
+// commitFilter types query into the filter and confirms it with enter, so the
+// filter stays applied after filter input mode ends.
+func commitFilter(t *testing.T, m Model, query string) Model {
+	t.Helper()
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: '/'}))
+	for _, r := range query {
+		m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if m.filter.Active() || m.filter.Value() != query {
+		t.Fatalf("setup: filtering=%v filter=%q, want committed %q", m.filter.Active(), m.filter.Value(), query)
+	}
+	return m
+}
+
+func TestEscClearsCommittedFilter(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.servers = []compute.Server{
+		{ID: "s-1", Name: "alpha"},
+		{ID: "s-2", Name: "beta"},
+	}
+	m.applyFilter()
+	m = commitFilter(t, m, "alp")
+	if len(m.filtered) != 1 {
+		t.Fatalf("setup: filtered len = %d, want 1", len(m.filtered))
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	if got := m.filter.Value(); got != "" {
+		t.Fatalf("filter = %q after esc, want cleared", got)
+	}
+	if len(m.filtered) != len(m.servers) {
+		t.Fatalf("filtered len = %d after esc, want %d", len(m.filtered), len(m.servers))
+	}
+}
+
+// With both a committed filter and a selection, esc clears the filter first
+// and the selection on the next press.
+func TestEscClearsFilterBeforeSelection(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.servers = []compute.Server{
+		{ID: "s-1", Name: "alpha"},
+		{ID: "s-2", Name: "beta"},
+	}
+	m.applyFilter()
+	m = commitFilter(t, m, "alp")
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	if m.SelectionCount() != 1 {
+		t.Fatalf("setup: selection = %d, want 1", m.SelectionCount())
+	}
+
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	if m.filter.Value() != "" || m.SelectionCount() != 1 {
+		t.Fatalf("first esc: filter=%q selection=%d, want filter cleared and selection kept", m.filter.Value(), m.SelectionCount())
+	}
+	m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	if m.SelectionCount() != 0 {
+		t.Fatalf("second esc: selection = %d, want cleared", m.SelectionCount())
+	}
+}
+
+// The empty-state hint must name the create key (c is clone).
+func TestEmptyStateHintNamesCreateKey(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.SetSize(80, 24)
+	m.loading = false
+	got := m.View()
+	want := "Press [" + shared.Keys.Create.Help().Key + "] to create one."
+	if !strings.Contains(got, want) {
+		t.Fatalf("empty view = %q, want it to contain %q", got, want)
+	}
+}
+
+// Under a filter, the advertised bulk count must match the servers a bulk
+// action would actually target.
+func TestSelectionCountMatchesFilteredTargets(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.servers = []compute.Server{
+		{ID: "s-1", Name: "alpha"},
+		{ID: "s-2", Name: "alpine"},
+		{ID: "s-3", Name: "beta"},
+	}
+	m.applyFilter()
+	m.SelectIDs([]string{"s-1", "s-3"})
+	m = commitFilter(t, m, "alp")
+
+	if got := len(m.SelectedServers()); got != 1 {
+		t.Fatalf("SelectedServers len = %d, want 1 (beta is filtered out)", got)
+	}
+	if got := m.SelectionCount(); got != 1 {
+		t.Fatalf("SelectionCount = %d, want 1", got)
+	}
+	if h := m.Hints(); !strings.Contains(h, "(1 selected)") {
+		t.Fatalf("hints = %q, want the listed count (1 selected)", h)
+	}
+}
+
+// When every selected server is hidden by the filter, nothing listed is
+// selected: actions fall back to the cursor server, as the hints show.
+func TestHiddenSelectionFallsBackToCursor(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m.servers = []compute.Server{
+		{ID: "s-1", Name: "alpha"},
+		{ID: "s-3", Name: "beta"},
+	}
+	m.applyFilter()
+	m.SelectIDs([]string{"s-3"})
+	m = commitFilter(t, m, "alp")
+
+	if got := m.SelectionCount(); got != 0 {
+		t.Fatalf("SelectionCount = %d, want 0", got)
+	}
+	if got := m.SelectedServers(); len(got) != 1 || got[0].ID != "s-1" {
+		t.Fatalf("SelectedServers = %v, want the cursor server s-1", got)
+	}
+	if h := m.Hints(); strings.Contains(h, "selected") {
+		t.Fatalf("hints = %q, want no selection count", h)
+	}
+}
+
+// The view gets the full terminal height; the root model prepends a tab bar
+// and keeps the last line for the status bar, so a full list must render in
+// at most height-2 lines or its bottom row is clipped.
+func TestFullListFitsBetweenTabBarAndStatusBar(t *testing.T) {
+	const height = 24
+	m := New(nil, nil, 5*time.Second)
+	m.SetSize(120, height)
+	m, _ = m.Update(serversLoadedMsg{seq: m.refresh.Seq(), servers: fiftyServers()})
+	lines := strings.Split(strings.TrimSuffix(m.View(), "\n"), "\n")
+	if len(lines) > height-2 {
+		t.Fatalf("full list rendered %d lines, want at most %d", len(lines), height-2)
+	}
+}
+
+// A failed refresh must not wipe the table: the last good rows stay and the
+// error shows as one friendly line, which the next good load clears.
+func TestRefreshErrorKeepsRowsAndShowsFriendlyError(t *testing.T) {
+	m := New(nil, nil, 5*time.Second)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = m.Update(serversLoadedMsg{seq: m.refresh.Seq(), servers: []compute.Server{{ID: "s-1", Name: "web-01", Status: "ACTIVE"}}})
+
+	seq := m.refresh.Start()
+	apiErr := gophercloud.ErrUnexpectedResponseCode{Actual: 503}
+	m, _ = m.Update(serversErrMsg{seq: seq, err: apiErr})
+	view := m.View()
+	friendly := shared.ParseError(apiErr).FriendlyMessage
+	if !strings.Contains(view, "web-01") {
+		t.Fatalf("failed refresh wiped the rows:\n%s", view)
+	}
+	if !strings.Contains(view, friendly) {
+		t.Fatalf("view lacks the friendly error %q:\n%s", friendly, view)
+	}
+
+	seq = m.refresh.Start()
+	m, _ = m.Update(serversLoadedMsg{seq: seq, servers: []compute.Server{{ID: "s-1", Name: "web-01", Status: "ACTIVE"}}})
+	if strings.Contains(m.View(), friendly) {
+		t.Fatalf("successful load did not clear the error:\n%s", m.View())
 	}
 }

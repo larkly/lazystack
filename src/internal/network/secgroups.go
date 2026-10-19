@@ -37,6 +37,9 @@ type SecurityRule struct {
 
 // ListSecurityGroups fetches all security groups with their rules.
 func ListSecurityGroups(ctx context.Context, client *gophercloud.ServiceClient) ([]SecurityGroup, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing security groups")
 	var result []SecurityGroup
 	err := groups.List(client, groups.ListOpts{}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -144,6 +147,9 @@ func DeleteSecurityGroupRule(ctx context.Context, client *gophercloud.ServiceCli
 
 // GetSecurityGroup fetches a single security group by ID.
 func GetSecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, id string) (*SecurityGroup, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] getting security group %s", id)
 	r := groups.Get(ctx, client, id)
 	sg, err := r.Extract()

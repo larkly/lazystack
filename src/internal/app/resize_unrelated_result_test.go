@@ -28,14 +28,16 @@ func resizeFailFixture(t *testing.T) Model {
 	return m
 }
 
-// submitResize opens the resize modal on srv-b's detail view, submits it
-// and returns the tracked resize result, not yet delivered.
+// submitResize opens the resize modal on srv-b's detail view, submits and
+// confirms it and returns the tracked resize result, not yet delivered.
 func submitResize(t *testing.T, m Model) (Model, tea.Msg) {
 	t.Helper()
 	m.view = viewServerDetail
 	m.serverDetail = detailFor("srv-b", "ACTIVE")
 	m = openResizeModal(t, m)
-	res, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	res, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = res.(Model)
+	res, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	m = res.(Model)
 	for _, msg := range nonSpinner(cmd) {
 		if _, ok := msg.(actionResultMsg); ok {

@@ -14,6 +14,7 @@ import (
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
+	"github.com/larkly/lazystack/internal/ui/filterbar"
 )
 
 type focusPane int
@@ -56,9 +57,12 @@ type Model struct {
 	networkClient *gophercloud.ServiceClient
 
 	// Selector state
-	routers        []network.Router
+	allRouters     []network.Router // every router, as last fetched
+	routers        []network.Router // the listed routers: filtered and sorted
 	cursor         int
 	selectorScroll int
+	filter         filterbar.Model
+	order          shared.SortState
 
 	// Detail state for currently selected router
 	interfaces   []network.RouterInterface
@@ -82,7 +86,7 @@ type Model struct {
 	refresh         shared.RefreshGate // router list fetches
 	detailRefresh   shared.RefreshGate // interface (detail) fetches
 	spinner         spinner.Model
-	err             string
+	err             error
 	refreshInterval time.Duration
 }
 
@@ -97,7 +101,44 @@ func New(networkClient *gophercloud.ServiceClient, refreshInterval time.Duration
 		networkNames:    make(map[string]string),
 		subnetToNet:     make(map[string]string),
 		refreshInterval: refreshInterval,
+		filter:          filterbar.New(),
+		order:           shared.NewSortState(),
 	}
+}
+
+// routerSortColumns are the router list's sort keys, cycled with s.
+var routerSortColumns = []string{"name", "status", "routes"}
+
+type sortClearMsg struct{}
+
+// IsFiltering reports whether the "/" router filter input has focus.
+func (m Model) IsFiltering() bool { return m.filter.Active() }
+
+// escHint mentions esc in the selector hints while it has a filter to clear.
+func (m Model) escHint() string {
+	if m.filter.Value() != "" {
+		return "esc clear filter • "
+	}
+	return ""
+}
+
+// FilterValue is the current router filter text.
+func (m Model) FilterValue() string { return m.filter.Value() }
+
+// Escape clears one layer of state per esc press: the committed filter,
+// then focus on a detail pane, which returns to the router list. It
+// reports whether anything was cleared; when nothing was, esc goes on to
+// mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if m.filter.Clear() {
+		m.applyFilter()
+		return true
+	}
+	if m.focus != FocusSelector {
+		m.focus = FocusSelector
+		return true
+	}
+	return false
 }
 
 // Init starts the initial fetch.
@@ -225,6 +266,12 @@ func (m *Model) resetDetailState() {
 func (m *Model) onSelectorChange() tea.Cmd {
 	r := m.selectedRouter()
 	if r == nil {
+		// The filter hides every router: show no router's detail.
+		if m.lastDetailID != "" {
+			m.lastDetailID = ""
+			m.resetDetailState()
+			m.detailLoading = false
+		}
 		return nil
 	}
 	if r.ID == m.lastDetailID {
@@ -253,24 +300,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[routerview] routersLoadedMsg: %d routers", len(msg.routers))
-		var cursorID string
-		if m.cursor >= 0 && m.cursor < len(m.routers) {
-			cursorID = m.routers[m.cursor].ID
-		}
 		m.loading = false
-		m.routers = msg.routers
-		m.err = ""
-		if cursorID != "" {
-			for i, r := range m.routers {
-				if r.ID == cursorID {
-					m.cursor = i
-					break
-				}
-			}
-		}
-		if m.cursor >= len(m.routers) && len(m.routers) > 0 {
-			m.cursor = len(m.routers) - 1
-		}
+		m.allRouters = msg.routers
+		m.err = nil
+		m.applyFilter()
 		if r := m.selectedRouter(); r != nil && r.ID != m.lastDetailID {
 			shared.Debugf("[routerview] routersLoaded: new selection %.8s, fetching detail", r.ID)
 			m.lastDetailID = r.ID
@@ -286,14 +319,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[routerview] routersErrMsg: %s", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case namesLoadedMsg:
 		shared.Debugf("[routerview] namesLoadedMsg: %d networks, %d subnets", len(msg.networkNames), len(msg.subnetToNet))
 		m.networkNames = msg.networkNames
 		m.subnetToNet = msg.subnetToNet
-		return m, nil
+		m.applyFilter() // the filter matches gateway network names
+		cmd := m.onSelectorChange()
+		return m, cmd
 
 	case detailLoadedMsg:
 		if !m.detailRefresh.Accept(msg.seq) {
@@ -339,12 +374,46 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
+	case sortClearMsg:
+		m.order.Highlight = false
+		return m, nil
+
+	case shared.SelectionChangedMsg:
+		cmd := m.onSelectorChange()
+		return m, cmd
+
 	case tea.KeyMsg:
+		if m.filter.Active() {
+			var cmd tea.Cmd
+			m.filter, cmd = m.filter.Update(msg)
+			m.applyFilter()
+			sel := m.onSelectorChange()
+			return m, tea.Batch(cmd, sel)
+		}
 		switch {
+		case key.Matches(msg, shared.Keys.Filter) && m.focus == FocusSelector:
+			return m, m.filter.Start()
+		case key.Matches(msg, shared.Keys.Back):
+			if m.Escape() {
+				cmd := m.onSelectorChange()
+				return m, cmd
+			}
+			return m, nil
+		case key.Matches(msg, shared.Keys.Sort) && m.focus == FocusSelector:
+			m.order = shared.NextSort(m.order, len(routerSortColumns))
+			return m.resort()
+		case key.Matches(msg, shared.Keys.ReverseSort) && m.focus == FocusSelector:
+			m.order = shared.ReverseSort(m.order)
+			return m.resort()
+		case key.Matches(msg, shared.Keys.Enter) && m.focus == FocusSelector:
+			// Open the router's detail: its interfaces.
+			if m.selectedRouter() != nil {
+				m.focus = FocusInterfaces
+			}
+			return m, nil
 		case key.Matches(msg, shared.Keys.Tab):
 			m.focus = (m.focus + 1) % focusPaneCount
 			return m, nil
@@ -363,6 +432,76 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// rowIDs lists the IDs of the listed routers in display order.
+func (m Model) rowIDs() []string {
+	ids := make([]string, len(m.routers))
+	for i, r := range m.routers {
+		ids[i] = r.ID
+	}
+	return ids
+}
+
+// applyFilter rebuilds the listed routers from every router under the
+// current filter and sort, keeping the cursor on the same router while it
+// is still listed and the selector viewport where it was.
+func (m *Model) applyFilter() {
+	cursorID := m.SelectedRouterID()
+	m.routers = m.routers[:0:0]
+	for _, r := range m.allRouters {
+		if m.filter.Match(r.Name, r.ID, r.Status, r.Description,
+			m.networkNames[r.ExternalGatewayNetworkID], r.ExternalGatewayIPv4, r.ExternalGatewayIPv6) {
+			m.routers = append(m.routers, r)
+		}
+	}
+	m.sortRouters()
+	if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
+		m.cursor = i
+	}
+	m.cursor = shared.ClampCursor(m.cursor, len(m.routers))
+	m.selectorScroll = min(m.selectorScroll, max(0, len(m.routers)-m.selectorVisibleLines()))
+	m.ensureSelectorCursorVisible()
+}
+
+func (m *Model) sortRouters() {
+	col := routerSortColumns[m.order.Col]
+	asc := m.order.Asc
+	sort.SliceStable(m.routers, func(i, j int) bool {
+		a, b := m.routers[i], m.routers[j]
+		// Descending swaps the operands so equal keys keep their order.
+		if !asc {
+			a, b = b, a
+		}
+		switch col {
+		case "status":
+			return a.Status < b.Status
+		case "routes":
+			return len(a.Routes) < len(b.Routes)
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	})
+}
+
+// resort re-sorts the routers after a sort change, keeping the cursor on
+// the same router, and highlights the sort for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	id := m.SelectedRouterID()
+	m.sortRouters()
+	if i := shared.RestoreCursor(m.rowIDs(), id); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureSelectorCursorVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
+}
+
+// sortLabel names the router list's sort for the selector title.
+func (m Model) sortLabel() string {
+	label := "by " + routerSortColumns[m.order.Col] + m.order.Indicator(m.order.Col)
+	if m.order.Highlight {
+		return lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true).Render(label)
+	}
+	return shared.StyleHelp.Render(label)
 }
 
 func (m Model) moveUp() (Model, tea.Cmd) {
@@ -577,14 +716,10 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.routers))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
-
-	if len(m.routers) == 0 && !m.loading {
+	if len(m.allRouters) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No routers found.") + "\n")
 		return b.String()
 	}
@@ -609,7 +744,7 @@ func (m Model) renderWide() string {
 	selPanel := m.panelBorder(FocusSelector).
 		Width(m.width).
 		Height(selH).
-		Render(padContent(m.panelTitle(FocusSelector), selContent))
+		Render(shared.PadContent(m.panelTitle(FocusSelector), selContent))
 
 	// Detail top row: info (35%) | interfaces (65%)
 	topH := dh * 55 / 100
@@ -624,14 +759,14 @@ func (m Model) renderWide() string {
 	leftW := m.width * 35 / 100
 	rightW := m.width - leftW - 1
 
-	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
+	infoContent := shared.PadContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
 	infoPanel := m.panelBorder(focusInfo).Width(leftW).Height(topH).Render(infoContent)
 
-	ifacesContent := padContent(m.panelTitle(FocusInterfaces), m.renderInterfacesContent(rightW-4, topH-4))
+	ifacesContent := shared.PadContent(m.panelTitle(FocusInterfaces), m.renderInterfacesContent(rightW-4, topH-4))
 	ifacesPanel := m.panelBorder(FocusInterfaces).Width(rightW).Height(topH).Render(ifacesContent)
 
 	// Detail bottom row: routes (full width)
-	routesContent := padContent(m.panelTitle(focusRoutes), m.renderRoutesContent(m.width-4, bottomH-4))
+	routesContent := shared.PadContent(m.panelTitle(focusRoutes), m.renderRoutesContent(m.width-4, bottomH-4))
 	routesPanel := m.panelBorder(focusRoutes).Width(m.width).Height(bottomH).Render(routesContent)
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", ifacesPanel)
@@ -660,28 +795,16 @@ func (m Model) renderNarrow() string {
 	}
 
 	selContent := m.renderSelectorContent(w-4, selH-2)
-	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(padContent(m.panelTitle(FocusSelector), selContent))
+	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(shared.PadContent(m.panelTitle(FocusSelector), selContent))
 
-	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4)))
-	ifacesPanel := m.panelBorder(FocusInterfaces).Width(w).Height(ifacesH).Render(padContent(m.panelTitle(FocusInterfaces), m.renderInterfacesContent(w-4, ifacesH-4)))
-	routesPanel := m.panelBorder(focusRoutes).Width(w).Height(routesH).Render(padContent(m.panelTitle(focusRoutes), m.renderRoutesContent(w-4, routesH-4)))
+	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(shared.PadContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4)))
+	ifacesPanel := m.panelBorder(FocusInterfaces).Width(w).Height(ifacesH).Render(shared.PadContent(m.panelTitle(FocusInterfaces), m.renderInterfacesContent(w-4, ifacesH-4)))
+	routesPanel := m.panelBorder(focusRoutes).Width(w).Height(routesH).Render(shared.PadContent(m.panelTitle(focusRoutes), m.renderRoutesContent(w-4, routesH-4)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, ifacesPanel, routesPanel)
 }
 
 // --- Panel helpers ---
-
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "")
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) panelTitle(pane focusPane) string {
 	borderColor := shared.ColorMuted
@@ -692,7 +815,11 @@ func (m Model) panelTitle(pane focusPane) string {
 
 	switch pane {
 	case FocusSelector:
-		return titleStyle.Render("Routers")
+		t := titleStyle.Render("Routers")
+		if f := m.filter.Inline(); f != "" {
+			t += " " + f
+		}
+		return t + " " + m.sortLabel()
 	case focusInfo:
 		return titleStyle.Render("Info")
 	case FocusInterfaces:
@@ -726,6 +853,9 @@ func (m Model) panelBorder(pane focusPane) lipgloss.Style {
 
 func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 	if len(m.routers) == 0 {
+		if m.filter.Value() != "" {
+			return shared.StyleHelp.Render("No routers match the filter.")
+		}
 		return ""
 	}
 
@@ -1126,19 +1256,28 @@ func (m *Model) ForceRefresh() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.filter.SetWidth(w)
 }
 
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
+	if m.filter.Active() {
+		return "enter confirm \u2022 esc clear"
+	}
+	// From a detail pane esc clears a filter first, then returns to the list.
+	escList := "esc list \u2022 "
+	if m.filter.Value() != "" {
+		escList = m.escHint()
+	}
 	switch m.focus {
 	case FocusInterfaces:
-		return "\u2191\u2193 navigate \u2022 " + shared.Keys.Attach.Help().Key + " add interface \u2022 ^t remove \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 " + shared.Keys.Attach.Help().Key + " add interface \u2022 ^t remove \u2022 tab/shift+tab focus \u2022 R refresh \u2022 " + escList + "? help"
 	case focusRoutes:
-		return "\u2191\u2193 navigate \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 tab/shift+tab focus \u2022 R refresh \u2022 " + escList + "? help"
 	case focusInfo:
-		return "tab/shift+tab focus \u2022 ^n new \u2022 ^d delete \u2022 R refresh \u2022 ? help"
+		return "tab/shift+tab focus \u2022 ^n new \u2022 ^d delete \u2022 R refresh \u2022 " + escList + "? help"
 	default:
-		return "\u2191\u2193 navigate \u2022 ^n new \u2022 ^d delete \u2022 tab/shift+tab focus \u2022 R refresh \u2022 ? help"
+		return "\u2191\u2193 navigate \u2022 enter interfaces \u2022 / filter \u2022 s/S sort \u2022 ^n new \u2022 ^d delete \u2022 tab/shift+tab focus \u2022 R refresh \u2022 " + m.escHint() + "? help"
 	}
 }
 

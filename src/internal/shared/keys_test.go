@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestNoDefaultBindingUsesReservedKey(t *testing.T) {
@@ -143,5 +144,23 @@ func TestKeys_DestructiveActionsHaveConfirm(t *testing.T) {
 	}
 	if len(Keys.Deny.Keys()) == 0 {
 		t.Error("Deny (cancel) binding must have keys")
+	}
+}
+
+func TestMatchesNonText(t *testing.T) {
+	up := key.NewBinding(key.WithKeys("up", "k", "ctrl+p"))
+	cases := []struct {
+		msg  tea.KeyPressMsg
+		want bool
+	}{
+		{tea.KeyPressMsg{Code: tea.KeyUp}, true},
+		{tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, true},
+		{tea.KeyPressMsg{Code: 'k', Text: "k"}, false},
+		{tea.KeyPressMsg{Code: 'j', Text: "j"}, false},
+	}
+	for _, c := range cases {
+		if got := MatchesNonText(c.msg, up); got != c.want {
+			t.Errorf("MatchesNonText(%q) = %v, want %v", c.msg.String(), got, c.want)
+		}
 	}
 }

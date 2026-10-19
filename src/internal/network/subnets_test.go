@@ -95,7 +95,7 @@ func TestCreateSubnet(t *testing.T) {
 		Name:       "test-subnet",
 		CIDR:       "192.168.1.0/24",
 		IPVersion:  4,
-		GatewayIP:  "192.168.1.1",
+		GatewayIP:  ptr("192.168.1.1"),
 		EnableDHCP: true,
 	})
 	if err != nil {

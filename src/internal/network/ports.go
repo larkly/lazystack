@@ -115,6 +115,9 @@ func extractPortsWithExt(page pagination.Page) ([]portWithExt, error) {
 
 // GetPort fetches a single port by ID.
 func GetPort(ctx context.Context, client *gophercloud.ServiceClient, portID string) (*Port, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] getting port %s", portID)
 	var result portWithExt
 	err := ports.Get(ctx, client, portID).ExtractInto(&result)
@@ -130,6 +133,9 @@ func GetPort(ctx context.Context, client *gophercloud.ServiceClient, portID stri
 // FindRouterPortOnNetwork returns the router interface port (legacy, HA or
 // DVR) on a given network, if any.
 func FindRouterPortOnNetwork(ctx context.Context, client *gophercloud.ServiceClient, routerID, networkID string) (*Port, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] finding router port for router %s on network %s", routerID, networkID)
 	var result *Port
 	err := ports.List(client, ports.ListOpts{
@@ -263,6 +269,9 @@ func RemoveFixedIPFromPort(ctx context.Context, client *gophercloud.ServiceClien
 
 // ListPortsByDevice fetches all ports attached to a given device (e.g. server).
 func ListPortsByDevice(ctx context.Context, client *gophercloud.ServiceClient, deviceID string) ([]Port, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing ports for device %s", deviceID)
 	var result []Port
 	err := ports.List(client, ports.ListOpts{DeviceID: deviceID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -285,6 +294,9 @@ func ListPortsByDevice(ctx context.Context, client *gophercloud.ServiceClient, d
 
 // ListPortsBySecurityGroup fetches all ports that have a given security group.
 func ListPortsBySecurityGroup(ctx context.Context, client *gophercloud.ServiceClient, sgID string) ([]Port, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing ports for security group %s", sgID)
 	var result []Port
 	err := ports.List(client, ports.ListOpts{SecurityGroups: []string{sgID}}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {
@@ -450,6 +462,9 @@ func DeletePort(ctx context.Context, client *gophercloud.ServiceClient, portID s
 
 // ListPorts fetches all ports for a given network.
 func ListPorts(ctx context.Context, client *gophercloud.ServiceClient, networkID string) ([]Port, error) {
+	if err := shared.RequireClient(client, shared.ServiceNetwork); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[network] listing ports for network %s", networkID)
 	var result []Port
 	err := ports.List(client, ports.ListOpts{NetworkID: networkID}).EachPage(ctx, func(_ context.Context, page pagination.Page) (bool, error) {

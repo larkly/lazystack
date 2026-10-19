@@ -66,15 +66,6 @@ func TestEmptyInvalidAndCancel(t *testing.T) {
 	}
 }
 func TestDisplayHelpers(t *testing.T) {
-	for _, tc := range []struct {
-		s    string
-		n    int
-		want string
-	}{{"abc", 0, "abc"}, {"abc", 1, "…"}, {"abcd", 3, "ab…"}, {"abc", 3, "abc"}} {
-		if got := truncate(tc.s, tc.n); got != tc.want {
-			t.Errorf("truncate=%q want %q", got, tc.want)
-		}
-	}
 	if padRight("a", 3) != "a  " || padRight("long", 2) != "long" {
 		t.Fatal("padding")
 	}

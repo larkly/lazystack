@@ -2,6 +2,7 @@ package modal
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
@@ -55,14 +56,45 @@ func NewConfirm(action, serverID, name string) ConfirmModel {
 	}
 }
 
-// NewBulkConfirm creates a confirmation dialog for multiple servers.
+// NewBulkConfirm creates a confirmation dialog for multiple servers. Its
+// body names the servers, e.g. "Delete 3 servers: a, b, c".
 func NewBulkConfirm(action string, servers []ServerRef) ConfirmModel {
+	verb := action
+	if verb != "" {
+		verb = strings.ToUpper(verb[:1]) + verb[1:]
+	}
 	return ConfirmModel{
 		Action:  action,
 		Servers: servers,
 		Name:    fmt.Sprintf("%d servers", len(servers)),
+		Body:    fmt.Sprintf("%s %d servers: %s", verb, len(servers), ServerNames(servers)),
 		focused: 1,
 	}
+}
+
+// maxListedServers is how many names a bulk confirmation lists before
+// summarizing the rest.
+const maxListedServers = 5
+
+// ServerNames lists up to five server names (the ID when a server has no
+// name), followed by "and N more" for the rest.
+func ServerNames(servers []ServerRef) string {
+	var names []string
+	for i, s := range servers {
+		if i == maxListedServers {
+			break
+		}
+		name := s.Name
+		if name == "" {
+			name = s.ID
+		}
+		names = append(names, name)
+	}
+	out := strings.Join(names, ", ")
+	if rest := len(servers) - len(names); rest > 0 {
+		out += fmt.Sprintf(" and %d more", rest)
+	}
+	return out
 }
 
 func (m ConfirmModel) confirmMsg() tea.Cmd {
@@ -167,7 +199,7 @@ func (m ConfirmModel) View() string {
 	if len(m.VolumeIDs) > 0 {
 		modalWidth = 70
 	}
-	box := shared.StyleModal.Width(modalWidth).Render(content)
+	box := shared.StyleModal.Width(shared.ModalWidth(modalWidth, m.Width)).Render(content)
 
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, box)
 }
@@ -176,4 +208,12 @@ func (m ConfirmModel) View() string {
 func (m *ConfirmModel) SetSize(w, h int) {
 	m.Width = w
 	m.Height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m ConfirmModel) Hints() string {
+	if len(m.VolumeIDs) > 0 {
+		return "y confirm • n/esc cancel • space toggle volumes • tab switch"
+	}
+	return "y confirm • n/esc cancel • tab switch"
 }

@@ -35,7 +35,7 @@ func TestLoadScrollRefreshAndBack(t *testing.T) {
 		t.Fatal("error state")
 	}
 	m, _ = m.Update(consoleLoadedMsg{"recovered"})
-	if m.err != "" || m.scroll != 0 || !strings.Contains(m.View(), "recovered") {
+	if m.err != nil || m.scroll != 0 || !strings.Contains(m.View(), "recovered") {
 		t.Fatal("recovery")
 	}
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -60,5 +60,25 @@ func TestNarrowViewDoesNotPanic(t *testing.T) {
 		m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 5})
 		m, _ = m.Update(consoleLoadedMsg{"output"})
 		_ = m.View()
+	}
+}
+
+// The error line takes an output row; a view following the end of the
+// console output must still show the last line after a refresh fails.
+func TestErrorKeepsBottomOfOutputVisible(t *testing.T) {
+	m := New(nil, "server", "web")
+	m.SetSize(40, 8)
+	var out []string
+	for i := 0; i < 30; i++ {
+		out = append(out, "row"+string(rune('A'+i)))
+	}
+	m, _ = m.Update(consoleLoadedMsg{strings.Join(out, "\n")})
+	if m.scroll != m.maxScroll() {
+		t.Fatalf("setup: scroll=%d max=%d", m.scroll, m.maxScroll())
+	}
+
+	m, _ = m.Update(consoleErrMsg{errors.New("denied")})
+	if m.scroll != m.maxScroll() || !strings.Contains(m.View(), out[len(out)-1]) {
+		t.Fatalf("last output line hidden after the error: scroll=%d max=%d\n%s", m.scroll, m.maxScroll(), m.View())
 	}
 }

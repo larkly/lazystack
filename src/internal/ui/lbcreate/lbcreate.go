@@ -184,7 +184,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case subnetsFetchErrMsg:
 		m.subnetsLoading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 	case lbCreatedMsg:
 		m.submitting = false
@@ -252,7 +252,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField = (m.focusField + 1) % m.fieldCount()
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			var cmd tea.Cmd
@@ -309,7 +309,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if msg.String() == "ctrl+s" {
+	if key.Matches(msg, shared.Keys.Submit) {
 		return m.submit()
 	}
 
@@ -328,21 +328,20 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.subnetFiltering = false
 			return m, nil
 		default:
-			s := keyText(msg)
-			switch s {
-			case "backspace":
+			switch {
+			case key.Matches(msg, shared.TextKeys.DeleteChar):
 				if len(m.subnetFilter) > 0 {
 					m.subnetFilter = m.subnetFilter[:len(m.subnetFilter)-1]
 					m.applySubnetFilter()
 				}
 				return m, nil
-			case "esc":
+			case msg.String() == "esc":
 				m.subnetFiltering = false
 				m.subnetFilter = ""
 				m.applySubnetFilter()
 				return m, nil
 			}
-			if len(s) == 1 && s[0] >= 32 && s[0] < 127 {
+			if s := msg.String(); len(s) == 1 && s[0] >= 32 && s[0] < 127 {
 				m.subnetFilter += s
 				m.applySubnetFilter()
 				return m, nil
@@ -364,7 +363,7 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.pickerCursor++
 		}
 		return m, nil
-	case keyText(msg) == "/":
+	case key.Matches(msg, shared.Keys.Filter):
 		m.subnetFiltering = true
 		m.subnetFilter = ""
 		m.applySubnetFilter()
@@ -425,6 +424,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		})
 	}
 
+	if m.subnetsLoading {
+		m.err = "Loading subnets…"
+		return m, nil
+	}
 	if len(m.subnets) == 0 {
 		m.err = "No subnets available"
 		return m, nil
@@ -549,7 +552,7 @@ func (m Model) View() string {
 		content += "\n\n" + m.renderPicker()
 	}
 
-	box := shared.StyleModal.Width(55).Render(content)
+	box := shared.StyleModal.Width(shared.ModalWidth(55, m.width)).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
@@ -603,8 +606,4 @@ func (m *Model) applySubnetFilter() {
 		}
 	}
 	m.pickerCursor = 0
-}
-
-func keyText(msg tea.KeyMsg) string {
-	return msg.String()
 }

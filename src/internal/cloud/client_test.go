@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -578,6 +579,117 @@ func TestRetryDelay(t *testing.T) {
 		got := retryDelay(attempt, "")
 		if got < base || got > base+100*time.Millisecond {
 			t.Errorf("retryDelay(%d, \"\") = %v, want %v–%v (base + jitter)", attempt, got, base, base+100*time.Millisecond)
+		}
+	}
+}
+
+// A DELETE that timed out at the gateway may already have executed; its
+// replay then gets 404. That 404 is the expected outcome of our own delete,
+// not a sign that someone else removed the resource.
+func TestRetryTransport_RetriedDelete404IsSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		first  int // status of the first attempt; 0 means answer 404 at once
+		want   int
+	}{
+		{"delete after 504", http.MethodDelete, http.StatusGatewayTimeout, http.StatusNoContent},
+		{"delete after 502", http.MethodDelete, http.StatusBadGateway, http.StatusNoContent},
+		{"delete first attempt", http.MethodDelete, 0, http.StatusNotFound},
+		{"delete after 429", http.MethodDelete, http.StatusTooManyRequests, http.StatusNotFound},
+		{"get after 504", http.MethodGet, http.StatusGatewayTimeout, http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attempts atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if attempts.Add(1) == 1 && tc.first != 0 {
+					w.Header().Set("Retry-After", "0")
+					w.WriteHeader(tc.first)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"itemNotFound": {"code": 404, "message": "Instance vm could not be found."}}`))
+			}))
+			defer srv.Close()
+
+			req, err := http.NewRequest(tc.method, srv.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := retryTestClient().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != tc.want {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tc.want)
+			}
+			if tc.want == http.StatusNoContent && (len(body) != 0 || resp.ContentLength != 0 || resp.Header.Get("Content-Type") != "") {
+				t.Errorf("204 must be empty: body=%q len=%d type=%q", body, resp.ContentLength, resp.Header.Get("Content-Type"))
+			}
+		})
+	}
+}
+
+// Legacy catalogs register compute as /v2.1/<project_id>; Nova answers
+// discovery there with 404 and only serves the version document one level up.
+func TestNegotiateNovaMicroversion_ProjectSuffixedEndpoint(t *testing.T) {
+	var paths []string
+	compute, closeFn := fakeComputeClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path != "/v2.1/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"version": {"id": "v2.1", "version": "2.95", "min_version": "2.1"}}`))
+	}))
+	defer closeFn()
+	compute.Endpoint += "v2.1/6f0d5e1c9b8a4f2e8d7c6b5a4f3e2d1c/"
+
+	max, used, _ := negotiateNovaMicroversion(context.Background(), compute)
+	if max != "2.95" || used != "2.95" {
+		t.Errorf("got max=%q used=%q, want 2.95/2.95 from the stripped URL", max, used)
+	}
+	want := []string{"/v2.1/6f0d5e1c9b8a4f2e8d7c6b5a4f3e2d1c/", "/v2.1/"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Errorf("discovery requests = %q, want %q", paths, want)
+	}
+}
+
+// When the stripped URL fails too, the base microversion is used with a
+// warning, exactly as for a single failed attempt.
+func TestNegotiateNovaMicroversion_RetryAlsoFailsFallsBack(t *testing.T) {
+	calls := 0
+	compute, closeFn := fakeComputeClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.NotFound(w, r)
+	}))
+	defer closeFn()
+	compute.Endpoint += "v2.1/6f0d5e1c9b8a4f2e8d7c6b5a4f3e2d1c/"
+
+	max, used, warn := negotiateNovaMicroversion(context.Background(), compute)
+	if max != "unknown" || used != "2.1" || warn == "" {
+		t.Errorf("got (%q, %q, %q), want (unknown, 2.1, warning)", max, used, warn)
+	}
+	if calls != 2 {
+		t.Errorf("discovery attempts = %d, want 2 (original + stripped URL)", calls)
+	}
+}
+
+func TestStripLastPathSegment(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://nova.example:8774/v2.1/abc123/": "https://nova.example:8774/v2.1/",
+		"https://nova.example:8774/v2.1/abc123":  "https://nova.example:8774/v2.1/",
+		"https://cloud.example/compute/v2.1/":    "https://cloud.example/compute/",
+		"https://nova.example:8774/v2.1/":        "https://nova.example:8774/",
+		"https://nova.example:8774/":             "",
+		"https://nova.example:8774":              "",
+	} {
+		if got := stripLastPathSegment(in); got != want {
+			t.Errorf("stripLastPathSegment(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

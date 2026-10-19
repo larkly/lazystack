@@ -1,8 +1,6 @@
 package modal
 
 import (
-	"strings"
-
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -48,7 +46,7 @@ func (m ErrorModel) Update(msg tea.Msg) (ErrorModel, tea.Cmd) {
 				return ErrorDismissedMsg{}
 			}
 		default:
-			if strings.ToLower(msg.String()) == "d" {
+			if key.Matches(msg, shared.Keys.ToggleDetails) {
 				m.ShowDetails = !m.ShowDetails
 				return m, nil
 			}
@@ -89,9 +87,10 @@ func (m ErrorModel) View() string {
 		Bold(true)
 	button := btnStyle.Render("[enter] OK")
 
-	detailLabel := "[d] Details"
+	d := shared.Keys.ToggleDetails.Help().Key
+	detailLabel := "[" + d + "] Details"
 	if m.ShowDetails {
-		detailLabel = "[d] Hide"
+		detailLabel = "[" + d + "] Hide"
 	}
 	help := detailLabel
 
@@ -105,4 +104,13 @@ func (m ErrorModel) View() string {
 func (m *ErrorModel) SetSize(w, h int) {
 	m.Width = w
 	m.Height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m ErrorModel) Hints() string {
+	d := shared.Keys.ToggleDetails.Help().Key
+	if m.ShowDetails {
+		return "enter/esc dismiss • " + d + " hide details"
+	}
+	return "enter/esc dismiss • " + d + " details"
 }

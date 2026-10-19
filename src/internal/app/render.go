@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/larkly/lazystack/internal/shared"
+	"github.com/larkly/lazystack/internal/ui/statusbar"
 )
 
 func (m Model) viewName() string {
@@ -140,8 +141,15 @@ func (m Model) viewContent() string {
 		return m.help.Render()
 	}
 
-	if v, ok := m.activeModalView(); ok {
-		return v
+	if o, ok := m.topOverlay(); ok {
+		// The overlay fills the content area and the status bar below it
+		// shows the overlay's own keys, not the view underneath. m is a
+		// copy here, so sizing the overlay to the content area does not
+		// leak into the model.
+		o.setSize(m.width, max(0, m.height-1))
+		bar := m.statusBar
+		bar.Hint = o.Hints()
+		return m.withStatusBar(o.View(), bar)
 	}
 
 	if m.view == viewCloudPicker {
@@ -206,12 +214,17 @@ func (m Model) viewContent() string {
 		}
 	}
 	content = strings.Join(lines, "\n")
+	return m.withStatusBar(content, m.statusBar)
+}
 
+// withStatusBar fits content to the screen above the status bar and appends
+// the bar.
+func (m Model) withStatusBar(content string, bar statusbar.Model) string {
 	contentHeight := m.height - 1
 	if contentHeight < 0 {
 		contentHeight = 0
 	}
 
 	padded := lipgloss.NewStyle().Height(contentHeight).MaxHeight(contentHeight).Render(content)
-	return padded + "\n" + m.statusBar.Render()
+	return padded + "\n" + bar.Render()
 }

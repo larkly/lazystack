@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/larkly/lazystack/internal/shared"
 
@@ -63,10 +66,14 @@ func resolveMicroversion(ctx context.Context, compute *gophercloud.ServiceClient
 // caps at 2.100 (our known-good ceiling), and returns the negotiated version.
 // Returns (maxVersion, usedVersion, degradationWarning).
 //
+// Legacy catalogs register compute as .../v2.1/<project_id>, where Nova
+// answers discovery with 404. When discovery at the endpoint fails it is
+// retried once with the trailing path segment stripped, as keystoneauth does.
+//
 // If discovery fails (HTTP error, undecodable body, missing or malformed
-// version) the base microversion 2.1 is used, since assuming the ceiling
-// would make every later request fail on an older Nova, and a warning is
-// returned so the degradation is visible.
+// version) at both URLs the base microversion 2.1 is used, since assuming
+// the ceiling would make every later request fail on an older Nova, and a
+// warning is returned so the degradation is visible.
 func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.ServiceClient) (string, string, string) {
 	const ceiling = novaCeilingMicroversion
 	fallback := func(reason string) (string, string, string) {
@@ -76,8 +83,38 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 			novaBaseMicroversion)
 	}
 
-	// Version discovery returns the API versions supported by the deployment.
 	url := compute.ServiceURL("")
+	maxVersion, err := discoverNovaMaxVersion(ctx, compute, url)
+	if err != nil {
+		parent := stripLastPathSegment(url)
+		if parent == "" {
+			return fallback(err.Error())
+		}
+		shared.Debugf("[cloud] negotiateMicroversion: %v, retrying at the parent URL", err)
+		var retryErr error
+		maxVersion, retryErr = discoverNovaMaxVersion(ctx, compute, parent)
+		if retryErr != nil {
+			return fallback(fmt.Sprintf("%v; parent URL: %v", err, retryErr))
+		}
+	}
+
+	// Compare: use the lower of maxVersion and ceiling (2.100)
+	usedVersion := minMicroversion(maxVersion, ceiling)
+	degradeWarning := ""
+	if usedVersion != ceiling {
+		degradeWarning = fmt.Sprintf(
+			"Nova microversion %s (max supported: %s, requested: %s). Some features may be limited.",
+			usedVersion, maxVersion, ceiling,
+		)
+		shared.Debugf("[cloud] negotiateMicroversion: degraded: %s", degradeWarning)
+	}
+
+	return maxVersion, usedVersion, degradeWarning
+}
+
+// discoverNovaMaxVersion reads Nova's version document at url and returns
+// the maximum microversion of the v2.1 API, validated as usable.
+func discoverNovaMaxVersion(ctx context.Context, compute *gophercloud.ServiceClient, url string) (string, error) {
 	// 300 Multiple Choices is served by unversioned compute endpoints and
 	// carries the same versions document as a 200.
 	resp, err := compute.Get(ctx, url, nil, &gophercloud.RequestOpts{
@@ -85,7 +122,7 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 		KeepResponseBody: true,
 	})
 	if err != nil {
-		return fallback(fmt.Sprintf("version discovery failed: %v", err))
+		return "", fmt.Errorf("version discovery failed: %w", err)
 	}
 
 	var versionDoc struct {
@@ -102,7 +139,7 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(&versionDoc); err != nil {
-		return fallback(fmt.Sprintf("JSON parse failed: %v", err))
+		return "", fmt.Errorf("JSON parse failed: %w", err)
 	}
 
 	// Parse the latest supported version from the response
@@ -119,24 +156,29 @@ func negotiateNovaMicroversion(ctx context.Context, compute *gophercloud.Service
 		maxVersion = versionDoc.Version.Version
 	}
 	if maxVersion == "" {
-		return fallback("couldn't determine max version")
+		return "", errors.New("couldn't determine max version")
 	}
 	if err := validateNovaMicroversion(maxVersion); err != nil {
-		return fallback(fmt.Sprintf("discovered version unusable: %v", err))
+		return "", fmt.Errorf("discovered version unusable: %w", err)
 	}
+	return maxVersion, nil
+}
 
-	// Compare: use the lower of maxVersion and ceiling (2.100)
-	usedVersion := minMicroversion(maxVersion, ceiling)
-	degradeWarning := ""
-	if usedVersion != ceiling {
-		degradeWarning = fmt.Sprintf(
-			"Nova microversion %s (max supported: %s, requested: %s). Some features may be limited.",
-			usedVersion, maxVersion, ceiling,
-		)
-		shared.Debugf("[cloud] negotiateMicroversion: degraded: %s", degradeWarning)
+// stripLastPathSegment returns rawURL with its last path segment removed,
+// keeping the trailing slash: ".../v2.1/<project_id>/" becomes ".../v2.1/".
+// It returns "" when there is no segment to strip or rawURL does not parse.
+func stripLastPathSegment(rawURL string) string {
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		return ""
 	}
-
-	return maxVersion, usedVersion, degradeWarning
+	p := strings.TrimSuffix(u.Path, "/")
+	if p == "" {
+		return ""
+	}
+	u.Path = p[:strings.LastIndex(p, "/")+1]
+	u.RawPath = ""
+	return u.String()
 }
 
 // minMicroversion returns the numerically lower of two microversion strings.

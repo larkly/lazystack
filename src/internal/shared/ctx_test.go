@@ -75,3 +75,36 @@ func TestStallCtxCancelsOnlyStalledTransfers(t *testing.T) {
 		t.Fatal("stall context must not carry an overall deadline")
 	}
 }
+
+// TransferCancel reaches the transfer's cancel func whether the user
+// cancels before or after the transfer has bound it, and only once.
+func TestTransferCancel(t *testing.T) {
+	var nilT *TransferCancel
+	nilT.Cancel() // must not panic
+	if nilT.Canceled() {
+		t.Fatal("nil holder reports canceled")
+	}
+
+	calls := 0
+	early := &TransferCancel{}
+	early.Cancel()
+	if !early.Canceled() {
+		t.Fatal("Cancel not recorded")
+	}
+	early.Bind(func() { calls++ })
+	if calls != 1 {
+		t.Fatalf("cancel before bind: calls=%d, want 1", calls)
+	}
+
+	calls = 0
+	late := &TransferCancel{}
+	late.Bind(func() { calls++ })
+	if late.Canceled() || calls != 0 {
+		t.Fatal("bind alone canceled the transfer")
+	}
+	late.Cancel()
+	late.Cancel()
+	if !late.Canceled() || calls != 1 {
+		t.Fatalf("cancel after bind: canceled=%v calls=%d, want true/1", late.Canceled(), calls)
+	}
+}

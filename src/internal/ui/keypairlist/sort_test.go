@@ -23,8 +23,8 @@ func TestDescendingSortKeepsTiesStable(t *testing.T) {
 		{Name: "c", Type: "ssh"},
 		{Name: "d", Type: "ssh"},
 	}
-	m.sortCol = 1 // type
-	m.sortAsc = false
+	m.order.Col = 1 // type
+	m.order.Asc = false
 	m.sortPairs()
 
 	want := []string{"b", "a", "c", "d"}
@@ -39,8 +39,8 @@ func TestDescendingSortKeepsTiesStable(t *testing.T) {
 func TestAscendingSortByName(t *testing.T) {
 	m := New(nil, time.Second)
 	m.pairs = []compute.KeyPair{{Name: "Charlie"}, {Name: "alpha"}, {Name: "bravo"}}
-	m.sortCol = 0
-	m.sortAsc = true
+	m.order.Col = 0
+	m.order.Asc = true
 	m.sortPairs()
 	want := []string{"alpha", "bravo", "Charlie"}
 	got := names(m.pairs)

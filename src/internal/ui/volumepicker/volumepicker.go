@@ -78,7 +78,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case fetchErrMsg:
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		shared.Debugf("[volumepicker] error: %v", msg.err)
 		return m, nil
 
@@ -94,7 +94,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case attachErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 
 	case spinner.TickMsg:
@@ -111,6 +111,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Esc closes the modal while it loads; late results are dropped
+		// because inactive modals receive no messages.
+		if m.loading && !m.submitting && key.Matches(msg, shared.Keys.Back) {
+			m.Active = false
+			return m, nil
+		}
 		if m.loading || m.submitting {
 			return m, nil
 		}
@@ -118,13 +124,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, shared.Keys.Back):
 			m.Active = false
 			return m, nil
-		// Only arrows navigate: j/k must reach the filter as text.
-		case msg.String() == "up":
+		// Only non-text keys navigate: j/k must reach the filter as text.
+		case shared.MatchesNonText(msg, shared.Keys.Up):
 			if m.cursor > 0 {
 				m.cursor--
 				m.ensureVisible()
 			}
-		case msg.String() == "down":
+		case shared.MatchesNonText(msg, shared.Keys.Down):
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
 				m.ensureVisible()
@@ -138,7 +144,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		default:
 			s := msg.String()
-			if s == "backspace" {
+			if key.Matches(msg, shared.TextKeys.DeleteChar) {
 				if len(m.filter) > 0 {
 					m.filter = m.filter[:len(m.filter)-1]
 					m.cursor = 0
@@ -299,4 +305,12 @@ func (m Model) attachVolume(vol volume.Volume) tea.Cmd {
 		}
 		return attachDoneMsg{Audit: rec, serverName: serverName, volumeName: volumeName}
 	}
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	if m.loading || m.submitting || m.err != "" || len(m.filtered) == 0 {
+		return "esc close"
+	}
+	return shared.Glyph("↑↓", "up/down") + " navigate • enter select • type to filter • esc cancel"
 }

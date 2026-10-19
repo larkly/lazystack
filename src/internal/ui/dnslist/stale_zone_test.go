@@ -37,13 +37,13 @@ func TestStaleRecordsetsResponseIsDropped(t *testing.T) {
 func TestStaleRecordsetsErrorIsDropped(t *testing.T) {
 	m := twoZoneModel()
 	m, _ = m.Update(recordsetsErrMsg{zoneID: "zone-a", err: errors.New("boom")})
-	if m.err != "" || !m.loading {
-		t.Fatalf("stale error applied: err=%q loading=%v", m.err, m.loading)
+	if m.err != nil || !m.loading {
+		t.Fatalf("stale error applied: err=%v loading=%v", m.err, m.loading)
 	}
 
 	m, _ = m.Update(recordsetsErrMsg{zoneID: "zone-b", err: errors.New("boom")})
-	if m.err != "boom" || m.loading {
-		t.Fatalf("current zone error not applied: err=%q loading=%v", m.err, m.loading)
+	if m.err == nil || m.err.Error() != "boom" || m.loading {
+		t.Fatalf("current zone error not applied: err=%v loading=%v", m.err, m.loading)
 	}
 }
 

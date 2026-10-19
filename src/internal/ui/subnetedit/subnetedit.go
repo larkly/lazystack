@@ -71,10 +71,15 @@ func New(client *gophercloud.ServiceClient, sub network.Subnet) Model {
 
 	gi := textinput.New()
 	gi.Prompt = ""
-	gi.Placeholder = "e.g. 10.0.0.1"
+	// Neutron cannot pick a gateway on update, so blank also means none.
+	gi.Placeholder = `IP, "none" = no gateway`
 	gi.CharLimit = fitLimit(45, sub.GatewayIP)
 	gi.SetWidth(40)
-	gi.SetValue(sub.GatewayIP)
+	if sub.GatewayIP == "" {
+		gi.SetValue(network.NoGatewayKeyword)
+	} else {
+		gi.SetValue(sub.GatewayIP)
+	}
 
 	di := textinput.New()
 	di.Prompt = ""
@@ -153,7 +158,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case subnetUpdateErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting {
@@ -201,7 +206,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.focusField++
 			m.updateFocus()
 			return m, nil
-		case msg.String() == "ctrl+s":
+		case key.Matches(msg, shared.Keys.Submit):
 			return m.submit()
 		default:
 			return m.routeToInput(msg)
@@ -244,7 +249,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.Active = false
 			return m, nil
 		}
-	case msg.String() == "ctrl+s":
+	case key.Matches(msg, shared.Keys.Submit):
 		return m.submit()
 	}
 
@@ -297,7 +302,18 @@ func (m Model) submit() (Model, tea.Cmd) {
 	}
 
 	gw := strings.TrimSpace(m.gatewayInput.Value())
+	if network.IsNoGateway(gw) {
+		gw = "" // sent as gateway_ip null
+	}
 	if gw != m.subnet.GatewayIP {
+		if gw != "" && !shared.ValidIP(gw) {
+			m.err = fmt.Sprintf(`Gateway %q is not a valid IP address (or "none")`, gw)
+			return m, nil
+		}
+		if gw != "" && !shared.IPInCIDR(gw, m.subnet.CIDR) {
+			m.err = fmt.Sprintf("Gateway %s is not inside %s", gw, m.subnet.CIDR)
+			return m, nil
+		}
 		opts.GatewayIP = &gw
 	}
 
@@ -311,9 +327,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 	if dnsRaw != "" {
 		for _, s := range strings.Split(dnsRaw, ",") {
 			s = strings.TrimSpace(s)
-			if s != "" {
-				dns = append(dns, s)
+			if s == "" {
+				continue
 			}
+			if !shared.ValidIP(s) {
+				m.err = fmt.Sprintf("DNS server %q is not a valid IP address", s)
+				return m, nil
+			}
+			dns = append(dns, s)
 		}
 	}
 	if !stringSliceEqual(dns, m.subnet.DNSNameservers) {
@@ -544,4 +565,9 @@ func routesEqual(a, b []network.HostRoute) bool {
 		}
 	}
 	return true
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return "tab/" + shared.Glyph("↑↓", "up/down") + " fields • " + shared.Glyph("←→", "left/right") + " cycle • ctrl+s submit • esc cancel"
 }

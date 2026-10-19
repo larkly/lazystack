@@ -36,6 +36,9 @@ type Image struct {
 
 // ListImages fetches all images (all statuses).
 func ListImages(ctx context.Context, client *gophercloud.ServiceClient) ([]Image, error) {
+	if err := shared.RequireClient(client, shared.ServiceImage); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[image] ListImages: starting")
 	opts := images.ListOpts{
 		Sort: "name:asc",
@@ -62,6 +65,9 @@ func ListImages(ctx context.Context, client *gophercloud.ServiceClient) ([]Image
 
 // GetImage fetches a single image by ID.
 func GetImage(ctx context.Context, client *gophercloud.ServiceClient, id string) (*Image, error) {
+	if err := shared.RequireClient(client, shared.ServiceImage); err != nil {
+		return nil, err
+	}
 	shared.Debugf("[image] GetImage: starting, id=%s", id)
 	raw, err := images.Get(ctx, client, id).Extract()
 	if err != nil {

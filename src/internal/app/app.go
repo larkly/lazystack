@@ -368,12 +368,61 @@ func (m Model) isCreateFormView() bool {
 	return m.view == viewServerCreate || m.view == viewVolumeCreate || m.view == viewKeypairCreate
 }
 
+// listEscaper is a list view's part of the esc contract: clear one layer of
+// list state (the committed filter, then the selection) and report whether
+// anything was cleared.
+type listEscaper interface {
+	Escape() (handled bool)
+}
+
+// activeListEscaper returns the active list view, or nil when the active
+// view is not a list.
+func (m *Model) activeListEscaper() listEscaper {
+	switch m.view {
+	case viewServerList:
+		return &m.serverList
+	case viewVolumeList:
+		return &m.volumeList
+	case viewFloatingIPList:
+		return &m.floatingIPList
+	case viewKeypairList:
+		return &m.keypairList
+	case viewSecGroupView:
+		return &m.secGroupView
+	case viewNetworkList:
+		return &m.networkView
+	case viewRouterView:
+		return &m.routerView
+	case viewDNSList:
+		return &m.dnsList
+	case viewImageView:
+		return &m.imageView
+	case viewLBView:
+		return &m.lbView
+	}
+	return nil
+}
+
 // textInputFocused reports whether the active view has a focused filter or
 // search input that must receive every key before global shortcuts do.
 func (m Model) textInputFocused() bool {
 	switch m.view {
 	case viewServerList:
 		return m.serverList.IsFiltering()
+	case viewVolumeList:
+		return m.volumeList.IsFiltering()
+	case viewFloatingIPList:
+		return m.floatingIPList.IsFiltering()
+	case viewKeypairList:
+		return m.keypairList.IsFiltering()
+	case viewSecGroupView:
+		return m.secGroupView.IsFiltering()
+	case viewNetworkList:
+		return m.networkView.IsFiltering()
+	case viewRouterView:
+		return m.routerView.IsFiltering()
+	case viewDNSList:
+		return m.dnsList.IsFiltering()
 	case viewLBView:
 		return m.lbView.IsSearching()
 	case viewImageView:
@@ -489,28 +538,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if !m.isCreateFormView() {
-			// Filter/search input mode (server list filter, LB and image
-			// search): every keystroke belongs to the input — never let
+			// Filter/search input mode (the "/" input of any list view):
+			// every keystroke belongs to the input — never let
 			// global handlers see them (typing "q" would otherwise quit the
 			// app, digits would switch tabs). Ctrl+C is handled above.
 			if m.textInputFocused() {
 				return m.updateActiveView(msg)
 			}
-			// Server list: esc clears selection when items are selected
-			if m.view == viewServerList && m.serverList.SelectionCount() > 0 && key.Matches(msg, shared.Keys.Back) {
-				m.serverList.ClearSelection()
-				m.statusBar.Hint = m.serverList.Hints()
-				return m, nil
-			}
-			// Volume list: esc clears selection when items are selected
-			if m.view == viewVolumeList && m.volumeList.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
-				m.volumeList.ClearSelection()
-				return m, nil
-			}
-			// Image view: esc clears selection when items are selected
-			if m.view == viewImageView && m.imageView.SelectionCount() > 0 && (key.Matches(msg, shared.Keys.Back) || msg.String() == "esc") {
-				m.imageView.ClearSelection()
-				return m, nil
+			// List views: esc first clears the view's committed filter,
+			// then its selection; only then does it mean back-navigation.
+			if key.Matches(msg, shared.Keys.Back) {
+				if l := m.activeListEscaper(); l != nil && l.Escape() {
+					return m.updateActiveView(shared.SelectionChangedMsg{})
+				}
 			}
 
 			switch {
@@ -557,13 +597,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Tab switching (only from top-level list views)
 			if m.isTopLevelView() {
-				// Number keys 1-9 map to tab indices
-				if s := msg.String(); len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
-					idx := int(s[0] - '1')
-					if idx < len(m.tabs) {
-						m.clearBackNav() // explicit tab choice starts fresh
-						return m.switchTab(idx)
-					}
+				// Number keys 1-9 and 0 map to the first ten tabs
+				if idx, ok := tabIndexForKey(msg.String()); ok && idx < len(m.tabs) {
+					m.clearBackNav() // explicit tab choice starts fresh
+					return m.switchTab(idx)
 				}
 				switch {
 				case key.Matches(msg, shared.Keys.Right):
@@ -760,7 +797,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openFIPReleaseConfirm()
 			}
 			if key.Matches(msg, shared.Keys.Allocate) {
-				return m.doAllocateFIP()
+				return m.openFIPAllocate()
 			}
 			if key.Matches(msg, shared.Keys.Detach) {
 				return m.openFIPDisassociateConfirm()
@@ -856,7 +893,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					key.Matches(msg, shared.Keys.Create) ||
 					key.Matches(msg, shared.Keys.Enter) ||
 					key.Matches(msg, shared.Keys.StopStart) ||
-					msg.String() == "ctrl+h" {
+					key.Matches(msg, shared.Keys.HealthMonitor) {
 					m.statusBar.StickyHint = "Load balancer is " + lb.ProvisioningStatus + ", please wait..."
 					return m, nil
 				}
@@ -864,8 +901,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			pane := m.lbView.FocusedPane()
 
-			// Health monitor: ctrl+h on pools pane
-			if msg.String() == "ctrl+h" && pane == lbview.FocusPools {
+			// Health monitor on pools pane
+			if key.Matches(msg, shared.Keys.HealthMonitor) && pane == lbview.FocusPools {
 				if pool := m.lbView.SelectedPool(); pool != nil {
 					if pool.MonitorID != "" {
 						return m.openLBMonitorEdit()
@@ -888,18 +925,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			// Bulk member selection: space toggles, x toggles all
+			// Bulk member selection: Select toggles one, SelectAll toggles all
 			if key.Matches(msg, shared.Keys.Select) && pane == lbview.FocusMembers {
 				m.lbView.ToggleMemberSelection()
 				return m, nil
 			}
-			if msg.String() == "x" && pane == lbview.FocusMembers {
+			if key.Matches(msg, shared.Keys.SelectAll) && pane == lbview.FocusMembers {
 				m.lbView.ToggleAllMemberSelection()
 				return m, nil
 			}
 
-			// Drain member: 'w' key on members pane
-			if msg.String() == "w" && pane == lbview.FocusMembers {
+			// Drain member on members pane
+			if key.Matches(msg, shared.Keys.DrainMember) && pane == lbview.FocusMembers {
 				if m.lbView.SelectedMemberCount() > 0 {
 					return m.drainLBMembersBulk()
 				}
@@ -1005,7 +1042,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, shared.Keys.Create) && pane == imageview.FocusSelector {
 				return m.openImageUpload()
 			}
-			if msg.String() == "ctrl+g" && pane == imageview.FocusProperties {
+			if key.Matches(msg, shared.Keys.Download) && pane == imageview.FocusProperties {
 				return m.openImageDownload()
 			}
 			if key.Matches(msg, shared.Keys.Enter) {
@@ -1325,7 +1362,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case auditLogLoadedMsg:
 		if m.view == viewAuditLog {
-			if msg.err != "" {
+			if msg.err != nil {
 				m.auditLog.SetError(msg.err)
 			} else {
 				m.auditLog.SetEntries(msg.entries)
@@ -1446,12 +1483,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m2, viewCmd := m.updateAllViews(msg)
 		m = m2
 		// Route to quota view for spinner/loaded messages; keep background
-		// image downloads flowing even while the quota overlay is up.
+		// image downloads and uploads flowing even while the quota overlay
+		// is up.
 		if m.quotaView.Visible {
 			var cmd tea.Cmd
 			m.quotaView, cmd = m.quotaView.Update(msg)
 			dlCmd := m.updateImageDownloadBackground(msg)
-			return m, tea.Batch(viewCmd, cmd, dlCmd)
+			ulCmd := m.updateImageUploadBackground(msg)
+			return m, tea.Batch(viewCmd, cmd, dlCmd, ulCmd)
 		}
 		// Route to any active modals for background messages
 		if modalCmd := m.updateAnyModalBackground(msg); modalCmd != nil {

@@ -2,6 +2,7 @@ package cloudpicker
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -122,5 +123,26 @@ func TestWindowSize(t *testing.T) {
 	}
 	if m.height != 50 {
 		t.Errorf("height = %d, want 50", m.height)
+	}
+}
+
+func TestPlainModeUsesASCIIGlyphs(t *testing.T) {
+	prev := shared.PlainMode
+	t.Cleanup(func() { shared.PlainMode = prev })
+	shared.PlainMode = true
+
+	m := New([]string{"alpha", "beta"}, nil)
+	m.width, m.height = 80, 24
+	got := m.View()
+	for _, glyph := range []string{"▸", "↑/↓"} {
+		if strings.Contains(got, glyph) {
+			t.Errorf("plain mode view contains %q", glyph)
+		}
+	}
+	if !strings.Contains(got, "> ") || !strings.Contains(got, "up/down navigate") {
+		t.Errorf("plain mode view lacks ASCII cursor or hint: %q", got)
+	}
+	if h := m.Hints(); strings.Contains(h, "↑/↓") {
+		t.Errorf("plain mode hints contain arrows: %q", h)
 	}
 }

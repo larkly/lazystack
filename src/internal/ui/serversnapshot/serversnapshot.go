@@ -77,7 +77,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case snapshotErrMsg:
 		m.submitting = false
-		m.err = msg.err.Error()
+		m.err = shared.ParseError(msg.err).FriendlyMessage
 		return m, nil
 	case spinner.TickMsg:
 		if m.submitting {
@@ -162,7 +162,7 @@ func (m Model) View() string {
 
 	label := lipgloss.NewStyle().Foreground(shared.ColorSecondary).Render("Name")
 	body.WriteString("  " + label + "  " + m.nameInput.View() + "\n\n")
-	body.WriteString(shared.StyleHelp.Render("  enter: create  esc: cancel"))
+	body.WriteString(shared.StyleHelp.Render("  enter save • esc cancel"))
 
 	content := title + "\n\n" + body.String()
 	return m.renderModal(content)
@@ -181,4 +181,9 @@ func (m Model) renderModal(content string) string {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return "enter save • esc cancel"
 }

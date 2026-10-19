@@ -59,7 +59,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, shared.Keys.Enter):
 		return m.openInBrowser()
-	case msg.String() == "c":
+	case key.Matches(msg, shared.Keys.CopyValue):
 		return m.copyToClipboard()
 	default:
 		return m, nil
@@ -167,4 +167,9 @@ func (m Model) renderModal(content string) string {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+// Hints returns the key hints shown in the status bar.
+func (m Model) Hints() string {
+	return "enter open in browser • c copy • esc close"
 }

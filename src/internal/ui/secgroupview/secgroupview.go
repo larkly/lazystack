@@ -15,6 +15,7 @@ import (
 	"github.com/larkly/lazystack/internal/network"
 	"github.com/larkly/lazystack/internal/shared"
 	"github.com/larkly/lazystack/internal/ui/copypicker"
+	"github.com/larkly/lazystack/internal/ui/filterbar"
 )
 
 type focusPane int
@@ -63,10 +64,13 @@ type Model struct {
 	computeClient *gophercloud.ServiceClient
 
 	// Selector state
-	groups         []network.SecurityGroup
-	groupNames     map[string]string // ID -> name for resolving remote group references
+	allGroups      []network.SecurityGroup // every group, as last fetched
+	groups         []network.SecurityGroup // the listed groups: filtered and sorted
+	groupNames     map[string]string       // ID -> name for resolving remote group references
 	cursor         int
 	selectorScroll int
+	filter         filterbar.Model
+	order          shared.SortState
 
 	// Detail state for currently selected SG
 	servers     []serverRef
@@ -91,7 +95,7 @@ type Model struct {
 	refresh         shared.RefreshGate // group list fetches
 	detailRefresh   shared.RefreshGate // detail (servers/ports) fetches
 	spinner         spinner.Model
-	err             string
+	err             error
 	refreshInterval time.Duration
 	highlightNames  map[string]bool
 	lastDetailSGID  string // tracks which SG's detail is loaded
@@ -106,7 +110,38 @@ func New(networkClient *gophercloud.ServiceClient, refreshInterval time.Duration
 		loading:         true,
 		spinner:         s,
 		refreshInterval: refreshInterval,
+		filter:          filterbar.New(),
+		order:           shared.NewSortState(),
 	}
+}
+
+// sgSortColumns are the group list's sort keys, cycled with s.
+var sgSortColumns = []string{"name", "rules"}
+
+type sortClearMsg struct{}
+
+// IsFiltering reports whether the "/" group filter input has focus.
+func (m Model) IsFiltering() bool { return m.filter.Active() }
+
+// escHint mentions esc in the selector hints while it has a filter to clear.
+func (m Model) escHint() string {
+	if m.filter.Value() != "" {
+		return "esc clear filter • "
+	}
+	return ""
+}
+
+// FilterValue is the current group filter text.
+func (m Model) FilterValue() string { return m.filter.Value() }
+
+// Escape clears the committed filter and reports whether there was one;
+// when there was not, esc goes on to mean back-navigation in the root model.
+func (m *Model) Escape() (handled bool) {
+	if !m.filter.Clear() {
+		return false
+	}
+	m.applyFilter()
+	return true
 }
 
 // SetComputeClient sets the compute client for server resolution.
@@ -226,29 +261,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		shared.Debugf("[secgroupview] sgLoadedMsg: %d groups", len(msg.groups))
-		var cursorID string
-		if m.cursor >= 0 && m.cursor < len(m.groups) {
-			cursorID = m.groups[m.cursor].ID
-		}
 		m.loading = false
-		m.groups = msg.groups
+		m.allGroups = msg.groups
 		m.groupNames = make(map[string]string)
 		for _, g := range msg.groups {
 			m.groupNames[g.ID] = g.Name
 		}
-		// Restore cursor position
-		if cursorID != "" {
-			for i, g := range m.groups {
-				if g.ID == cursorID {
-					m.cursor = i
-					break
-				}
-			}
-		}
-		if m.cursor >= len(m.groups) && len(m.groups) > 0 {
-			m.cursor = len(m.groups) - 1
-		}
-		m.err = ""
+		m.applyFilter()
+		m.err = nil
 		m.applyHighlightNames()
 		// Fetch detail for selected SG if changed
 		if sg := m.selectedSG(); sg != nil && sg.ID != m.lastDetailSGID {
@@ -268,7 +288,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		shared.Debugf("[secgroupview] sgErrMsg: %v", msg.err)
 		m.loading = false
-		m.err = msg.err.Error()
+		m.err = msg.err
 		return m, nil
 
 	case detailLoadedMsg:
@@ -319,14 +339,86 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.SetSize(msg.Width, msg.Height)
 		return m, nil
+
+	case sortClearMsg:
+		m.order.Highlight = false
+		return m, nil
+
+	case shared.SelectionChangedMsg:
+		return m.onSelectorChange()
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+// rowIDs lists the IDs of the listed groups in display order.
+func (m Model) rowIDs() []string {
+	ids := make([]string, len(m.groups))
+	for i, g := range m.groups {
+		ids[i] = g.ID
+	}
+	return ids
+}
+
+// applyFilter rebuilds the listed groups from every group under the current
+// filter and sort, keeping the cursor on the same group while it is still
+// listed and the selector viewport where it was.
+func (m *Model) applyFilter() {
+	cursorID := m.SelectedGroupID()
+	m.groups = m.groups[:0:0]
+	for _, g := range m.allGroups {
+		if m.filter.Match(g.Name, g.Description, g.ID) {
+			m.groups = append(m.groups, g)
+		}
+	}
+	m.sortGroups()
+	if i := shared.RestoreCursor(m.rowIDs(), cursorID); i >= 0 {
+		m.cursor = i
+	}
+	m.cursor = shared.ClampCursor(m.cursor, len(m.groups))
+	m.selectorScroll = min(m.selectorScroll, max(0, len(m.groups)-m.selectorVisibleLines()))
+	m.ensureSelectorCursorVisible()
+}
+
+func (m *Model) sortGroups() {
+	col := sgSortColumns[m.order.Col]
+	asc := m.order.Asc
+	sort.SliceStable(m.groups, func(i, j int) bool {
+		a, b := m.groups[i], m.groups[j]
+		// Descending swaps the operands so equal keys keep their order.
+		if !asc {
+			a, b = b, a
+		}
+		if col == "rules" {
+			return len(a.Rules) < len(b.Rules)
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	})
+}
+
+// resort re-sorts the groups after a sort change, keeping the cursor on the
+// same group, and highlights the sort for a moment.
+func (m Model) resort() (Model, tea.Cmd) {
+	id := m.SelectedGroupID()
+	m.sortGroups()
+	if i := shared.RestoreCursor(m.rowIDs(), id); i >= 0 {
+		m.cursor = i
+	}
+	m.ensureSelectorCursorVisible()
+	return m, shared.SortHighlightCmd(sortClearMsg{})
+}
+
+// sortLabel names the group list's sort for the selector title.
+func (m Model) sortLabel() string {
+	label := "by " + sgSortColumns[m.order.Col] + m.order.Indicator(m.order.Col)
+	if m.order.Highlight {
+		return lipgloss.NewStyle().Foreground(shared.ColorHighlight).Bold(true).Render(label)
+	}
+	return shared.StyleHelp.Render(label)
 }
 
 func (m *Model) resetDetailState() {
@@ -359,7 +451,32 @@ func (m *Model) clampDetailCursors() {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.filter.Active() {
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		m.applyFilter()
+		var sel tea.Cmd
+		m, sel = m.onSelectorChange()
+		return m, tea.Batch(cmd, sel)
+	}
 	switch {
+	case key.Matches(msg, shared.Keys.Filter) && m.focus == FocusSelector:
+		return m, m.filter.Start()
+
+	case key.Matches(msg, shared.Keys.Back):
+		if m.Escape() {
+			return m.onSelectorChange()
+		}
+		return m, nil
+
+	case key.Matches(msg, shared.Keys.Sort) && m.focus == FocusSelector:
+		m.order = shared.NextSort(m.order, len(sgSortColumns))
+		return m.resort()
+
+	case key.Matches(msg, shared.Keys.ReverseSort) && m.focus == FocusSelector:
+		m.order = shared.ReverseSort(m.order)
+		return m.resort()
+
 	case key.Matches(msg, shared.Keys.Tab):
 		m.focus = (m.focus + 1) % focusPaneCount
 		return m, nil
@@ -468,7 +585,16 @@ func (m Model) scrollDown(n int) (Model, tea.Cmd) {
 
 func (m Model) onSelectorChange() (Model, tea.Cmd) {
 	sg := m.selectedSG()
-	if sg == nil || sg.ID == m.lastDetailSGID {
+	if sg == nil {
+		// The filter hides every group: show no group's detail.
+		if m.lastDetailSGID != "" {
+			m.lastDetailSGID = ""
+			m.resetDetailState()
+			m.detailLoading = false
+		}
+		return m, nil
+	}
+	if sg.ID == m.lastDetailSGID {
 		return m, nil
 	}
 	m.lastDetailSGID = sg.ID
@@ -594,14 +720,10 @@ func (m Model) View() string {
 		title += " " + m.spinner.View()
 	}
 	count := fmt.Sprintf(" (%d)", len(m.groups))
-	b.WriteString(title + shared.StyleHelp.Render(count) + "\n\n")
+	b.WriteString(title + shared.StyleHelp.Render(count) + "\n")
+	b.WriteString(shared.LoadErrorLine(m.err, m.width) + "\n")
 
-	if m.err != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(shared.ColorError).Render("  Error: "+m.err) + "\n")
-		return b.String()
-	}
-
-	if len(m.groups) == 0 && !m.loading {
+	if len(m.allGroups) == 0 && !m.loading {
 		b.WriteString(shared.StyleHelp.Render("  No security groups found.") + "\n")
 		return b.String()
 	}
@@ -626,7 +748,7 @@ func (m Model) renderWide() string {
 	selPanel := m.panelBorder(FocusSelector).
 		Width(m.width).
 		Height(selH).
-		Render(padContent(m.panelTitle(FocusSelector), selContent))
+		Render(shared.PadContent(m.panelTitle(FocusSelector), selContent))
 
 	// Detail top row: info (35%) | rules (65%)
 	topH := dh * 55 / 100
@@ -641,17 +763,17 @@ func (m Model) renderWide() string {
 	leftW := m.width * 35 / 100
 	rightW := m.width - leftW - 1
 
-	infoContent := padContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
+	infoContent := shared.PadContent(m.panelTitle(focusInfo), m.renderInfoContent(leftW-4))
 	infoPanel := m.panelBorder(focusInfo).Width(leftW).Height(topH).Render(infoContent)
 
-	rulesContent := padContent(m.panelTitle(FocusRules), m.renderRulesContent(rightW-4, topH-4))
+	rulesContent := shared.PadContent(m.panelTitle(FocusRules), m.renderRulesContent(rightW-4, topH-4))
 	rulesPanel := m.panelBorder(FocusRules).Width(rightW).Height(topH).Render(rulesContent)
 
 	// Detail bottom row: servers (35%) | ports (65%)
-	serversContent := padContent(m.panelTitle(focusServers), m.renderServersContent(leftW-4, bottomH-4))
+	serversContent := shared.PadContent(m.panelTitle(focusServers), m.renderServersContent(leftW-4, bottomH-4))
 	serversPanel := m.panelBorder(focusServers).Width(leftW).Height(bottomH).Render(serversContent)
 
-	portsContent := padContent(m.panelTitle(focusPorts), m.renderPortsContent(rightW-4, bottomH-4))
+	portsContent := shared.PadContent(m.panelTitle(focusPorts), m.renderPortsContent(rightW-4, bottomH-4))
 	portsPanel := m.panelBorder(focusPorts).Width(rightW).Height(bottomH).Render(portsContent)
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoPanel, " ", rulesPanel)
@@ -683,29 +805,17 @@ func (m Model) renderNarrow() string {
 	}
 
 	selContent := m.renderSelectorContent(w-4, selH-2)
-	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(padContent(m.panelTitle(FocusSelector), selContent))
+	selPanel := m.panelBorder(FocusSelector).Width(w).Height(selH).Render(shared.PadContent(m.panelTitle(FocusSelector), selContent))
 
-	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(padContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4)))
-	rulesPanel := m.panelBorder(FocusRules).Width(w).Height(rulesH).Render(padContent(m.panelTitle(FocusRules), m.renderRulesContent(w-4, rulesH-4)))
-	serversPanel := m.panelBorder(focusServers).Width(w).Height(serversH).Render(padContent(m.panelTitle(focusServers), m.renderServersContent(w-4, serversH-4)))
-	portsPanel := m.panelBorder(focusPorts).Width(w).Height(portsH).Render(padContent(m.panelTitle(focusPorts), m.renderPortsContent(w-4, portsH-4)))
+	infoPanel := m.panelBorder(focusInfo).Width(w).Height(infoH).Render(shared.PadContent(m.panelTitle(focusInfo), m.renderInfoContent(w-4)))
+	rulesPanel := m.panelBorder(FocusRules).Width(w).Height(rulesH).Render(shared.PadContent(m.panelTitle(FocusRules), m.renderRulesContent(w-4, rulesH-4)))
+	serversPanel := m.panelBorder(focusServers).Width(w).Height(serversH).Render(shared.PadContent(m.panelTitle(focusServers), m.renderServersContent(w-4, serversH-4)))
+	portsPanel := m.panelBorder(focusPorts).Width(w).Height(portsH).Render(shared.PadContent(m.panelTitle(focusPorts), m.renderPortsContent(w-4, portsH-4)))
 
 	return lipgloss.JoinVertical(lipgloss.Left, selPanel, infoPanel, rulesPanel, serversPanel, portsPanel)
 }
 
 // --- Panel helpers ---
-
-func padContent(title, content string) string {
-	var out []string
-	out = append(out, " "+title)
-	out = append(out, "")
-	if content != "" {
-		for _, l := range strings.Split(content, "\n") {
-			out = append(out, " "+l)
-		}
-	}
-	return strings.Join(out, "\n")
-}
 
 func (m Model) panelTitle(pane focusPane) string {
 	borderColor := shared.ColorMuted
@@ -716,7 +826,11 @@ func (m Model) panelTitle(pane focusPane) string {
 
 	switch pane {
 	case FocusSelector:
-		return titleStyle.Render("Security Groups")
+		t := titleStyle.Render("Security Groups")
+		if f := m.filter.Inline(); f != "" {
+			t += " " + f
+		}
+		return t + " " + m.sortLabel()
 	case focusInfo:
 		return titleStyle.Render("Info")
 	case FocusRules:
@@ -756,6 +870,9 @@ func (m Model) panelBorder(pane focusPane) lipgloss.Style {
 
 func (m Model) renderSelectorContent(maxWidth, maxHeight int) string {
 	if len(m.groups) == 0 {
+		if m.filter.Value() != "" {
+			return shared.StyleHelp.Render("No security groups match the filter.")
+		}
 		return ""
 	}
 
@@ -1247,6 +1364,7 @@ func (m *Model) ForceRefresh() tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.filter.SetWidth(w)
 }
 
 // ScrollToNames positions the cursor on the first matching group name.
@@ -1261,6 +1379,11 @@ func (m *Model) ScrollToNames(names []string) {
 func (m *Model) applyHighlightNames() {
 	if len(m.highlightNames) == 0 {
 		return
+	}
+	// A committed filter that hides every group being jumped to gives way.
+	if m.filter.Value() != "" && !m.listsHighlighted(m.groups) && m.listsHighlighted(m.allGroups) {
+		m.filter.Clear()
+		m.applyFilter()
 	}
 	for i, sg := range m.groups {
 		if m.highlightNames[sg.Name] {
@@ -1277,8 +1400,22 @@ func (m *Model) applyHighlightNames() {
 	}
 }
 
+// listsHighlighted reports whether items contains a group named in
+// highlightNames.
+func (m Model) listsHighlighted(items []network.SecurityGroup) bool {
+	for _, it := range items {
+		if m.highlightNames[it.Name] {
+			return true
+		}
+	}
+	return false
+}
+
 // Hints returns key hints for the status bar.
 func (m Model) Hints() string {
+	if m.filter.Active() {
+		return "enter confirm • esc clear"
+	}
 	switch m.focus {
 	case FocusRules:
 		return "↑↓ navigate • ^n add rule • ^d delete • enter edit • tab focus • R refresh • ? help"
@@ -1289,7 +1426,7 @@ func (m Model) Hints() string {
 	case focusInfo:
 		return "tab focus • ^n new • r rename • c clone • R refresh • ? help"
 	default:
-		return "↑↓ navigate • ^n new • ^d delete • r rename • c clone • tab focus • R refresh • ? help"
+		return "↑↓ navigate • / filter • s/S sort • ^n new • ^d delete • r rename • c clone • tab focus • R refresh • " + m.escHint() + "? help"
 	}
 }
 
