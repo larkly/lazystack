@@ -19,6 +19,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/config"
 	"github.com/gophercloud/gophercloud/v2/openstack/config/clouds"
 	"github.com/gophercloud/gophercloud/v2/openstack/identity/v3/tokens"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -294,7 +295,59 @@ func parseCloud(cloudName string) (gophercloud.AuthOptions, gophercloud.Endpoint
 	if err != nil {
 		return gophercloud.AuthOptions{}, gophercloud.EndpointOpts{}, nil, err
 	}
-	return clouds.Parse(clouds.WithCloudName(cloudName), clouds.WithLocations(path))
+	ao, eo, tlsConfig, err := clouds.Parse(
+		clouds.WithCloudName(cloudName),
+		clouds.WithLocations(path),
+		// From gophercloud 2.15 a cloud with a profile: or cloud: key is
+		// merged with clouds-public.yaml, searched for in the working
+		// directory first, and parsing fails when none is found. An empty
+		// document keeps such clouds connecting as before and keeps a
+		// planted clouds-public.yaml from supplying the auth URL.
+		clouds.WithCloudsPublicYAML(strings.NewReader("{}")),
+	)
+	if err != nil {
+		return gophercloud.AuthOptions{}, gophercloud.EndpointOpts{}, nil, err
+	}
+	projectDomainID, projectDomainName := readProjectDomain(path, cloudName)
+	inheritDomains(&ao, projectDomainID, projectDomainName)
+	return ao, eo, tlsConfig, nil
+}
+
+// inheritDomains restores the domain fallback gophercloud dropped in 2.15:
+// a user named without a user domain is looked up in the project's domain,
+// and a project named without a project domain in the user's. Without it a
+// clouds.yaml that sets only one of the two stops authenticating.
+func inheritDomains(ao *gophercloud.AuthOptions, projectDomainID, projectDomainName string) {
+	if ao.Username != "" && ao.DomainID == "" && ao.DomainName == "" {
+		ao.DomainID, ao.DomainName = projectDomainID, projectDomainName
+	}
+	if s := ao.Scope; s != nil && s.ProjectName != "" && s.DomainID == "" && s.DomainName == "" {
+		s.DomainID, s.DomainName = ao.DomainID, ao.DomainName
+	}
+}
+
+// readProjectDomain returns the project domain the named cloud sets in the
+// clouds.yaml at path. gophercloud only reports it for a project scoped by
+// name, so it is read here for inheritDomains. A file that cannot be read
+// or parsed yields no domain; clouds.Parse has already reported that.
+func readProjectDomain(path, cloudName string) (id, name string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", ""
+	}
+	var cf struct {
+		Clouds map[string]struct {
+			Auth struct {
+				ProjectDomainID   string `yaml:"project_domain_id"`
+				ProjectDomainName string `yaml:"project_domain_name"`
+			} `yaml:"auth"`
+		} `yaml:"clouds"`
+	}
+	if yaml.Unmarshal(data, &cf) != nil {
+		return "", ""
+	}
+	auth := cf.Clouds[cloudName].Auth
+	return auth.ProjectDomainID, auth.ProjectDomainName
 }
 
 // Connect authenticates to the given cloud and initializes service clients.
