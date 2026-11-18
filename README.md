@@ -64,6 +64,8 @@ Single binary. No runtime dependencies. Reads your standard `clouds.yaml`.
 brew install larkly/tap/lazystack
 ```
 
+If Homebrew refuses to load the formula "from untrusted tap larkly/tap" (for example on `brew upgrade lazystack`), run `brew trust larkly/tap` once.
+
 ### Arch Linux (AUR)
 
 ```bash
